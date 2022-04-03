@@ -5,6 +5,13 @@
 
 This is a deep-learning-based tool to extract instrumental track from your songs.
 
+### From Ben Carper
+This is a variation of tsurumeso's vocal remover that I've been tinkering with for a while. The goal of this project was to find a meaningful way to use the transformer architecture for track separation.
+
+This version consists of only a single u-net. This u-net includes modified evolved transformer encoders after each downsampling as well as modified evolved transformer decoders before each upsampling.
+
+The key difference with this architecture is that all encoders use 3x1 convolutions and when downsampling use a stride of (2,1), which I'll call column convolutions for lack of a better name (perhaps this has a better name already, no idea). This way, only features from the same frame are encoded with each other and all information shared between frames occurs only at the wide 1d convolutions or the multihead frame attention in the transformer modules. After each downsampling a sequence of transformer encoders is ran which are connected in a sort of DenseNet setup, where each layer feeds into the subsequent layer along with the original input. I did this due to the bottlenecking that is used for using the transformer architecture with the convolutional encoder/decoder. One alternative is to include the previous encoders output and simply add the bottleneck to it with layer norm and activation as with other residual connections in the transformer architecture, but quick tests didn't show a significant change.
+
 ## Installation
 
 ### Getting vocal-remover
