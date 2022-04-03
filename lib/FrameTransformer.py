@@ -299,6 +299,7 @@ class MultibandFrameAttention(nn.Module):
         self.er = nn.Parameter(torch.empty(bins // num_bands, cropsize))
         nn.init.kaiming_uniform_(self.er, a=math.sqrt(5))
 
+        # I don't actually know if this helps (doesn't seem to hurt though); the general idea was to allow each band to focus on different regions in relation to its position to allow for some locality to be learned if useful.
         self.register_buffer('distances', torch.empty(num_bands, cropsize, cropsize))
         self.distance_weight = nn.Parameter(torch.empty(num_bands).unsqueeze(1).expand((-1, cropsize)).unsqueeze(2).clone())
         nn.init.kaiming_uniform_(self.distance_weight, a=math.sqrt(5.0))
