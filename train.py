@@ -16,7 +16,7 @@ from lib import spec_utils
 
 from tqdm import tqdm
 
-from lib.FrameTransformer import FrameTransformer
+from lib.frame_transformer import FrameTransformer
 
 def setup_logger(name, logfile='LOGFILENAME.log'):
     logger = logging.getLogger(name)
