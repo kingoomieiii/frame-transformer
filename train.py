@@ -218,7 +218,7 @@ def main():
             print(f'new lr: {lr}')
 
         logger.info('# epoch {}'.format(epoch))
-        train_loss = train_epoch(train_dataloader, model, device, optimizer, args.accumulation_steps, grad_scaler, p.progress_bar)
+        train_loss = train_epoch(train_dataloader, model, device, optimizer, args.accumulation_steps, grad_scaler, args.progress_bar)
         val_loss = validate_epoch(val_dataloader, model, device)
 
         logger.info(
