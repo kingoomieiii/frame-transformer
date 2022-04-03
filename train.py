@@ -70,11 +70,11 @@ def train_epoch(dataloader, model, device, optimizer, accumulation_steps, grad_s
 
     # the rest batch
     if (itr + 1) % accumulation_steps != 0:
-        optimizer.step()
+        grad_scaler.step(optimizer)
+        grad_scaler.update()
         model.zero_grad()
 
     return sum_loss / len(dataloader.dataset)
-
 
 def validate_epoch(dataloader, model, device):
     model.eval()
