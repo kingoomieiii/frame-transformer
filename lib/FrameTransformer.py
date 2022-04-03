@@ -168,7 +168,7 @@ class FrameTransformerEncoder(nn.Module):
         self.norm3 = nn.LayerNorm(bins)
         self.dropout2 = nn.Dropout(dropout) if dropout > 0 else nn.Identity()
 
-        self.attn = MultiheadFrameAttention(num_bands, bins, cropsize, bias)
+        self.attn = MultibandFrameAttention(num_bands, bins, cropsize, bias)
         self.norm4 = nn.LayerNorm(bins)
         self.dropout3 = nn.Dropout(dropout) if dropout > 0 else nn.Identity()
 
@@ -222,8 +222,8 @@ class FrameTransformerDecoder(nn.Module):
         self.mem_bottleneck_linear = nn.Linear(mem_channels, 1, bias=bias)
         self.mem_bottleneck_norm = nn.BatchNorm2d(1)
 
-        self.self_attn1 = MultiheadFrameAttention(num_bands, bins, cropsize, bias)
-        self.enc_attn1 = MultiheadFrameAttention(num_bands, bins, cropsize, bias)
+        self.self_attn1 = MultibandFrameAttention(num_bands, bins, cropsize, bias)
+        self.enc_attn1 = MultibandFrameAttention(num_bands, bins, cropsize, bias)
         self.norm1 = nn.LayerNorm(bins)
         self.dropout1 = nn.Dropout(dropout) if dropout > 0 else nn.Identity()
 
@@ -240,11 +240,11 @@ class FrameTransformerDecoder(nn.Module):
         self.norm3 = nn.LayerNorm(bins)
         self.dropout2 = nn.Dropout(dropout) if dropout > 0 else nn.Identity()
 
-        self.self_attn2 = MultiheadFrameAttention(num_bands, bins, cropsize, bias)
+        self.self_attn2 = MultibandFrameAttention(num_bands, bins, cropsize, bias)
         self.norm4 = nn.LayerNorm(bins)
         self.dropout3 = nn.Dropout(dropout) if dropout > 0 else nn.Identity()
 
-        self.enc_attn2 = MultiheadFrameAttention(num_bands, bins, cropsize, bias)
+        self.enc_attn2 = MultibandFrameAttention(num_bands, bins, cropsize, bias)
         self.norm5 = nn.LayerNorm(bins)
         self.dropout4 = nn.Dropout(dropout) if dropout > 0 else nn.Identity()
 
@@ -286,21 +286,21 @@ class FrameTransformerDecoder(nn.Module):
                 
         return x.transpose(1, 2).unsqueeze(1)
 
-class MultiheadFrameAttention(nn.Module):
-    def __init__(self, num_heads, bins, cropsize, bias=False):
+class MultibandFrameAttention(nn.Module):
+    def __init__(self, num_bands, bins, cropsize, bias=False):
         super().__init__()
 
-        self.num_heads = num_heads
+        self.num_bands = num_bands
         self.q_proj = nn.Linear(bins, bins, bias=bias)
         self.k_proj = nn.Linear(bins, bins, bias=bias)
         self.v_proj = nn.Linear(bins, bins, bias=bias)
         self.o_proj = nn.Linear(bins, bins, bias=bias)
 
-        self.er = nn.Parameter(torch.empty(bins // num_heads, cropsize))
+        self.er = nn.Parameter(torch.empty(bins // num_bands, cropsize))
         nn.init.kaiming_uniform_(self.er, a=math.sqrt(5))
 
-        self.register_buffer('distances', torch.empty(num_heads, cropsize, cropsize))
-        self.distance_weight = nn.Parameter(torch.empty(num_heads).unsqueeze(1).expand((-1, cropsize)).unsqueeze(2).clone())
+        self.register_buffer('distances', torch.empty(num_bands, cropsize, cropsize))
+        self.distance_weight = nn.Parameter(torch.empty(num_bands).unsqueeze(1).expand((-1, cropsize)).unsqueeze(2).clone())
         nn.init.kaiming_uniform_(self.distance_weight, a=math.sqrt(5.0))
 
         for i in range(cropsize):
@@ -309,9 +309,9 @@ class MultiheadFrameAttention(nn.Module):
 
     def forward(self, x, mem=None):
         b,w,c = x.shape
-        q = self.q_proj(x).reshape(b, w, self.num_heads, -1).permute(0,2,1,3)
-        k = self.k_proj(x if mem is None else mem).reshape(b, w, self.num_heads, -1).permute(0,2,3,1)
-        v = self.v_proj(x if mem is None else mem).reshape(b, w, self.num_heads, -1).permute(0,2,1,3)
+        q = self.q_proj(x).reshape(b, w, self.num_bands, -1).permute(0,2,1,3)
+        k = self.k_proj(x if mem is None else mem).reshape(b, w, self.num_bands, -1).permute(0,2,3,1)
+        v = self.v_proj(x if mem is None else mem).reshape(b, w, self.num_bands, -1).permute(0,2,1,3)
         qk = torch.matmul(q,k) / math.sqrt(c)
         p = (self.distances * self.distance_weight) + F.pad(torch.matmul(q,self.er), (1,0)).transpose(2,3)[:,:,1:,:]
         a = F.softmax(qk+p, dim=-1)

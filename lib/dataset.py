@@ -12,7 +12,7 @@ except ModuleNotFoundError:
     import spec_utils
 
 class VocalAugmentationDataset(torch.utils.data.Dataset):
-    def __init__(self, path, extra_path=None, vocal_path="", is_validation=False, mul=1, downsamples=0, epoch_size=-1):
+    def __init__(self, path, extra_path=None, vocal_path="", is_validation=False, mul=1, downsamples=0, epoch_size=None):
         self.epoch_size = epoch_size
         self.mul = mul
         patch_list = [os.path.join(path, f) for f in os.listdir(path) if os.path.isfile(os.path.join(path, f))]
@@ -35,7 +35,7 @@ class VocalAugmentationDataset(torch.utils.data.Dataset):
         self.downsamples = downsamples
         self.full_list = self.curr_list
 
-        if not is_validation and self.epoch_size > -1:
+        if not is_validation and self.epoch_size is not None:
             self.curr_list = self.full_list[:self.epoch_size]            
             self.reset()
 
@@ -43,7 +43,7 @@ class VocalAugmentationDataset(torch.utils.data.Dataset):
         self.vidx = 0
         random.shuffle(self.vocal_list)
 
-        if self.epoch_size > -1:
+        if self.epoch_size is not None:
             random.shuffle(self.full_list)
             self.curr_list = self.full_list[:self.epoch_size]
 

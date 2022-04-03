@@ -84,7 +84,7 @@ def validate_epoch(dataloader, model, device):
                 pred = model(X_batch)
 
             y_batch = spec_utils.crop_center(y_batch, pred)
-            loss = crit(X * pred, y_batch)
+            loss = crit(X_batch * pred, y_batch)
 
             sum_loss += loss.item() * len(X_batch)
 
@@ -143,6 +143,8 @@ def main():
         logger.info('{} {} {}'.format(i + 1, os.path.basename(X_fname), os.path.basename(y_fname)))
 
     device = torch.device('cpu')
+
+    # 8 is used for the width here as it seems to be a sweet spot; using a larger channel count doesn't seem to help and just adds computational cost, and using a lower width starts to impact the frame transformers accuracy.
     model = FrameTransformer(2048, out_proj_width=8, num_encoders=3, num_decoders=3, num_bands=8, feedforward_dim=2048, kernel_size=3, padding=1, bias=True)
 
     if args.pretrained_model is not None:
