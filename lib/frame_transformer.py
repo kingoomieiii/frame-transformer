@@ -5,19 +5,18 @@ import math
 from lib import spec_utils
 
 class FrameTransformer(nn.Module):
-    def __init__(self, n_fft, out_proj_width=8, num_encoders=4, num_decoders=4, num_bands=8, kernel_size=5, padding=2, bias=False, feedforward_dim=2048):
+    def __init__(self, n_fft, out_proj_width=8, num_encoders=4, num_decoders=4, num_bands=8, bias=False, feedforward_dim=2048):
         super(FrameTransformer, self).__init__()
         self.max_bin = n_fft // 2
         self.output_bin = n_fft // 2 + 1
         self.nin_lstm = self.max_bin // 2
 
-        self.transformer = FrameTransformerNet(2, out_proj_width, n_fft=n_fft, num_encoders=num_encoders, num_decoders=num_decoders, num_bands=num_bands, feedforward_dim=feedforward_dim, kernel_size=kernel_size, padding=padding, bias=bias)
+        self.transformer = FrameTransformerNet(2, out_proj_width, n_fft=n_fft, num_encoders=num_encoders, num_decoders=num_decoders, num_bands=num_bands, feedforward_dim=feedforward_dim, bias=bias)
         self.out = nn.Linear(in_features=out_proj_width, out_features=2, bias=bias)
 
     def forward(self, x):
         x = x[:, :, :self.max_bin]
-        t = self.transformer(x)
-        out = torch.sigmoid(self.out(t.transpose(1,3)).transpose(1,3))        
+        out = torch.sigmoid(self.transformer(x))
         out = F.pad(
             input=out,
             pad=(0, 0, 0, self.output_bin - out.size()[2]),
@@ -31,8 +30,9 @@ class FrameTransformerNet(nn.Module):
         super(FrameTransformerNet, self).__init__()
 
         self.enc1 = FrameConv(nin, nout, 3, 1, 1)
+        self.enc1_transformer = nn.ModuleList([FrameTransformerEncoder(nout + i, num_bands, cropsize, n_fft, downsamples=0, feedforward_dim=feedforward_dim, bias=bias) for i in range(num_encoders)])
         
-        self.enc2 = Encoder(nout * 1, nout * 2, kernel_size=3, stride=2, padding=1)
+        self.enc2 = Encoder(nout * 1 + num_encoders, nout * 2, kernel_size=3, stride=2, padding=1)
         self.enc2_transformer = nn.ModuleList([FrameTransformerEncoder(nout * 2 + i, num_bands, cropsize, n_fft, downsamples=1, feedforward_dim=feedforward_dim, bias=bias) for i in range(num_encoders)])
 
         self.enc3 = Encoder(nout * 2 + num_encoders, nout * 4, kernel_size=3, stride=2, padding=1)
@@ -54,10 +54,15 @@ class FrameTransformerNet(nn.Module):
         self.dec2 = Decoder(nout * (2 + 4) + num_decoders + num_encoders, nout * 2, kernel_size=3, padding=1)
 
         self.dec1_transformer = nn.ModuleList([FrameTransformerDecoder(nout * 2 + i, nout * 2 + num_encoders, num_bands, cropsize, n_fft, downsamples=1, feedforward_dim=feedforward_dim, bias=bias) for i in range(num_decoders)])
-        self.dec1 = Decoder(nout * (1 + 2) + num_decoders, nout * 1, kernel_size=3, padding=1)
+        self.dec1 = Decoder(nout * (1 + 2) + num_decoders + num_encoders, nout * 1, kernel_size=3, padding=1)
+
+        self.out_transformer = nn.ModuleList([FrameTransformerDecoder(nout + i, nout + num_encoders, num_bands, cropsize, n_fft, downsamples=0, feedforward_dim=feedforward_dim, bias=bias) for i in range(2)])
 
     def __call__(self, x):
         e1 = self.enc1(x)
+        for module in self.enc1_transformer:
+            t = module(e1)
+            e1 = torch.cat((e1, t), dim=1)
 
         e2 = self.enc2(e1)
         for module in self.enc2_transformer:
@@ -99,9 +104,14 @@ class FrameTransformerNet(nn.Module):
             t = module(h, mem=e2)
             h = torch.cat((h, t), dim=1)
 
+        out = None
         h = self.dec1(h, e1)
+        for i, module in enumerate(self.out_transformer):
+            t = module(h, mem=e1)
+            h = torch.cat((h, t), dim=1)
+            out = torch.cat((out, t), dim=1) if out is not None else t
 
-        return h 
+        return out
         
 class Encoder(nn.Module):
     def __init__(self, nin, nout, kernel_size=3, stride=1, padding=1, activ=nn.LeakyReLU):

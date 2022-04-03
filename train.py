@@ -38,12 +38,14 @@ def setup_logger(name, logfile='LOGFILENAME.log'):
     return logger
 
 
-def train_epoch(dataloader, model, device, optimizer, accumulation_steps, grad_scaler):
+def train_epoch(dataloader, model, device, optimizer, accumulation_steps, grad_scaler, progress_bar):
     model.train()
     sum_loss = 0
+    batch_loss = 0
     crit = nn.L1Loss()
 
-    for itr, (X_batch, y_batch) in enumerate(tqdm(dataloader)):
+    pbar = tqdm(dataloader) if progress_bar else dataloader
+    for itr, (X_batch, y_batch) in enumerate(pbar):
         X_batch = X_batch.to(device)
         y_batch = y_batch.to(device)
 
@@ -52,13 +54,17 @@ def train_epoch(dataloader, model, device, optimizer, accumulation_steps, grad_s
 
         loss = crit(pred * X_batch, y_batch)
         accum_loss = loss / accumulation_steps
+        batch_loss = batch_loss + accum_loss
 
         grad_scaler.scale(accum_loss).backward()
 
         if (itr + 1) % accumulation_steps == 0:
+            if progress_bar:
+                pbar.set_description(str(batch_loss.item()))
             grad_scaler.step(optimizer)
             grad_scaler.update()
             model.zero_grad()
+            batch_loss = 0
 
         sum_loss += loss.item() * len(X_batch)
 
@@ -104,7 +110,7 @@ def main():
     p.add_argument('--lr_min', type=float, default=0.0001)
     p.add_argument('--lr_decay_factor', type=float, default=0.9)
     p.add_argument('--lr_decay_patience', type=int, default=6)
-    p.add_argument('--batchsize', '-B', type=int, default=5)
+    p.add_argument('--batchsize', '-B', type=int, default=4)
     p.add_argument('--accumulation_steps', '-A', type=int, default=1)
     p.add_argument('--cropsize', '-C', type=int, default=256)
     p.add_argument('--patches', '-p', type=int, default=16)
@@ -119,8 +125,11 @@ def main():
     p.add_argument('--mixup_rate', '-M', type=float, default=0.0)
     p.add_argument('--mixup_alpha', '-a', type=float, default=1.0)
     p.add_argument('--pretrained_model', '-P', type=str, default=None)
+    p.add_argument('--progress_bar', type=str, default='true')
     p.add_argument('--debug', action='store_true')
     args = p.parse_args()
+
+    p.progress_bar = str.lower(p.progress_bar) == 'true'
 
     logger.debug(vars(args))
 
@@ -145,7 +154,7 @@ def main():
     device = torch.device('cpu')
 
     # 8 is used for the width here as it seems to be a sweet spot; using a larger channel count doesn't seem to help and just adds computational cost, and using a lower width starts to impact the frame transformers accuracy.
-    model = FrameTransformer(2048, out_proj_width=8, num_encoders=3, num_decoders=3, num_bands=8, feedforward_dim=2048, kernel_size=3, padding=1, bias=True)
+    model = FrameTransformer(2048, out_proj_width=8, num_encoders=3, num_decoders=3, num_bands=8, feedforward_dim=1536, bias=True)
 
     if args.pretrained_model is not None:
         model.load_state_dict(torch.load(args.pretrained_model, map_location=device))
@@ -209,7 +218,7 @@ def main():
             print(f'new lr: {lr}')
 
         logger.info('# epoch {}'.format(epoch))
-        train_loss = train_epoch(train_dataloader, model, device, optimizer, args.accumulation_steps, grad_scaler)
+        train_loss = train_epoch(train_dataloader, model, device, optimizer, args.accumulation_steps, grad_scaler, p.progress_bar)
         val_loss = validate_epoch(val_dataloader, model, device)
 
         logger.info(
