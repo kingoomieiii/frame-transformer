@@ -27,34 +27,34 @@ class FrameTransformer(nn.Module):
         return out
 
 class FrameTransformerNet(nn.Module):
-    def __init__(self, nin, nout, n_fft=2048, feedforward_dim=512, num_bands=4, num_encoders=1, num_decoders=1, cropsize=256, kernel_size=3, padding=1, bias=False):
+    def __init__(self, nin, nout, n_fft=2048, feedforward_dim=512, num_bands=4, num_encoders=1, num_decoders=1, cropsize=256, bias=False):
         super(FrameTransformerNet, self).__init__()
 
-        self.enc1 = FrameConv(nin, nout, kernel_size, 1, padding)
+        self.enc1 = FrameConv(nin, nout, 3, 1, 1)
         
-        self.enc2 = Encoder(nout * 1, nout * 2, kernel_size, stride=2, padding=padding)
+        self.enc2 = Encoder(nout * 1, nout * 2, kernel_size=3, stride=2, padding=1)
         self.enc2_transformer = nn.ModuleList([FrameTransformerEncoder(nout * 2 + i, num_bands, cropsize, n_fft, downsamples=1, feedforward_dim=feedforward_dim, bias=bias) for i in range(num_encoders)])
 
-        self.enc3 = Encoder(nout * 2 + num_encoders, nout * 4, kernel_size, stride=2, padding=padding)
+        self.enc3 = Encoder(nout * 2 + num_encoders, nout * 4, kernel_size=3, stride=2, padding=1)
         self.enc3_transformer = nn.ModuleList([FrameTransformerEncoder(nout * 4 + i, num_bands, cropsize, n_fft, downsamples=2, feedforward_dim=feedforward_dim, bias=bias) for i in range(num_encoders)])
 
-        self.enc4 = Encoder(nout * 4 + num_encoders, nout * 6, kernel_size, stride=2, padding=padding)
+        self.enc4 = Encoder(nout * 4 + num_encoders, nout * 6, kernel_size=3, stride=2, padding=1)
         self.enc4_transformer = nn.ModuleList([FrameTransformerEncoder(nout * 6 + i, num_bands, cropsize, n_fft, downsamples=3, feedforward_dim=feedforward_dim, bias=bias) for i in range(num_encoders)])
         
-        self.enc5 = Encoder(nout * 6 + num_encoders, nout * 8, kernel_size, stride=2, padding=padding)
+        self.enc5 = Encoder(nout * 6 + num_encoders, nout * 8, kernel_size=3, stride=2, padding=1)
         self.enc5_transformer = nn.ModuleList([FrameTransformerEncoder(nout * 8 + i, num_bands, cropsize, n_fft, downsamples=4, feedforward_dim=feedforward_dim, bias=bias) for i in range(num_encoders)])
         
         self.dec4_transformer = nn.ModuleList([FrameTransformerDecoder(nout * 8 + i + num_encoders, nout * 8 + num_encoders, num_bands, cropsize, n_fft, downsamples=4, feedforward_dim=feedforward_dim, bias=bias) for i in range(num_decoders)])
-        self.dec4 = Decoder(nout * (6 + 8) + num_decoders + num_encoders * 2, nout * 6, kernel_size, padding=padding)
+        self.dec4 = Decoder(nout * (6 + 8) + num_decoders + num_encoders * 2, nout * 6, kernel_size=3, padding=1)
 
         self.dec3_transformer = nn.ModuleList([FrameTransformerDecoder(nout * 6 + i, nout * 6 + num_encoders, num_bands, cropsize, n_fft, downsamples=3, feedforward_dim=feedforward_dim, bias=bias) for i in range(num_decoders)])
-        self.dec3 = Decoder(nout * (4 + 6) + num_decoders + num_encoders, nout * 4, kernel_size, padding=padding)
+        self.dec3 = Decoder(nout * (4 + 6) + num_decoders + num_encoders, nout * 4, kernel_size=3, padding=1)
 
         self.dec2_transformer = nn.ModuleList([FrameTransformerDecoder(nout * 4 + i, nout * 4 + num_encoders, num_bands, cropsize, n_fft, downsamples=2, feedforward_dim=feedforward_dim, bias=bias) for i in range(num_decoders)])
-        self.dec2 = Decoder(nout * (2 + 4) + num_decoders + num_encoders, nout * 2, kernel_size, padding=padding)
+        self.dec2 = Decoder(nout * (2 + 4) + num_decoders + num_encoders, nout * 2, kernel_size=3, padding=1)
 
         self.dec1_transformer = nn.ModuleList([FrameTransformerDecoder(nout * 2 + i, nout * 2 + num_encoders, num_bands, cropsize, n_fft, downsamples=1, feedforward_dim=feedforward_dim, bias=bias) for i in range(num_decoders)])
-        self.dec1 = Decoder(nout * (1 + 2) + num_decoders, nout * 1, kernel_size, padding=padding)
+        self.dec1 = Decoder(nout * (1 + 2) + num_decoders, nout * 1, kernel_size=3, padding=1)
 
     def __call__(self, x):
         e1 = self.enc1(x)
@@ -139,6 +139,7 @@ class FrameTransformerEncoder(nn.Module):
     def __init__(self, channels, num_bands=4, cropsize=256, n_fft=2048, feedforward_dim=2048, downsamples=0, bias=False, dropout=0.1):
         super(FrameTransformerEncoder, self).__init__()
 
+        # these need to be updated; they make too many assumptions
         bins = (n_fft // 2)
         if downsamples > 0:
             for _ in range(downsamples):
