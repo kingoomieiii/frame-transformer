@@ -11,6 +11,132 @@ try:
 except ModuleNotFoundError:
     import spec_utils
 
+class VocalAugmentationDataset(torch.utils.data.Dataset):
+    def __init__(self, path, extra_path=None, vocal_path="", is_validation=False, mul=1, downsamples=0, epoch_size=-1):
+        self.epoch_size = epoch_size
+        self.mul = mul
+        patch_list = [os.path.join(path, f) for f in os.listdir(path) if os.path.isfile(os.path.join(path, f))]
+
+        if extra_path is not None:
+            extra_list = [os.path.join(extra_path, f) for f in os.listdir(extra_path) if os.path.isfile(os.path.join(extra_path, f))]
+
+            for f in extra_list:
+                patch_list.append(f) 
+        
+        if not is_validation and vocal_path != "":
+            self.vocal_list = [os.path.join(vocal_path, f) for f in os.listdir(vocal_path) if os.path.isfile(os.path.join(vocal_path, f))]
+
+        self.is_validation = is_validation
+
+        self.curr_list = []
+        for p in patch_list:
+            self.curr_list.append(p)
+
+        self.downsamples = downsamples
+        self.full_list = self.curr_list
+
+        if not is_validation and self.epoch_size > -1:
+            self.curr_list = self.full_list[:self.epoch_size]            
+            self.reset()
+
+    def reset(self):
+        self.vidx = 0
+        random.shuffle(self.vocal_list)
+
+        if self.epoch_size > -1:
+            random.shuffle(self.full_list)
+            self.curr_list = self.full_list[:self.epoch_size]
+
+    def __len__(self):
+        return len(self.curr_list) * self.mul
+
+    def __getitem__(self, idx):
+        path = self.curr_list[idx % len(self.curr_list)]
+        data = np.load(str(path))
+        aug = "Y" not in data.files
+        X, Xc = data['X'], data['c']
+
+        if aug:
+            Y = X
+        else:
+            Y = data['Y']
+
+        if not self.is_validation:
+            if aug and np.random.uniform() > 0.02:
+                vidx = np.random.randint(len(self.vocal_list))                
+                vpath = self.vocal_list[vidx]
+                vdata = np.load(str(vpath))
+                V, Vc = vdata['X'], vdata['c']
+
+                if np.random.uniform() < 0.5:
+                    V = V[::-1]
+
+                if np.random.uniform() < 0.025:
+                    if np.random.uniform() < 0.5:
+                        V[0] = V[0] * 0
+                    else:
+                        V[1] = V[1] * 0
+
+                if np.random.uniform() < 0.5:
+                    vidx2 = np.random.randint(len(self.vocal_list))
+                    
+                    vpath2 = self.vocal_list[vidx2]
+                    vdata2 = np.load(str(vpath2))
+                    V2, Vc2 = vdata2['X'], vdata2['c']
+
+                    if np.random.uniform() < 0.5:
+                        V2 = V2[::-1]
+
+                    if np.random.uniform() < 0.025:
+                        if np.random.uniform() < 0.5:
+                            V2[0] = V2[0] * 0
+                        else:
+                            V2[1] = V2[1] * 0
+
+                    lam = np.random.beta(1, 1)
+                    inv = 1 - lam
+
+                    Vc = (Vc * lam) + (Vc2 * inv)
+                    V = (V * lam) + (V2 * inv)
+
+                X = Y + V
+                c = np.max([Xc, Vc])
+            else:
+                if np.random.uniform() < 0.33:
+                    vidx = np.random.randint(len(self.vocal_list))
+                    
+                    vpath = self.vocal_list[vidx]
+                    vdata = np.load(str(vpath))
+                    V, Vc = vdata['X'], vdata['c']
+
+                    if np.random.uniform() < 0.5:
+                        V = V[::-1]
+
+                    if np.random.uniform() < 0.025:
+                        if np.random.uniform() < 0.5:
+                            V[0] = V[0] * 0
+                        else:
+                            V[1] = V[1] * 0
+
+                    a = np.random.beta(1, 1)
+                    X = X + (V * a)
+
+                c = Xc
+
+            if np.random.uniform() < 0.5:
+                X = X[::-1]
+                Y = Y[::-1]
+        else:
+            c = Xc
+
+        if np.random.uniform() < 0.025:
+            X = Y
+            c = Xc
+
+        Xm = np.clip(np.abs(X) / c, 0, 1)
+        Ym = np.clip(np.abs(Y) / c, 0, 1)
+
+        return Xm, Ym
 
 class VocalRemoverTrainingSet(torch.utils.data.Dataset):
 

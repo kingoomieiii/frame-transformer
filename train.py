@@ -14,6 +14,9 @@ from lib import dataset
 from lib import nets
 from lib import spec_utils
 
+from tqdm import tqdm
+
+from lib.FrameTransformer import FrameTransformer
 
 def setup_logger(name, logfile='LOGFILENAME.log'):
     logger = logging.getLogger(name)
@@ -35,26 +38,26 @@ def setup_logger(name, logfile='LOGFILENAME.log'):
     return logger
 
 
-def train_epoch(dataloader, model, device, optimizer, accumulation_steps):
+def train_epoch(dataloader, model, device, optimizer, accumulation_steps, grad_scaler):
     model.train()
     sum_loss = 0
     crit = nn.L1Loss()
 
-    for itr, (X_batch, y_batch) in enumerate(dataloader):
+    for itr, (X_batch, y_batch) in enumerate(tqdm(dataloader)):
         X_batch = X_batch.to(device)
         y_batch = y_batch.to(device)
 
-        pred, aux = model(X_batch)
+        with torch.cuda.amp.autocast_mode.autocast():
+            pred = model(X_batch)
 
-        loss_main = crit(pred * X_batch, y_batch)
-        loss_aux = crit(aux * X_batch, y_batch)
-
-        loss = loss_main * 0.8 + loss_aux * 0.2
+        loss = crit(pred * X_batch, y_batch)
         accum_loss = loss / accumulation_steps
-        accum_loss.backward()
+
+        grad_scaler.scale(accum_loss).backward()
 
         if (itr + 1) % accumulation_steps == 0:
-            optimizer.step()
+            grad_scaler.step(optimizer)
+            grad_scaler.update()
             model.zero_grad()
 
         sum_loss += loss.item() * len(X_batch)
@@ -77,10 +80,11 @@ def validate_epoch(dataloader, model, device):
             X_batch = X_batch.to(device)
             y_batch = y_batch.to(device)
 
-            pred = model.predict(X_batch)
+            with torch.cuda.amp.autocast_mode.autocast():
+                pred = model(X_batch)
 
             y_batch = spec_utils.crop_center(y_batch, pred)
-            loss = crit(pred, y_batch)
+            loss = crit(X * pred, y_batch)
 
             sum_loss += loss.item() * len(X_batch)
 
@@ -94,13 +98,13 @@ def main():
     p.add_argument('--sr', '-r', type=int, default=44100)
     p.add_argument('--hop_length', '-H', type=int, default=1024)
     p.add_argument('--n_fft', '-f', type=int, default=2048)
-    p.add_argument('--dataset', '-d', required=True)
+    p.add_argument('--dataset', '-d', required=False)
     p.add_argument('--split_mode', '-S', type=str, choices=['random', 'subdirs'], default='random')
     p.add_argument('--learning_rate', '-l', type=float, default=0.001)
     p.add_argument('--lr_min', type=float, default=0.0001)
     p.add_argument('--lr_decay_factor', type=float, default=0.9)
     p.add_argument('--lr_decay_patience', type=int, default=6)
-    p.add_argument('--batchsize', '-B', type=int, default=4)
+    p.add_argument('--batchsize', '-B', type=int, default=5)
     p.add_argument('--accumulation_steps', '-A', type=int, default=1)
     p.add_argument('--cropsize', '-C', type=int, default=256)
     p.add_argument('--patches', '-p', type=int, default=16)
@@ -129,17 +133,8 @@ def main():
         with open(args.val_filelist, 'r', encoding='utf8') as f:
             val_filelist = json.load(f)
 
-    train_filelist, val_filelist = dataset.train_val_split(
-        dataset_dir=args.dataset,
-        split_mode=args.split_mode,
-        val_rate=args.val_rate,
-        val_filelist=val_filelist
-    )
-
     if args.debug:
         logger.info('### DEBUG MODE')
-        train_filelist = train_filelist[:1]
-        val_filelist = val_filelist[:1]
     elif args.val_filelist is None and args.split_mode == 'random':
         with open('val_{}.json'.format(timestamp), 'w', encoding='utf8') as f:
             json.dump(val_filelist, f, ensure_ascii=False)
@@ -148,51 +143,19 @@ def main():
         logger.info('{} {} {}'.format(i + 1, os.path.basename(X_fname), os.path.basename(y_fname)))
 
     device = torch.device('cpu')
-    model = nets.CascadedNet(args.n_fft)
+    model = FrameTransformer(2048, out_proj_width=8, num_encoders=3, num_decoders=3, num_bands=8, feedforward_dim=2048, kernel_size=3, padding=1, bias=True)
+
     if args.pretrained_model is not None:
         model.load_state_dict(torch.load(args.pretrained_model, map_location=device))
     if torch.cuda.is_available() and args.gpu >= 0:
         device = torch.device('cuda:{}'.format(args.gpu))
         model.to(device)
 
-    optimizer = torch.optim.Adam(
-        filter(lambda p: p.requires_grad, model.parameters()),
-        lr=args.learning_rate
-    )
-
-    scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
-        optimizer,
-        factor=args.lr_decay_factor,
-        patience=args.lr_decay_patience,
-        threshold=1e-6,
-        min_lr=args.lr_min,
-        verbose=True
-    )
-
-    bins = args.n_fft // 2 + 1
-    freq_to_bin = 2 * bins / args.sr
-    unstable_bins = int(200 * freq_to_bin)
-    stable_bins = int(22050 * freq_to_bin)
-    reduction_weight = np.concatenate([
-        np.linspace(0, 1, unstable_bins, dtype=np.float32)[:, None],
-        np.linspace(1, 0, stable_bins - unstable_bins, dtype=np.float32)[:, None],
-        np.zeros((bins - stable_bins, 1), dtype=np.float32),
-    ], axis=0) * args.reduction_level
-
-    training_set = dataset.make_training_set(
-        filelist=train_filelist,
-        sr=args.sr,
-        hop_length=args.hop_length,
-        n_fft=args.n_fft
-    )
-
-    train_dataset = dataset.VocalRemoverTrainingSet(
-        training_set * args.patches,
-        cropsize=args.cropsize,
-        reduction_rate=args.reduction_rate,
-        reduction_weight=reduction_weight,
-        mixup_rate=args.mixup_rate,
-        mixup_alpha=args.mixup_alpha
+    train_dataset = dataset.VocalAugmentationDataset(
+        path="C://cs256_sr44100_hl1024_nf2048_of0",
+        extra_path="G://cs256_sr44100_hl1024_nf2048_of0",
+        vocal_path="G://cs256_sr44100_hl1024_nf2048_of0_VOCALS",
+        is_validation=False
     )
 
     train_dataloader = torch.utils.data.DataLoader(
@@ -201,18 +164,10 @@ def main():
         shuffle=True,
         num_workers=args.num_workers
     )
-
-    patch_list = dataset.make_validation_set(
-        filelist=val_filelist,
-        cropsize=args.val_cropsize,
-        sr=args.sr,
-        hop_length=args.hop_length,
-        n_fft=args.n_fft,
-        offset=model.offset
-    )
-
-    val_dataset = dataset.VocalRemoverValidationSet(
-        patch_list=patch_list
+    
+    val_dataset = dataset.VocalAugmentationDataset(
+        path="C://cs256_sr44100_hl1024_nf2048_of0_VALIDATION",
+        is_validation=True
     )
 
     val_dataloader = torch.utils.data.DataLoader(
@@ -221,12 +176,38 @@ def main():
         shuffle=False,
         num_workers=args.num_workers
     )
+    
+    grad_scaler = torch.cuda.amp.grad_scaler.GradScaler()
+    
+    current_warmup_step = 0
+    target_learning_rate = args.learning_rate
+    warmup_steps = 4
 
     log = []
     best_loss = np.inf
     for epoch in range(args.epoch):
+        if current_warmup_step < warmup_steps:
+            lr = (current_warmup_step + 1) * (target_learning_rate / warmup_steps)
+            current_warmup_step += 1
+
+            optimizer = torch.optim.Adam(
+                filter(lambda p: p.requires_grad, model.parameters()),
+                lr=lr
+            )
+
+            scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
+                optimizer,
+                factor=args.lr_decay_factor,
+                patience=args.lr_decay_patience,
+                threshold=1e-6,
+                min_lr=args.lr_min,
+                verbose=True
+            )
+
+            print(f'new lr: {lr}')
+
         logger.info('# epoch {}'.format(epoch))
-        train_loss = train_epoch(train_dataloader, model, device, optimizer, args.accumulation_steps)
+        train_loss = train_epoch(train_dataloader, model, device, optimizer, args.accumulation_steps, grad_scaler)
         val_loss = validate_epoch(val_dataloader, model, device)
 
         logger.info(
