@@ -125,11 +125,11 @@ def main():
     p.add_argument('--mixup_rate', '-M', type=float, default=0.0)
     p.add_argument('--mixup_alpha', '-a', type=float, default=1.0)
     p.add_argument('--pretrained_model', '-P', type=str, default=None)
-    p.add_argument('--progress_bar', type=str, default='true')
+    p.add_argument('--progress_bar', '-pb', type=str, default='true')
     p.add_argument('--debug', action='store_true')
     args = p.parse_args()
 
-    p.progress_bar = str.lower(p.progress_bar) == 'true'
+    args.progress_bar = str.lower(args.progress_bar) == 'true'
 
     logger.debug(vars(args))
 
@@ -154,7 +154,7 @@ def main():
     device = torch.device('cpu')
 
     # 8 is used for the width here as it seems to be a sweet spot; using a larger channel count doesn't seem to help and just adds computational cost, and using a lower width starts to impact the frame transformers accuracy.
-    model = FrameTransformer(2048, out_proj_width=8, num_encoders=3, num_decoders=3, num_bands=8, feedforward_dim=1536, bias=True)
+    model = FrameTransformer(2048, out_proj_width=8, num_encoders=2, num_decoders=3, num_bands=8, feedforward_dim=2048, bias=True)
 
     if args.pretrained_model is not None:
         model.load_state_dict(torch.load(args.pretrained_model, map_location=device))
