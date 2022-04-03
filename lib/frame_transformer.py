@@ -12,7 +12,7 @@ class FrameTransformer(nn.Module):
         self.nin_lstm = self.max_bin // 2
 
         self.transformer = FrameTransformerNet(2, out_proj_width, n_fft=n_fft, num_encoders=num_encoders, num_decoders=num_decoders, num_bands=num_bands, feedforward_dim=feedforward_dim, bias=bias)
-        self.out = nn.Linear(in_features=out_proj_width, out_features=2, bias=bias)
+        #self.out = nn.Linear(in_features=out_proj_width, out_features=2, bias=bias)
 
     def forward(self, x):
         x = x[:, :, :self.max_bin]

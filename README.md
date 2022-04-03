@@ -78,3 +78,4 @@ python train.py --dataset path/to/dataset --reduction_rate 0.5 --mixup_rate 0.5 
 - [2] Takahashi et al., "Multi-scale Multi-band DenseNets for Audio Source Separation", https://arxiv.org/pdf/1706.09588.pdf
 - [3] Takahashi et al., "MMDENSELSTM: AN EFFICIENT COMBINATION OF CONVOLUTIONAL AND RECURRENT NEURAL NETWORKS FOR AUDIO SOURCE SEPARATION", https://arxiv.org/pdf/1805.02410.pdf
 - [4] Liutkus et al., "The 2016 Signal Separation Evaluation Campaign", Latent Variable Analysis and Signal Separation - 12th International Conference
+- [5] So, Liang, and Le, "The Evolved Transformer", https://arxiv.org/pdf/1901.11117.pdf
