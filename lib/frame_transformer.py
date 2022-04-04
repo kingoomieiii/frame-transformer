@@ -164,7 +164,7 @@ class FrameTransformerEncoder(nn.Module):
         self.bottleneck_linear = nn.Linear(channels, 1, bias=bias)
         self.bottleneck_norm = nn.BatchNorm2d(1)
        
-        # This isn't like how they have it in the evolved transformer paper; expanding the features by 2 allows for addition without padding, however they simply pad the output in the paper. Need to see if this performs better or worse.
+        # This isn't how they have it in the evolved transformer paper; expanding the features by 2 allows for addition without padding, however they simply pad the output in the paper. Need to see if this performs better or worse.
         self.glu = nn.Sequential(
             nn.Linear(bins, bins * 2, bias=bias),
             nn.GLU())
