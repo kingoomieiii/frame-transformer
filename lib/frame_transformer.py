@@ -9,17 +9,15 @@ class FrameTransformer(nn.Module):
         super(FrameTransformer, self).__init__()
         self.max_bin = n_fft // 2
         self.output_bin = n_fft // 2 + 1
-        self.nin_lstm = self.max_bin // 2
 
         self.transformer = FrameTransformerNet(2, channels, n_fft=n_fft, num_encoders=num_encoders, num_decoders=num_decoders, num_bands=num_bands, feedforward_dim=feedforward_dim, bias=bias, cropsize=cropsize)
-        self.out = nn.Linear(channels, 2, bias=bias)
 
     def forward(self, x):
         x = x[:, :, :self.max_bin]
-
+        out = torch.sigmoid(self.transformer(x))
         out = F.pad(
-            input=torch.sigmoid(self.out(self.transformer(x).transpose(1,3)).transpose(1,3)),
-            pad=(0, 0, 0, self.output_bin - self.max_bin),
+            input=out,
+            pad=(0, 0, 0, self.output_bin - out.size()[2]),
             mode='replicate'
         )
 
@@ -30,34 +28,39 @@ class FrameTransformerNet(nn.Module):
         super(FrameTransformerNet, self).__init__()
 
         self.enc1 = FrameConv(nin, nout, 3, 1, 1)
+        self.enc1_transformer = nn.ModuleList([FrameTransformerEncoder(nout + i, num_bands, cropsize, n_fft, downsamples=0, feedforward_dim=feedforward_dim, bias=bias) for i in range(num_encoders)])
         
-        self.enc2 = Encoder(nout * 1, nout * 2, kernel_size=3, stride=2, padding=1)
+        self.enc2 = Encoder(nout * 1 + num_encoders, nout * 2, kernel_size=3, stride=2, padding=1)
         self.enc2_transformer = nn.ModuleList([FrameTransformerEncoder(nout * 2 + i, num_bands, cropsize, n_fft, downsamples=1, feedforward_dim=feedforward_dim, bias=bias) for i in range(num_encoders)])
 
         self.enc3 = Encoder(nout * 2 + num_encoders, nout * 4, kernel_size=3, stride=2, padding=1)
         self.enc3_transformer = nn.ModuleList([FrameTransformerEncoder(nout * 4 + i, num_bands, cropsize, n_fft, downsamples=2, feedforward_dim=feedforward_dim, bias=bias) for i in range(num_encoders)])
 
-        self.enc4 = Encoder(nout * 4 + num_encoders, nout * 8, kernel_size=3, stride=2, padding=1)
-        self.enc4_transformer = nn.ModuleList([FrameTransformerEncoder(nout * 8 + i, num_bands, cropsize, n_fft, downsamples=3, feedforward_dim=feedforward_dim, bias=bias) for i in range(num_encoders)])
+        self.enc4 = Encoder(nout * 4 + num_encoders, nout * 6, kernel_size=3, stride=2, padding=1)
+        self.enc4_transformer = nn.ModuleList([FrameTransformerEncoder(nout * 6 + i, num_bands, cropsize, n_fft, downsamples=3, feedforward_dim=feedforward_dim, bias=bias) for i in range(num_encoders)])
         
-        self.enc5 = Encoder(nout * 8 + num_encoders, nout * 16, kernel_size=3, stride=2, padding=1)
-        self.enc5_transformer = nn.ModuleList([FrameTransformerEncoder(nout * 16 + i, num_bands, cropsize, n_fft, downsamples=4, feedforward_dim=feedforward_dim, bias=bias) for i in range(num_encoders)])
+        self.enc5 = Encoder(nout * 6 + num_encoders, nout * 8, kernel_size=3, stride=2, padding=1)
+        self.enc5_transformer = nn.ModuleList([FrameTransformerEncoder(nout * 8 + i, num_bands, cropsize, n_fft, downsamples=4, feedforward_dim=feedforward_dim, bias=bias) for i in range(num_encoders)])
         
-        self.dec4_transformer = nn.ModuleList([FrameTransformerDecoder(nout * 16 + i + num_encoders, nout * 16 + num_encoders, num_bands, cropsize, n_fft, downsamples=4, feedforward_dim=feedforward_dim, bias=bias) for i in range(num_decoders)])
-        self.dec4 = Decoder(nout * (8 + 16) + num_decoders + num_encoders * 2, nout * 8, kernel_size=3, padding=1)
+        self.dec4_transformer = nn.ModuleList([FrameTransformerDecoder(nout * 8 + i + num_encoders, nout * 8 + num_encoders, num_bands, cropsize, n_fft, downsamples=4, feedforward_dim=feedforward_dim, bias=bias) for i in range(num_decoders)])
+        self.dec4 = Decoder(nout * (6 + 8) + num_decoders + num_encoders * 2, nout * 6, kernel_size=3, padding=1)
 
-        self.dec3_transformer = nn.ModuleList([FrameTransformerDecoder(nout * 8 + i, nout * 8 + num_encoders, num_bands, cropsize, n_fft, downsamples=3, feedforward_dim=feedforward_dim, bias=bias) for i in range(num_decoders)])
-        self.dec3 = Decoder(nout * (4 + 8) + num_decoders + num_encoders, nout * 4, kernel_size=3, padding=1)
+        self.dec3_transformer = nn.ModuleList([FrameTransformerDecoder(nout * 6 + i, nout * 6 + num_encoders, num_bands, cropsize, n_fft, downsamples=3, feedforward_dim=feedforward_dim, bias=bias) for i in range(num_decoders)])
+        self.dec3 = Decoder(nout * (4 + 6) + num_decoders + num_encoders, nout * 4, kernel_size=3, padding=1)
 
         self.dec2_transformer = nn.ModuleList([FrameTransformerDecoder(nout * 4 + i, nout * 4 + num_encoders, num_bands, cropsize, n_fft, downsamples=2, feedforward_dim=feedforward_dim, bias=bias) for i in range(num_decoders)])
         self.dec2 = Decoder(nout * (2 + 4) + num_decoders + num_encoders, nout * 2, kernel_size=3, padding=1)
 
         self.dec1_transformer = nn.ModuleList([FrameTransformerDecoder(nout * 2 + i, nout * 2 + num_encoders, num_bands, cropsize, n_fft, downsamples=1, feedforward_dim=feedforward_dim, bias=bias) for i in range(num_decoders)])
-        self.dec1 = Decoder(nout * (1 + 2) + num_decoders, nout * 1, kernel_size=3, padding=1)
+        self.dec1 = Decoder(nout * (1 + 2) + num_decoders + num_encoders, nout * 1, kernel_size=3, padding=1)
 
+        self.out_transformer = nn.ModuleList([FrameTransformerDecoder(nout + i, nout + num_encoders, num_bands, cropsize, n_fft, downsamples=0, feedforward_dim=feedforward_dim, bias=bias) for i in range(2)])
 
     def __call__(self, x):
         e1 = self.enc1(x)
+        for module in self.enc1_transformer:
+            t = module(e1)
+            e1 = torch.cat((e1, t), dim=1)
 
         e2 = self.enc2(e1)
         for module in self.enc2_transformer:
@@ -99,9 +102,14 @@ class FrameTransformerNet(nn.Module):
             t = module(h, mem=e2)
             h = torch.cat((h, t), dim=1)
 
+        out = None
         h = self.dec1(h, e1)
+        for i, module in enumerate(self.out_transformer):
+            t = module(h, mem=e1)
+            h = torch.cat((h, t), dim=1)
+            out = torch.cat((out, t), dim=1) if out is not None else t
 
-        return h
+        return out
         
 class Encoder(nn.Module):
     def __init__(self, nin, nout, kernel_size=3, stride=1, padding=1, activ=nn.LeakyReLU):
@@ -154,7 +162,7 @@ class FrameTransformerEncoder(nn.Module):
         self.bottleneck_linear = nn.Linear(channels, 1, bias=bias)
         self.bottleneck_norm = nn.BatchNorm2d(1)
        
-        # This isn't how they have it in the evolved transformer paper; expanding the features by 2 allows for addition without padding, however they simply pad the output in the paper. Need to see if this performs better or worse.
+        # This isn't like how they have it in the evolved transformer paper; expanding the features by 2 allows for addition without padding, however they simply pad the output in the paper. Need to see if this performs better or worse.
         self.glu = nn.Sequential(
             nn.Linear(bins, bins * 2, bias=bias),
             nn.GLU())
@@ -293,16 +301,15 @@ class MultibandFrameAttention(nn.Module):
         super().__init__()
 
         self.num_bands = num_bands
-        self.q_proj = nn.Linear(bins, bins, bias=bias)
-        self.k_proj = nn.Linear(bins, bins, bias=bias)
-        self.v_proj = nn.Linear(bins, bins, bias=bias)
-        self.o_proj = nn.Linear(bins, bins, bias=bias)
+        self.q_proj = nn.Linear(bins, bins)
+        self.k_proj = nn.Linear(bins, bins)
+        self.v_proj = nn.Linear(bins, bins)
+        self.o_proj = nn.Linear(bins, bins)
 
-        # relative positional encoding
         self.er = nn.Parameter(torch.empty(bins // num_bands, cropsize))
         nn.init.kaiming_uniform_(self.er, a=math.sqrt(5))
 
-        # I don't actually know if this helps (doesn't seem to hurt though); the general idea was to allow each band to focus on different regions in relation to each frame's position to allow for some locality to be learned if useful.
+        # I don't actually know if this helps (doesn't seem to hurt though); the general idea was to allow each band to focus on different regions in relation to its position to allow for some locality to be learned if useful.
         self.register_buffer('distances', torch.empty(num_bands, cropsize, cropsize))
         self.distance_weight = nn.Parameter(torch.empty(num_bands).unsqueeze(1).expand((-1, cropsize)).unsqueeze(2).clone())
         nn.init.kaiming_uniform_(self.distance_weight, a=math.sqrt(5.0))
@@ -312,11 +319,11 @@ class MultibandFrameAttention(nn.Module):
                 self.distances[:, i, j] = abs(i - j) / 2
 
     def forward(self, x, mem=None):
-        b,w,h = x.shape
+        b,w,c = x.shape
         q = self.q_proj(x).reshape(b, w, self.num_bands, -1).permute(0,2,1,3)
         k = self.k_proj(x if mem is None else mem).reshape(b, w, self.num_bands, -1).permute(0,2,3,1)
         v = self.v_proj(x if mem is None else mem).reshape(b, w, self.num_bands, -1).permute(0,2,1,3)
-        qk = torch.matmul(q,k) / math.sqrt(h)
+        qk = torch.matmul(q,k) / math.sqrt(c)
         p = (self.distances * self.distance_weight) + F.pad(torch.matmul(q,self.er), (1,0)).transpose(2,3)[:,:,1:,:]
         a = F.softmax(qk+p, dim=-1)
         a = torch.matmul(a,v).transpose(1,2).reshape(b,w,-1)

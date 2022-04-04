@@ -12,12 +12,13 @@ from lib import nets
 from lib import spec_utils
 from lib import utils
 
+from lib.frame_transformer import FrameTransformer
 
 class Separator(object):
 
     def __init__(self, model, device, batchsize, cropsize, postprocess=False):
         self.model = model
-        self.offset = model.offset
+        self.offset = 0
         self.device = device
         self.batchsize = batchsize
         self.cropsize = cropsize
@@ -41,7 +42,7 @@ class Separator(object):
                 X_batch = X_dataset[i: i + self.batchsize]
                 X_batch = torch.from_numpy(X_batch).to(self.device)
 
-                pred = self.model.predict_mask(X_batch)
+                pred = self.model(X_batch)
 
                 pred = pred.detach().cpu().numpy()
                 pred = np.concatenate(pred, axis=2)
@@ -108,7 +109,7 @@ class Separator(object):
 def main():
     p = argparse.ArgumentParser()
     p.add_argument('--gpu', '-g', type=int, default=-1)
-    p.add_argument('--pretrained_model', '-P', type=str, default='models/baseline.pth')
+    p.add_argument('--pretrained_model', '-P', type=str, default='models/model_iter0.pth')
     p.add_argument('--input', '-i', required=True)
     p.add_argument('--sr', '-r', type=int, default=44100)
     p.add_argument('--n_fft', '-f', type=int, default=2048)
@@ -117,12 +118,18 @@ def main():
     p.add_argument('--cropsize', '-c', type=int, default=256)
     p.add_argument('--output_image', '-I', action='store_true')
     p.add_argument('--postprocess', '-p', action='store_true')
+    p.add_argument('--channels', type=int, default=8)
+    p.add_argument('--num_encoders', type=int, default=2)
+    p.add_argument('--num_decoders', type=int, default=3)
+    p.add_argument('--num_bands', type=str, default=8)
+    p.add_argument('--feedforward_dim', type=int, default=2048)
+    p.add_argument('--bias', type=str, default='true')
     p.add_argument('--tta', '-t', action='store_true')
     args = p.parse_args()
 
     print('loading model...', end=' ')
     device = torch.device('cpu')
-    model = nets.CascadedNet(args.n_fft)
+    model = FrameTransformer(args.n_fft, channels=args.channels, num_encoders=args.num_encoders, num_decoders=args.num_decoders, num_bands=args.num_bands, feedforward_dim=args.feedforward_dim, bias=args.bias, cropsize=args.cropsize)
     model.load_state_dict(torch.load(args.pretrained_model, map_location=device))
     if torch.cuda.is_available() and args.gpu >= 0:
         device = torch.device('cuda:{}'.format(args.gpu))
