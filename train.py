@@ -100,7 +100,7 @@ def validate_epoch(dataloader, model, device):
 def main():
     p = argparse.ArgumentParser()
     p.add_argument('--gpu', '-g', type=int, default=-1)
-    p.add_argument('--seed', '-s', type=int, default=2020)
+    p.add_argument('--seed', '-s', type=int, default=51)
     p.add_argument('--sr', '-r', type=int, default=44100)
     p.add_argument('--hop_length', '-H', type=int, default=1024)
     p.add_argument('--n_fft', '-f', type=int, default=2048)
@@ -129,7 +129,7 @@ def main():
     p.add_argument('--lr_warmup_steps', '-LW', type=int, default=4)
     p.add_argument('--lr_warmup_current_step', type=int, default=0)
     p.add_argument('--channels', type=int, default=8)
-    p.add_argument('--num_encoders', type=int, default=2)
+    p.add_argument('--num_encoders', type=int, default=3)
     p.add_argument('--num_decoders', type=int, default=3)
     p.add_argument('--num_bands', type=str, default=8)
     p.add_argument('--feedforward_dim', type=int, default=2048)
