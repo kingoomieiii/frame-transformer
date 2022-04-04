@@ -106,7 +106,7 @@ class FrameTransformerNet(nn.Module):
 
         out = None
         h = self.dec1(h, e1)
-        for i, module in enumerate(self.out_transformer):
+        for module in self.out_transformer:
             t = module(h, mem=e1)
             h = torch.cat((h, t), dim=1)
             out = torch.cat((out, t), dim=1) if out is not None else t
