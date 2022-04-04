@@ -6,7 +6,7 @@
 This is a deep-learning-based tool to extract instrumental track from your songs.
 
 ### From Ben Carper
-This is a variation of tsurumeso's vocal remover that I've been tinkering with for a while. The goal of this project was to find a meaningful way to use the evolved transformer architecture for track separation. This isn't a very user-friendly version just yet, has a lot of stuff that is specific to my dataset. Will pretty this up over time.
+This is a variation of tsurumeso's vocal remover that I've been tinkering with for a while. The goal of this project was to find a meaningful way to use the evolved transformer architecture for track separation. This isn't a very user-friendly version just yet, has a lot of stuff that is specific to my dataset and environment; will take at least 12gb of VRAM to train this given the settings in the code. Will pretty this up over time.
 
 This version consists of only a single u-net. This u-net includes modified evolved transformer encoders after each downsampling as well as modified evolved transformer decoders before each upsampling.
 

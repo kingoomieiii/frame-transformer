@@ -5,13 +5,13 @@ import math
 from lib import spec_utils
 
 class FrameTransformer(nn.Module):
-    def __init__(self, n_fft, out_proj_width=8, num_encoders=4, num_decoders=4, num_bands=8, bias=False, feedforward_dim=2048):
+    def __init__(self, n_fft, channels=8, num_encoders=4, num_decoders=4, num_bands=8, bias=False, feedforward_dim=2048, cropsize=256):
         super(FrameTransformer, self).__init__()
         self.max_bin = n_fft // 2
         self.output_bin = n_fft // 2 + 1
         self.nin_lstm = self.max_bin // 2
 
-        self.transformer = FrameTransformerNet(2, out_proj_width, n_fft=n_fft, num_encoders=num_encoders, num_decoders=num_decoders, num_bands=num_bands, feedforward_dim=feedforward_dim, bias=bias)
+        self.transformer = FrameTransformerNet(2, channels, n_fft=n_fft, num_encoders=num_encoders, num_decoders=num_decoders, num_bands=num_bands, feedforward_dim=feedforward_dim, bias=bias, cropsize=cropsize)
         #self.out = nn.Linear(in_features=out_proj_width, out_features=2, bias=bias)
 
     def forward(self, x):
@@ -56,6 +56,7 @@ class FrameTransformerNet(nn.Module):
         self.dec1_transformer = nn.ModuleList([FrameTransformerDecoder(nout * 2 + i, nout * 2 + num_encoders, num_bands, cropsize, n_fft, downsamples=1, feedforward_dim=feedforward_dim, bias=bias) for i in range(num_decoders)])
         self.dec1 = Decoder(nout * (1 + 2) + num_decoders + num_encoders, nout * 1, kernel_size=3, padding=1)
 
+        # doesn't seem like this is actually helpful, but currently testing. will likely remove this and enc1_transformer shortly.
         self.out_transformer = nn.ModuleList([FrameTransformerDecoder(nout + i, nout + num_encoders, num_bands, cropsize, n_fft, downsamples=0, feedforward_dim=feedforward_dim, bias=bias) for i in range(2)])
 
     def __call__(self, x):

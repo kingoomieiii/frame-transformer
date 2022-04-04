@@ -100,7 +100,7 @@ def validate_epoch(dataloader, model, device):
 def main():
     p = argparse.ArgumentParser()
     p.add_argument('--gpu', '-g', type=int, default=-1)
-    p.add_argument('--seed', '-s', type=int, default=2019)
+    p.add_argument('--seed', '-s', type=int, default=2020)
     p.add_argument('--sr', '-r', type=int, default=44100)
     p.add_argument('--hop_length', '-H', type=int, default=1024)
     p.add_argument('--n_fft', '-f', type=int, default=2048)
@@ -126,10 +126,19 @@ def main():
     p.add_argument('--mixup_alpha', '-a', type=float, default=1.0)
     p.add_argument('--pretrained_model', '-P', type=str, default=None)
     p.add_argument('--progress_bar', '-pb', type=str, default='true')
+    p.add_argument('--lr_warmup_steps', '-LW', type=int, default=4)
+    p.add_argument('--lr_warmup_current_step', type=int, default=0)
+    p.add_argument('--channels', type=int, default=8)
+    p.add_argument('--num_encoders', type=int, default=2)
+    p.add_argument('--num_decoders', type=int, default=3)
+    p.add_argument('--num_bands', type=str, default=8)
+    p.add_argument('--feedforward_dim', type=int, default=2048)
+    p.add_argument('--bias', type=str, default='true')
     p.add_argument('--debug', action='store_true')
     args = p.parse_args()
 
     args.progress_bar = str.lower(args.progress_bar) == 'true'
+    args.bias = str.lower(args.bias) == 'true'
 
     logger.debug(vars(args))
 
@@ -154,7 +163,7 @@ def main():
     device = torch.device('cpu')
 
     # 8 is used for the width here as it seems to be a sweet spot; using a larger channel count doesn't seem to help and just adds computational cost, and using a lower width starts to impact the frame transformers accuracy.
-    model = FrameTransformer(2048, out_proj_width=8, num_encoders=2, num_decoders=3, num_bands=8, feedforward_dim=2048, bias=True)
+    model = FrameTransformer(args.n_fft, channels=args.channels, num_encoders=args.num_encoders, num_decoders=args.num_decoders, num_bands=args.num_bands, feedforward_dim=args.feedforward_dim, bias=args.bias, cropsize=args.cropsize)
 
     if args.pretrained_model is not None:
         model.load_state_dict(torch.load(args.pretrained_model, map_location=device))
@@ -166,7 +175,8 @@ def main():
         path="C://cs256_sr44100_hl1024_nf2048_of0",
         extra_path="G://cs256_sr44100_hl1024_nf2048_of0",
         vocal_path="G://cs256_sr44100_hl1024_nf2048_of0_VOCALS",
-        is_validation=False
+        is_validation=False,
+        #epoch_size=4096
     )
 
     train_dataloader = torch.utils.data.DataLoader(
@@ -190,13 +200,19 @@ def main():
     
     grad_scaler = torch.cuda.amp.grad_scaler.GradScaler()
     
-    current_warmup_step = 0
+    current_warmup_step = args.lr_warmup_current_step
     target_learning_rate = args.learning_rate
-    warmup_steps = 4
+    warmup_steps = args.lr_warmup_steps
+    
+    model_parameters = filter(lambda p: p.requires_grad, model.parameters())
+    params = sum([np.prod(p.size()) for p in model_parameters])
+    print(f'# num params: {params}')
 
     log = []
     best_loss = np.inf
     for epoch in range(args.epoch):
+        train_dataset.reset()
+
         if current_warmup_step < warmup_steps:
             lr = (current_warmup_step + 1) * (target_learning_rate / warmup_steps)
             current_warmup_step += 1
@@ -215,7 +231,7 @@ def main():
                 verbose=True
             )
 
-            print(f'new lr: {lr}')
+            print(f'# lr: {lr}')
 
         logger.info('# epoch {}'.format(epoch))
         train_loss = train_epoch(train_dataloader, model, device, optimizer, args.accumulation_steps, grad_scaler, args.progress_bar)
