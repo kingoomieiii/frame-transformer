@@ -322,11 +322,11 @@ class MultibandFrameAttention(nn.Module):
                 self.distances[:, i, j] = abs(i - j) / 2
 
     def forward(self, x, mem=None):
-        b,w,c = x.shape
+        b,w,h = x.shape
         q = self.q_proj(x).reshape(b, w, self.num_bands, -1).permute(0,2,1,3)
         k = self.k_proj(x if mem is None else mem).reshape(b, w, self.num_bands, -1).permute(0,2,3,1)
         v = self.v_proj(x if mem is None else mem).reshape(b, w, self.num_bands, -1).permute(0,2,1,3)
-        qk = torch.matmul(q,k) / math.sqrt(c)
+        qk = torch.matmul(q,k) / math.sqrt(h)
         p = (self.distances * self.distance_weight) + F.pad(torch.matmul(q,self.er), (1,0)).transpose(2,3)[:,:,1:,:]
         a = F.softmax(qk+p, dim=-1)
         a = torch.matmul(a,v).transpose(1,2).reshape(b,w,-1)
