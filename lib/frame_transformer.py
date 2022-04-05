@@ -101,7 +101,7 @@ class FrameTransformer2(nn.Module):
         )
 
 class FrameTransformer(nn.Module):
-    def __init__(self, channels, n_fft=2048, feedforward_dim=512, num_bands=4, num_encoders=1, num_decoders=1, cropsize=256, bias=False):
+    def __init__(self, channels, n_fft=2048, feedforward_dim=512, num_bands=4, num_layers=1, cropsize=256, bias=False):
         super(FrameTransformer, self).__init__()        
         self.max_bin = n_fft // 2
         self.output_bin = n_fft // 2 + 1
@@ -111,8 +111,8 @@ class FrameTransformer(nn.Module):
         self.enc3 = Encoder(channels * 2, channels * 4, kernel_size=3, stride=2, padding=1)
         self.enc4 = Encoder(channels * 4, channels * 6, kernel_size=3, stride=2, padding=1)        
         self.enc5 = Encoder(channels * 6, channels * 8, kernel_size=3, stride=2, padding=1)
-        self.enc5_transformer = nn.ModuleList([FrameTransformerEncoder(channels * 8 + i, num_bands, cropsize, n_fft, downsamples=4, feedforward_dim=feedforward_dim, bias=bias) for i in range(num_encoders)])
-        self.dec4 = Decoder(channels * (6 + 8) + num_encoders, channels * 6, kernel_size=3, padding=1)
+        self.transformer = nn.ModuleList([FrameTransformerEncoder(channels * 8 + i, num_bands, cropsize, n_fft, downsamples=4, feedforward_dim=feedforward_dim, bias=bias) for i in range(num_layers)])
+        self.dec4 = Decoder(channels * (6 + 8) + num_layers, channels * 6, kernel_size=3, padding=1)
         self.dec3 = Decoder(channels * (4 + 6), channels * 4, kernel_size=3, padding=1)
         self.dec2 = Decoder(channels * (2 + 4), channels * 2, kernel_size=3, padding=1)
         self.dec1 = Decoder(channels * (1 + 2), channels * 1, kernel_size=3, padding=1)
@@ -127,7 +127,7 @@ class FrameTransformer(nn.Module):
         e4 = self.enc4(e3)
         h = self.enc5(e4)
 
-        for module in self.enc5_transformer:
+        for module in self.transformer:
             t = module(h)
             h = torch.cat((h, t), dim=1)
 
