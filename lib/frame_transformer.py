@@ -4,9 +4,9 @@ import torch.nn.functional as F
 import math
 from lib import spec_utils
 
-class FrameTransformer(nn.Module):
+class FrameTransformer2(nn.Module):
     def __init__(self, channels, n_fft=2048, feedforward_dim=512, num_bands=4, num_encoders=1, num_decoders=1, cropsize=256, bias=False):
-        super(FrameTransformer, self).__init__()
+        super(FrameTransformer2, self).__init__()
         self.max_bin = n_fft // 2
         self.output_bin = n_fft // 2 + 1
 
@@ -99,6 +99,44 @@ class FrameTransformer(nn.Module):
             pad=(0, 0, 0, self.output_bin - out.size()[2]),
             mode='replicate'
         )
+
+class FrameTransformer(nn.Module):
+    def __init__(self, channels, n_fft=2048, feedforward_dim=512, num_bands=4, num_encoders=1, num_decoders=1, cropsize=256, bias=False):
+        super(FrameTransformer, self).__init__()        
+        self.max_bin = n_fft // 2
+        self.output_bin = n_fft // 2 + 1
+
+        self.enc1 = FrameConv(2, channels, 3, 1, 1)        
+        self.enc2 = Encoder(channels * 1, channels * 2, kernel_size=3, stride=2, padding=1)
+        self.enc3 = Encoder(channels * 2, channels * 4, kernel_size=3, stride=2, padding=1)
+        self.enc4 = Encoder(channels * 4, channels * 6, kernel_size=3, stride=2, padding=1)        
+        self.enc5 = Encoder(channels * 6, channels * 8, kernel_size=3, stride=2, padding=1)
+        self.enc5_transformer = nn.ModuleList([FrameTransformerEncoder(channels * 8 + i, num_bands, cropsize, n_fft, downsamples=4, feedforward_dim=feedforward_dim, bias=bias) for i in range(num_encoders)])
+        self.dec4 = Decoder(channels * (6 + 8) + num_encoders, channels * 6, kernel_size=3, padding=1)
+        self.dec3 = Decoder(channels * (4 + 6), channels * 4, kernel_size=3, padding=1)
+        self.dec2 = Decoder(channels * (2 + 4), channels * 2, kernel_size=3, padding=1)
+        self.dec1 = Decoder(channels * (1 + 2), channels * 1, kernel_size=3, padding=1)
+        self.out = nn.Linear(channels, 2, bias=bias)
+
+    def forward(self, x):
+        x = x[:, :, :self.max_bin]
+
+        e1 = self.enc1(x)
+        e2 = self.enc2(e1)
+        e3 = self.enc3(e2)
+        e4 = self.enc4(e3)
+        h = self.enc5(e4)
+
+        for module in self.enc5_transformer:
+            t = module(h)
+            h = torch.cat((h, t), dim=1)
+
+        h = self.dec4(h, e4)
+        h = self.dec3(h, e3)
+        h = self.dec2(h, e2)
+        h = self.dec1(h, e1)
+
+        return F.pad(torch.sigmoid(self.out(h.transpose(1,3)).transpose(1,3)), (0,0,0,self.output_bin - self.max_bin), mode='replicate')
         
 class Encoder(nn.Module):
     def __init__(self, nin, nout, kernel_size=3, stride=1, padding=1, activ=nn.LeakyReLU):
@@ -147,7 +185,6 @@ class FrameTransformerEncoder(nn.Module):
         self.num_bands = num_bands
 
         self.relu = nn.ReLU(inplace=True)
-
         self.bottleneck_linear = nn.Linear(channels, 1, bias=bias)
         self.bottleneck_norm = nn.BatchNorm2d(1)
        
@@ -167,7 +204,7 @@ class FrameTransformerEncoder(nn.Module):
         self.norm3 = nn.LayerNorm(bins)
         self.dropout2 = nn.Dropout(dropout) if dropout > 0 else nn.Identity()
 
-        self.attn = MultibandFrameAttention(num_bands, bins, cropsize, bias)
+        self.attn = MultibandFrameAttention(num_bands, bins, cropsize)
         self.norm4 = nn.LayerNorm(bins)
         self.dropout3 = nn.Dropout(dropout) if dropout > 0 else nn.Identity()
 
@@ -221,8 +258,8 @@ class FrameTransformerDecoder(nn.Module):
         self.mem_bottleneck_linear = nn.Linear(mem_channels, 1, bias=bias)
         self.mem_bottleneck_norm = nn.BatchNorm2d(1)
 
-        self.self_attn1 = MultibandFrameAttention(num_bands, bins, cropsize, bias)
-        self.enc_attn1 = MultibandFrameAttention(num_bands, bins, cropsize, bias)
+        self.self_attn1 = MultibandFrameAttention(num_bands, bins, cropsize)
+        self.enc_attn1 = MultibandFrameAttention(num_bands, bins, cropsize)
         self.norm1 = nn.LayerNorm(bins)
         self.dropout1 = nn.Dropout(dropout) if dropout > 0 else nn.Identity()
 
@@ -239,11 +276,11 @@ class FrameTransformerDecoder(nn.Module):
         self.norm3 = nn.LayerNorm(bins)
         self.dropout2 = nn.Dropout(dropout) if dropout > 0 else nn.Identity()
 
-        self.self_attn2 = MultibandFrameAttention(num_bands, bins, cropsize, bias)
+        self.self_attn2 = MultibandFrameAttention(num_bands, bins, cropsize)
         self.norm4 = nn.LayerNorm(bins)
         self.dropout3 = nn.Dropout(dropout) if dropout > 0 else nn.Identity()
 
-        self.enc_attn2 = MultibandFrameAttention(num_bands, bins, cropsize, bias)
+        self.enc_attn2 = MultibandFrameAttention(num_bands, bins, cropsize)
         self.norm5 = nn.LayerNorm(bins)
         self.dropout4 = nn.Dropout(dropout) if dropout > 0 else nn.Identity()
 
@@ -286,10 +323,12 @@ class FrameTransformerDecoder(nn.Module):
         return x.transpose(1, 2).unsqueeze(1)
 
 class MultibandFrameAttention(nn.Module):
-    def __init__(self, num_bands, bins, cropsize, bias=False):
+    def __init__(self, num_bands, bins, cropsize):
         super().__init__()
 
         self.num_bands = num_bands
+
+        # need to test bias here further; bias appears to cause issues with learning when used here and I'm curious as to why
         self.q_proj = nn.Linear(bins, bins)
         self.k_proj = nn.Linear(bins, bins)
         self.v_proj = nn.Linear(bins, bins)
@@ -315,8 +354,9 @@ class MultibandFrameAttention(nn.Module):
         q = self.q_proj(x).reshape(b, w, self.num_bands, -1).permute(0,2,1,3)
         k = self.k_proj(x if mem is None else mem).reshape(b, w, self.num_bands, -1).permute(0,2,3,1)
         v = self.v_proj(x if mem is None else mem).reshape(b, w, self.num_bands, -1).permute(0,2,1,3)
-        qk = torch.matmul(q,k) / math.sqrt(c)
         p = (self.distances * self.distance_weight) + F.pad(torch.matmul(q,self.er), (1,0)).transpose(2,3)[:,:,1:,:]
+        #qk = (torch.matmul(q,k) + p) / math.sqrt(c)
+        qk = torch.matmul(q,k) / math.sqrt(c)
         a = F.softmax(qk+p, dim=-1)
         a = torch.matmul(a,v).transpose(1,2).reshape(b,w,-1)
         o = self.o_proj(a)

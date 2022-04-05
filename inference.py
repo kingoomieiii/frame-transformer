@@ -1,6 +1,8 @@
 import argparse
 import os
 
+import shutil
+
 import librosa
 import numpy as np
 import soundfile as sf
@@ -11,6 +13,8 @@ from lib import dataset
 from lib import nets
 from lib import spec_utils
 from lib import utils
+
+import json
 
 from lib.frame_transformer import FrameTransformer
 
@@ -109,8 +113,9 @@ class Separator(object):
 def main():
     p = argparse.ArgumentParser()
     p.add_argument('--gpu', '-g', type=int, default=-1)
-    p.add_argument('--pretrained_model', '-P', type=str, default='models/model_iter0.pth')
+    p.add_argument('--pretrained_model', '-P', type=str, default='models/model_iter1.pth')
     p.add_argument('--input', '-i', required=True)
+    p.add_argument('--output', '-o', type=str, default="")
     p.add_argument('--sr', '-r', type=int, default=44100)
     p.add_argument('--n_fft', '-f', type=int, default=2048)
     p.add_argument('--hop_length', '-H', type=int, default=1024)
@@ -136,43 +141,104 @@ def main():
         model.to(device)
     print('done')
 
-    print('loading wave source...', end=' ')
-    X, sr = librosa.load(
-        args.input, args.sr, False, dtype=np.float32, res_type='kaiser_fast')
-    basename = os.path.splitext(os.path.basename(args.input))[0]
-    print('done')
+    if str.endswith(args.input, '.json'):
+        convert = None
+        copy = None
+        output = None
 
-    if X.ndim == 1:
-        # mono to stereo
-        X = np.asarray([X, X])
 
-    print('stft of wave source...', end=' ')
-    X_spec = spec_utils.wave_to_spectrogram(X, args.hop_length, args.n_fft)
-    print('done')
+        with open(args.input, 'r', encoding='utf8') as f:
+            obj = json.load(f)
+            convert = obj.get('convert')
+            copy = obj.get('copy')
+            output = obj.get('output')
+            
+        output = '' if output is None else output
+        convert = [] if convert is None else convert
+        copy = [] if copy is None else copy
 
-    sp = Separator(model, device, args.batchsize, args.cropsize, args.postprocess)
+        for file in tqdm(copy):
+            basename = os.path.splitext(os.path.basename(file))[0]
+            shutil.copyfile(file, '{}{}_Instruments.wav'.format(output, basename))
 
-    if args.tta:
-        y_spec, v_spec = sp.separate_tta(X_spec)
+        for file in tqdm(convert):
+            print('loading wave source...', end=' ')
+            X, sr = librosa.load(
+                file, args.sr, False, dtype=np.float32, res_type='kaiser_fast')
+            basename = os.path.splitext(os.path.basename(file))[0]
+            print('done')
+
+            if output != '' and not os.path.exists(output):
+                os.makedirs(output)
+
+            if X.ndim == 1:
+                X = np.asarray([X, X])
+
+            print('stft of wave source...', end=' ')
+            X_spec = spec_utils.wave_to_spectrogram(X, args.hop_length, args.n_fft)
+            print('done')
+
+            sp = Separator(model, device, args.batchsize, args.cropsize, args.postprocess)
+
+            if args.tta:
+                y_spec, v_spec = sp.separate_tta(X_spec)
+            else:
+                y_spec, v_spec = sp.separate(X_spec)
+
+            print('inverse stft of instruments...', end=' ')
+            wave = spec_utils.spectrogram_to_wave(y_spec, hop_length=args.hop_length)
+            print('done')
+            sf.write('{}{}_Instruments.wav'.format(output, basename), wave.T, sr)
+
+            print('inverse stft of vocals...', end=' ')
+            wave = spec_utils.spectrogram_to_wave(v_spec, hop_length=args.hop_length)
+            print('done')
+            sf.write('{}{}_Vocals.wav'.format(output, basename), wave.T, sr)
+
+            if args.output_image:
+                image = spec_utils.spectrogram_to_image(y_spec)
+                utils.imwrite('{}{}_Instruments.jpg'.format(output, basename), image)
+                image = spec_utils.spectrogram_to_image(v_spec)
+                utils.imwrite('{}{}_Vocals.jpg'.format(output, basename), image)
+            
     else:
-        y_spec, v_spec = sp.separate(X_spec)
+        print('loading wave source...', end=' ')
+        X, sr = librosa.load(
+            args.input, args.sr, False, dtype=np.float32, res_type='kaiser_fast')
+        basename = os.path.splitext(os.path.basename(args.input))[0]
+        print('done')
 
-    print('inverse stft of instruments...', end=' ')
-    wave = spec_utils.spectrogram_to_wave(y_spec, hop_length=args.hop_length)
-    print('done')
-    sf.write('{}_Instruments.wav'.format(basename), wave.T, sr)
+        if X.ndim == 1:
+            # mono to stereo
+            X = np.asarray([X, X])
 
-    print('inverse stft of vocals...', end=' ')
-    wave = spec_utils.spectrogram_to_wave(v_spec, hop_length=args.hop_length)
-    print('done')
-    sf.write('{}_Vocals.wav'.format(basename), wave.T, sr)
+        print('stft of wave source...', end=' ')
+        X_spec = spec_utils.wave_to_spectrogram(X, args.hop_length, args.n_fft)
+        print('done')
 
-    if args.output_image:
-        image = spec_utils.spectrogram_to_image(y_spec)
-        utils.imwrite('{}_Instruments.jpg'.format(basename), image)
+        sp = Separator(model, device, args.batchsize, args.cropsize, args.postprocess)
 
-        image = spec_utils.spectrogram_to_image(v_spec)
-        utils.imwrite('{}_Vocals.jpg'.format(basename), image)
+        if args.tta:
+            y_spec, v_spec = sp.separate_tta(X_spec)
+        else:
+            y_spec, v_spec = sp.separate(X_spec)
+
+        print('inverse stft of instruments...', end=' ')
+        wave = spec_utils.spectrogram_to_wave(y_spec, hop_length=args.hop_length)
+        print('done')
+        sf.write('{}_Instruments.wav'.format(basename), wave.T, sr)
+
+        print('inverse stft of vocals...', end=' ')
+        wave = spec_utils.spectrogram_to_wave(v_spec, hop_length=args.hop_length)
+        print('done')
+        sf.write('{}_Vocals.wav'.format(basename), wave.T, sr)
+
+        if args.output_image:
+            image = spec_utils.spectrogram_to_image(y_spec)
+            utils.imwrite('{}_Instruments.jpg'.format(basename), image)
+
+            image = spec_utils.spectrogram_to_image(v_spec)
+            utils.imwrite('{}_Vocals.jpg'.format(basename), image)
 
 
 if __name__ == '__main__':
