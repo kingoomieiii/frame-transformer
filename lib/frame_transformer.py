@@ -37,7 +37,7 @@ class FrameTransformer(nn.Module):
         self.dec1_transformer = nn.ModuleList([FrameTransformerDecoder(channels * 2 + i, channels * 2 + num_encoders, num_bands, cropsize, n_fft, downsamples=1, feedforward_dim=feedforward_dim, bias=bias) for i in range(num_decoders)])
         self.dec1 = Decoder(channels * (1 + 2) + num_decoders + num_encoders, channels * 1, kernel_size=3, padding=1)
 
-        self.out_transformer = nn.ModuleList([FrameTransformerDecoder(channels + i, 2, num_bands, cropsize, n_fft, downsamples=0, feedforward_dim=feedforward_dim, bias=bias) for i in range(2)])
+        self.out_transformer = nn.ModuleList([FrameTransformerDecoder(channels + i, channels + num_encoders, num_bands, cropsize, n_fft, downsamples=0, feedforward_dim=feedforward_dim, bias=bias) for i in range(2)])
 
     def __call__(self, x):
         x = x[:, :, :self.max_bin]
@@ -90,7 +90,7 @@ class FrameTransformer(nn.Module):
         out = None
         h = self.dec1(h, e1)
         for i, module in enumerate(self.out_transformer):
-            t = module(h, mem=x)
+            t = module(h, mem=e1)
             h = torch.cat((h, t), dim=1)
             out = torch.cat((out, t), dim=1) if out is not None else t
 
@@ -297,6 +297,9 @@ class MultibandFrameAttention(nn.Module):
 
         self.er = nn.Parameter(torch.empty(bins // num_bands, cropsize))
         nn.init.kaiming_uniform_(self.er, a=math.sqrt(5))
+
+        # will probably be trying just standard fixed relative positional encoding in order to be able
+        # to extrapolate to new sequence lengths without having to retrain
 
         # I don't actually know if this helps (doesn't seem to hurt though); the general idea was to allow each band to focus on different regions in relation to its position to allow for some locality to be learned if useful.
         self.register_buffer('distances', torch.empty(num_bands, cropsize, cropsize))
