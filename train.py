@@ -16,7 +16,7 @@ from lib import spec_utils
 
 from tqdm import tqdm
 
-from lib.frame_transformer import FrameTransformer, CascadedFrameTransformer
+from lib.frame_transformer import FrameTransformer
 
 def setup_logger(name, logfile='LOGFILENAME.log'):
     logger = logging.getLogger(name)
@@ -167,8 +167,8 @@ def main():
     device = torch.device('cpu')
 
     # 8 is used for the width here as it seems to be a sweet spot; using a larger channel count doesn't seem to help and just adds computational cost, and using a lower width starts to impact the frame transformers accuracy.
-    #model = FrameTransformer(channels=args.channels, n_fft=args.n_fft, num_layers=args.num_layers, num_bands=args.num_bands, feedforward_dim=args.feedforward_dim, bias=args.bias, cropsize=args.cropsize)
-    model = CascadedFrameTransformer(channels=args.channels, n_fft=args.n_fft, num_layers=args.num_layers, num_bands=args.num_bands, feedforward_dim=args.feedforward_dim, bias=args.bias, cropsize=args.cropsize)
+    model = FrameTransformer(channels=args.channels, n_fft=args.n_fft, num_layers=args.num_layers, num_bands=args.num_bands, feedforward_dim=args.feedforward_dim, bias=args.bias, cropsize=args.cropsize)
+    #model = CascadedFrameTransformer(channels=args.channels, n_fft=args.n_fft, num_layers=args.num_layers, num_bands=args.num_bands, feedforward_dim=args.feedforward_dim, bias=args.bias, cropsize=args.cropsize)
 
     if args.pretrained_model is not None:
         model.load_state_dict(torch.load(args.pretrained_model, map_location=device))
