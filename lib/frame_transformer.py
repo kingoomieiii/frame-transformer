@@ -148,7 +148,7 @@ class CascadedFrameTransformer(nn.Module):
         self.stg1_high_band_net = FrameTransformer(2, channels, n_fft // 2, feedforward_dim=feedforward_dim, num_bands=num_bands, num_layers=num_layers, cropsize=cropsize, bias=bias, out=False)
         self.stg2_low_band_net = FrameTransformer(channels + 2, channels, n_fft // 2, feedforward_dim=feedforward_dim, num_bands=num_bands, num_layers=num_layers, cropsize=cropsize, bias=bias, out=False)
         self.stg2_high_band_net = FrameTransformer(channels + 2, channels, n_fft // 2, feedforward_dim=feedforward_dim, num_bands=num_bands, num_layers=num_layers, cropsize=cropsize, bias=bias, out=False)
-        self.stg3_full_band_net = FrameTransformer(channels * 2 + 2, channels, n_fft // 2, feedforward_dim=feedforward_dim, num_bands=num_bands, num_layers=num_layers, cropsize=cropsize, bias=bias, out=False)
+        self.stg3_full_band_net = FrameTransformer(channels * 2 + 2, channels, n_fft, feedforward_dim=feedforward_dim, num_bands=num_bands, num_layers=num_layers, cropsize=cropsize, bias=bias, out=False)
         self.out = nn.Linear(channels, 2)
         self.aux_out = nn.Linear(channels * 2, 2)
 
@@ -169,6 +169,7 @@ class CascadedFrameTransformer(nn.Module):
         aux2 = torch.cat([l2, h2], dim=2)
 
         f3_in = torch.cat([x, aux1, aux2], dim=1)
+
         f3 = self.stg3_full_band_net(f3_in)
 
         mask = torch.sigmoid(self.out(f3.transpose(1,3)).transpose(1,3))
