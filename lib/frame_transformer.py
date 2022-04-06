@@ -101,12 +101,12 @@ class FrameTransformer2(nn.Module):
         )
 
 class FrameTransformer(nn.Module):
-    def __init__(self, channels, n_fft=2048, feedforward_dim=512, num_bands=4, num_layers=1, cropsize=256, bias=False):
+    def __init__(self, in_channels=2, channels=8, n_fft=2048, feedforward_dim=512, num_bands=4, num_layers=1, cropsize=256, bias=False, out=True):
         super(FrameTransformer, self).__init__()        
         self.max_bin = n_fft // 2
         self.output_bin = n_fft // 2 + 1
 
-        self.enc1 = FrameConv(2, channels, 3, 1, 1)        
+        self.enc1 = FrameConv(in_channels, channels, 3, 1, 1)        
         self.enc2 = Encoder(channels * 1, channels * 2, kernel_size=3, stride=2, padding=1)
         self.enc3 = Encoder(channels * 2, channels * 4, kernel_size=3, stride=2, padding=1)
         self.enc4 = Encoder(channels * 4, channels * 6, kernel_size=3, stride=2, padding=1)        
@@ -116,7 +116,7 @@ class FrameTransformer(nn.Module):
         self.dec3 = Decoder(channels * (4 + 6), channels * 4, kernel_size=3, padding=1)
         self.dec2 = Decoder(channels * (2 + 4), channels * 2, kernel_size=3, padding=1)
         self.dec1 = Decoder(channels * (1 + 2), channels * 1, kernel_size=3, padding=1)
-        self.out = nn.Linear(channels, 2, bias=bias)
+        self.out = nn.Linear(channels, 2, bias=bias) if out else None
 
     def forward(self, x):
         x = x[:, :, :self.max_bin]
@@ -136,7 +136,59 @@ class FrameTransformer(nn.Module):
         h = self.dec2(h, e2)
         h = self.dec1(h, e1)
 
-        return F.pad(torch.sigmoid(self.out(h.transpose(1,3)).transpose(1,3)), (0,0,0,self.output_bin - self.max_bin), mode='replicate')
+        return F.pad(torch.sigmoid(self.out(h.transpose(1,3)).transpose(1,3)), (0,0,0,self.output_bin - self.max_bin), mode='replicate') if self.out is not None else h
+
+class CascadedFrameTransformer(nn.Module):
+    def __init__(self, channels, n_fft=2048, feedforward_dim=512, num_bands=4, num_layers=1, cropsize=256, bias=False):
+        super(CascadedFrameTransformer, self).__init__()
+
+        self.max_bin = n_fft // 2
+        self.output_bin = n_fft // 2 + 1
+        self.stg1_low_band_net = FrameTransformer(2, channels, n_fft // 2, feedforward_dim=feedforward_dim, num_bands=num_bands, num_layers=num_layers, cropsize=cropsize, bias=bias, out=False)
+        self.stg1_high_band_net = FrameTransformer(2, channels, n_fft // 2, feedforward_dim=feedforward_dim, num_bands=num_bands, num_layers=num_layers, cropsize=cropsize, bias=bias, out=False)
+        self.stg2_low_band_net = FrameTransformer(channels + 2, channels, n_fft // 2, feedforward_dim=feedforward_dim, num_bands=num_bands, num_layers=num_layers, cropsize=cropsize, bias=bias, out=False)
+        self.stg2_high_band_net = FrameTransformer(channels + 2, channels, n_fft // 2, feedforward_dim=feedforward_dim, num_bands=num_bands, num_layers=num_layers, cropsize=cropsize, bias=bias, out=False)
+        self.stg3_full_band_net = FrameTransformer(channels * 2 + 2, channels, n_fft // 2, feedforward_dim=feedforward_dim, num_bands=num_bands, num_layers=num_layers, cropsize=cropsize, bias=bias, out=False)
+        self.out = nn.Linear(channels, 2)
+        self.aux_out = nn.Linear(channels * 2, 2)
+
+    def forward(self, x):
+        x = x[:, :, :self.max_bin]
+
+        bandw = x.size()[2] // 2
+        l1_in = x[:, :, :bandw]
+        h1_in = x[:, :, bandw:]
+        l1 = self.stg1_low_band_net(l1_in)
+        h1 = self.stg1_high_band_net(h1_in)
+        aux1 = torch.cat([l1, h1], dim=2)
+
+        l2_in = torch.cat([l1_in, l1], dim=1)
+        h2_in = torch.cat([h1_in, h1], dim=1)
+        l2 = self.stg2_low_band_net(l2_in)
+        h2 = self.stg2_high_band_net(h2_in)
+        aux2 = torch.cat([l2, h2], dim=2)
+
+        f3_in = torch.cat([x, aux1, aux2], dim=1)
+        f3 = self.stg3_full_band_net(f3_in)
+
+        mask = torch.sigmoid(self.out(f3.transpose(1,3)).transpose(1,3))
+        mask = F.pad(
+            input=mask,
+            pad=(0, 0, 0, self.output_bin - mask.size()[2]),
+            mode='replicate'
+        )
+
+        if self.training:
+            aux = torch.cat([aux1, aux2], dim=1)
+            aux = torch.sigmoid(self.aux_out(aux.transpose(1,3)).transpose(1,3))
+            aux = F.pad(
+                input=aux,
+                pad=(0, 0, 0, self.output_bin - aux.size()[2]),
+                mode='replicate'
+            )
+            return mask, aux
+        else:
+            return mask
         
 class Encoder(nn.Module):
     def __init__(self, nin, nout, kernel_size=3, stride=1, padding=1, activ=nn.LeakyReLU):

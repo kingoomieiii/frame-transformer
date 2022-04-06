@@ -16,7 +16,7 @@ from lib import spec_utils
 
 from tqdm import tqdm
 
-from lib.frame_transformer import FrameTransformer
+from lib.frame_transformer import FrameTransformer, CascadedFrameTransformer
 
 def setup_logger(name, logfile='LOGFILENAME.log'):
     logger = logging.getLogger(name)
@@ -50,9 +50,12 @@ def train_epoch(dataloader, model, device, optimizer, accumulation_steps, grad_s
         y_batch = y_batch.to(device)
 
         with torch.cuda.amp.autocast_mode.autocast():
-            pred = model(X_batch)
+            pred, aux = model(X_batch)
 
-        loss = crit(pred * X_batch, y_batch)
+        loss_pred = crit(pred * X_batch, y_batch)
+        loss_aux = crit(aux * X_batch, y_batch)
+        loss = loss_pred * 0.8 + loss_aux * 0.2
+
         accum_loss = loss / accumulation_steps
         batch_loss = batch_loss + accum_loss
 
@@ -129,7 +132,7 @@ def main():
     p.add_argument('--lr_warmup_steps', '-LW', type=int, default=4)
     p.add_argument('--lr_warmup_current_step', type=int, default=0)
     p.add_argument('--channels', type=int, default=8)
-    p.add_argument('--num_layers', type=int, defualt=12)
+    p.add_argument('--num_layers', type=int, default=12)
     p.add_argument('--num_encoders', type=int, default=2)
     p.add_argument('--num_decoders', type=int, default=3)
     p.add_argument('--num_bands', type=str, default=8)
@@ -164,7 +167,8 @@ def main():
     device = torch.device('cpu')
 
     # 8 is used for the width here as it seems to be a sweet spot; using a larger channel count doesn't seem to help and just adds computational cost, and using a lower width starts to impact the frame transformers accuracy.
-    model = FrameTransformer(channels=args.channels, n_fft=args.n_fft, num_layers=args.num_layers, num_bands=args.num_bands, feedforward_dim=args.feedforward_dim, bias=args.bias, cropsize=args.cropsize)
+    #model = FrameTransformer(channels=args.channels, n_fft=args.n_fft, num_layers=args.num_layers, num_bands=args.num_bands, feedforward_dim=args.feedforward_dim, bias=args.bias, cropsize=args.cropsize)
+    model = CascadedFrameTransformer(channels=args.channels, n_fft=args.n_fft, num_layers=args.num_layers, num_bands=args.num_bands, feedforward_dim=args.feedforward_dim, bias=args.bias, cropsize=args.cropsize)
 
     if args.pretrained_model is not None:
         model.load_state_dict(torch.load(args.pretrained_model, map_location=device))
