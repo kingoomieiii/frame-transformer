@@ -6,7 +6,7 @@ from lib import spec_utils
 
 class FrameTransformer(nn.Module):
     def __init__(self, channels, n_fft=2048, feedforward_dim=512, num_bands=4, num_encoders=1, num_decoders=1, cropsize=256, bias=False):
-        super(FrameTransformer2, self).__init__()
+        super(FrameTransformer, self).__init__()
         self.max_bin = n_fft // 2
         self.output_bin = n_fft // 2 + 1
 
@@ -37,7 +37,8 @@ class FrameTransformer(nn.Module):
         self.dec1_transformer = nn.ModuleList([FrameTransformerDecoder(channels * 2 + i, channels * 2 + num_encoders, num_bands, cropsize, n_fft, downsamples=1, feedforward_dim=feedforward_dim, bias=bias) for i in range(num_decoders)])
         self.dec1 = Decoder(channels * (1 + 2) + num_decoders + num_encoders, channels * 1, kernel_size=3, padding=1)
 
-        self.out_transformer = nn.ModuleList([FrameTransformerDecoder(channels + i, channels + num_encoders, num_bands, cropsize, n_fft, downsamples=0, feedforward_dim=feedforward_dim, bias=bias) for i in range(2)])
+        #self.out_transformer = nn.ModuleList([FrameTransformerDecoder(channels + i, channels + num_encoders, num_bands, cropsize, n_fft, downsamples=0, feedforward_dim=feedforward_dim, bias=bias) for i in range(2)])
+        self.out = nn.Linear(channels, 2, bias=bias)
 
     def __call__(self, x):
         x = x[:, :, :self.max_bin]
@@ -87,12 +88,14 @@ class FrameTransformer(nn.Module):
             t = module(h, mem=e2)
             h = torch.cat((h, t), dim=1)
 
-        out = None
-        h = self.dec1(h, e1)
-        for i, module in enumerate(self.out_transformer):
-            t = module(h, mem=e1)
-            h = torch.cat((h, t), dim=1)
-            out = torch.cat((out, t), dim=1) if out is not None else t
+        out = self.out(self.dec1(h, e1).transpose(1,3)).transpose(1,3)
+
+        # out = None
+        # h = self.dec1(h, e1)
+        # for i, module in enumerate(self.out_transformer):
+        #     t = module(h, mem=e1)
+        #     h = torch.cat((h, t), dim=1)
+        #     out = torch.cat((out, t), dim=1) if out is not None else t
 
         return F.pad(
             input=torch.sigmoid(out),
