@@ -130,7 +130,7 @@ def main():
     p.add_argument('--lr_warmup_current_step', type=int, default=0)
     p.add_argument('--channels', type=int, default=8)
     p.add_argument('--num_encoders', type=int, default=2)
-    p.add_argument('--num_decoders', type=int, default=3)
+    p.add_argument('--num_decoders', type=int, default=4)
     p.add_argument('--num_bands', type=str, default=8)
     p.add_argument('--feedforward_dim', type=int, default=2048)
     p.add_argument('--bias', type=str, default='true')
