@@ -41,33 +41,33 @@ class FrameTransformer(nn.Module):
         e5 = self.enc5(e4)
 
         h = e5
-        hs1a, hm1a, hs2a, hm2a = None, None, None, None
+        sa1, ea1, sa2, ea2 = None, None, None, None
         for module in self.dec4_transformer:
-            t, hs1a, hm1a, hs2a, hm2a = module(h, mem=e5, hs1a=hs1a, hm1a=hm1a, hs2a=hs2a, hm2a=hm2a)
+            t, sa1, ea1, sa2, ea2 = module(h, mem=e5, hs1a=sa1, hm1a=ea1, hs2a=sa2, hm2a=ea2)
             h = torch.cat((h, t), dim=1)
         
         h = self.dec4(h, e4)        
-        hs1a, hm1a, hs2a, hm2a = None, None, None, None
+        sa1, ea1, sa2, ea2 = None, None, None, None
         for module in self.dec3_transformer:
-            t, hs1a, hm1a, hs2a, hm2a = module(h, mem=e4, hs1a=hs1a, hm1a=hm1a, hs2a=hs2a, hm2a=hm2a)
+            t, sa1, ea1, sa2, ea2 = module(h, mem=e4, hs1a=sa1, hm1a=ea1, hs2a=sa2, hm2a=ea2)
             h = torch.cat((h, t), dim=1)
 
         h = self.dec3(h, e3)        
-        hs1a, hm1a, hs2a, hm2a = None, None, None, None
+        sa1, ea1, sa2, ea2 = None, None, None, None
         for module in self.dec2_transformer:
-            t, hs1a, hm1a, hs2a, hm2a = module(h, mem=e3, hs1a=hs1a, hm1a=hm1a, hs2a=hs2a, hm2a=hm2a)
+            t, sa1, ea1, sa2, ea2 = module(h, mem=e3, hs1a=sa1, hm1a=ea1, hs2a=sa2, hm2a=ea2)
             h = torch.cat((h, t), dim=1)
 
         h = self.dec2(h, e2)        
-        hs1a, hm1a, hs2a, hm2a = None, None, None, None
+        sa1, ea1, sa2, ea2 = None, None, None, None
         for module in self.dec1_transformer:
-            t, hs1a, hm1a, hs2a, hm2a = module(h, mem=e2, hs1a=hs1a, hm1a=hm1a, hs2a=hs2a, hm2a=hm2a)
+            t, sa1, ea1, sa2, ea2 = module(h, mem=e2, hs1a=sa1, hm1a=ea1, hs2a=sa2, hm2a=ea2)
             h = torch.cat((h, t), dim=1)
 
         h = self.dec1(h, e1)
-        hs1a, hm1a, hs2a, hm2a = None, None, None, None
+        sa1, ea1, sa2, ea2 = None, None, None, None
         for module in self.out_transformer:
-            t, hs1a, hm1a, hs2a, hm2a = module(h, mem=e1, hs1a=hs1a, hm1a=hm1a, hs2a=hs2a, hm2a=hm2a)
+            t, sa1, ea1, sa2, ea2 = module(h, mem=e1, hs1a=sa1, hm1a=ea1, hs2a=sa2, hm2a=ea2)
             h = torch.cat((h, t), dim=1)
 
         return F.pad(
@@ -134,7 +134,7 @@ class Decoder(nn.Module):
             h = self.dropout(h)
 
         return h
-        
+
 class FrameTransformerEncoder(nn.Module):
     def __init__(self, channels, num_bands=4, cropsize=256, n_fft=2048, feedforward_dim=2048, downsamples=0, bias=False, dropout=0.1):
         super(FrameTransformerEncoder, self).__init__()
@@ -255,7 +255,7 @@ class FrameTransformerDecoder(nn.Module):
         self.norm6 = nn.LayerNorm(bins)
         self.dropout5 = nn.Dropout(dropout)
 
-    def __call__(self, x, mem, hs1a=None, hm1a=None, hs2a=None, hm2a=None):
+    def __call__(self, x, mem, sa1=None, ea1=None, sa2=None, ea2=None):
         x = self.relu(self.bottleneck_norm(self.bottleneck_linear(x.transpose(1,3)).transpose(1,3)))
         mem = self.relu(self.mem_bottleneck_norm(self.mem_bottleneck_linear(mem.transpose(1,3)).transpose(1,3)))
         b,_,h,w = x.shape
@@ -263,8 +263,8 @@ class FrameTransformerDecoder(nn.Module):
         x = x.transpose(2,3).reshape(b,w,h)
         mem = mem.transpose(2,3).reshape(b,w,h)
 
-        hs1, hs1a = self.self_attn1(x, prev=hs1a)
-        hm1, hm1a = self.enc_attn1(x, mem=mem, prev=hm1a)
+        hs1, sa1 = self.self_attn1(x, prev=sa1)
+        hm1, ea1 = self.enc_attn1(x, mem=mem, prev=ea1)
         x = self.norm1(x + self.dropout1(hs1 + hm1))
 
         hL = self.relu(self.conv1L(x.transpose(1,2)).transpose(1,2))
@@ -274,11 +274,11 @@ class FrameTransformerDecoder(nn.Module):
         h = self.dropout2(self.conv2(h.transpose(1,2)).transpose(1,2))
         x = self.norm3(x + h)
 
-        hs2, hs2a = self.self_attn2(x, prev=hs2a)
+        hs2, sa2 = self.self_attn2(x, prev=sa2)
         hs2 = self.dropout3(hs2)
         x = self.norm4(x + hs2)
 
-        hm2, hm2a = self.enc_attn2(x, mem=mem, prev=hm2a)
+        hm2, ea2 = self.enc_attn2(x, mem=mem, prev=ea2)
         hm2 = self.dropout4(hm2)
         x = self.norm5(x + hm2)
 
@@ -287,7 +287,7 @@ class FrameTransformerDecoder(nn.Module):
         h = self.dropout5(self.conv4(h))
         x = self.norm6(x + h)
                 
-        return x.transpose(1, 2).unsqueeze(1), hs1a, hm1a, hs2a, hm2a
+        return x.transpose(1, 2).unsqueeze(1), sa1, ea1, sa2, ea2
 
 class MultibandFrameAttention(nn.Module):
     def __init__(self, num_bands, bins, cropsize):
