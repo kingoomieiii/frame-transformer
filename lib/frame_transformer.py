@@ -5,7 +5,7 @@ import math
 from lib import spec_utils
 
 class FrameTransformer(nn.Module):
-    def __init__(self, channels, n_fft=2048, feedforward_dim=512, num_bands=4, num_encoders=1, num_decoders=1, cropsize=256, bias=False):
+    def __init__(self, channels, n_fft=2048, feedforward_dim=512, num_bands=8, num_decoders=1, cropsize=256, bias=False):
         super(FrameTransformer, self).__init__()
         self.max_bin = n_fft // 2
         self.output_bin = n_fft // 2 + 1
@@ -41,28 +41,33 @@ class FrameTransformer(nn.Module):
         e5 = self.enc5(e4)
 
         h = e5
+        hs1a, hm1a, hs2a, hm2a = None, None, None, None
         for module in self.dec4_transformer:
-            t = module(h, mem=e5)
+            t, hs1a, hm1a, hs2a, hm2a = module(h, mem=e5, hs1a=hs1a, hm1a=hm1a, hs2a=hs2a, hm2a=hm2a)
             h = torch.cat((h, t), dim=1)
         
         h = self.dec4(h, e4)        
+        hs1a, hm1a, hs2a, hm2a = None, None, None, None
         for module in self.dec3_transformer:
-            t = module(h, mem=e4)
+            t, hs1a, hm1a, hs2a, hm2a = module(h, mem=e4, hs1a=hs1a, hm1a=hm1a, hs2a=hs2a, hm2a=hm2a)
             h = torch.cat((h, t), dim=1)
 
         h = self.dec3(h, e3)        
+        hs1a, hm1a, hs2a, hm2a = None, None, None, None
         for module in self.dec2_transformer:
-            t = module(h, mem=e3)
+            t, hs1a, hm1a, hs2a, hm2a = module(h, mem=e3, hs1a=hs1a, hm1a=hm1a, hs2a=hs2a, hm2a=hm2a)
             h = torch.cat((h, t), dim=1)
 
         h = self.dec2(h, e2)        
+        hs1a, hm1a, hs2a, hm2a = None, None, None, None
         for module in self.dec1_transformer:
-            t = module(h, mem=e2)
+            t, hs1a, hm1a, hs2a, hm2a = module(h, mem=e2, hs1a=hs1a, hm1a=hm1a, hs2a=hs2a, hm2a=hm2a)
             h = torch.cat((h, t), dim=1)
 
         h = self.dec1(h, e1)
+        hs1a, hm1a, hs2a, hm2a = None, None, None, None
         for module in self.out_transformer:
-            t = module(h, mem=e1)
+            t, hs1a, hm1a, hs2a, hm2a = module(h, mem=e1, hs1a=hs1a, hm1a=hm1a, hs2a=hs2a, hm2a=hm2a)
             h = torch.cat((h, t), dim=1)
 
         return F.pad(
@@ -70,6 +75,33 @@ class FrameTransformer(nn.Module):
             pad=(0, 0, 0, self.output_bin - self.max_bin),
             mode='replicate'
         )
+
+class FrameConv(nn.Module):
+    def __init__(self, in_channels, out_channels, kernel_size=3, stride=1, padding=1, dilation=1, groups=1, activate=nn.ReLU, norm=True):
+        super(FrameConv, self).__init__()
+
+        self.conv = nn.Conv2d(
+                in_channels, out_channels,
+                kernel_size=(kernel_size, 1),
+                stride=(stride, 1),
+                padding=(padding, 0),
+                dilation=(dilation, 1),
+                groups=groups,
+                bias=False)
+
+        self.norm = nn.BatchNorm2d(out_channels) if norm else None
+        self.activate = activate(inplace=True) if activate is not None else None
+
+    def __call__(self, x):
+        h = self.conv(x)
+        
+        if self.norm is not None:
+            h = self.norm(h)
+
+        if self.activate is not None:
+            h = self.activate(h)
+
+        return h
         
 class Encoder(nn.Module):
     def __init__(self, nin, nout, kernel_size=3, stride=1, padding=1, activ=nn.LeakyReLU):
@@ -102,7 +134,7 @@ class Decoder(nn.Module):
             h = self.dropout(h)
 
         return h
-
+        
 class FrameTransformerEncoder(nn.Module):
     def __init__(self, channels, num_bands=4, cropsize=256, n_fft=2048, feedforward_dim=2048, downsamples=0, bias=False, dropout=0.1):
         super(FrameTransformerEncoder, self).__init__()
@@ -194,7 +226,7 @@ class FrameTransformerDecoder(nn.Module):
         self.self_attn1 = MultibandFrameAttention(num_bands, bins, cropsize)
         self.enc_attn1 = MultibandFrameAttention(num_bands, bins, cropsize)
         self.norm1 = nn.LayerNorm(bins)
-        self.dropout1 = nn.Dropout(dropout) if dropout > 0 else nn.Identity()
+        self.dropout1 = nn.Dropout(dropout)
 
         self.conv1L = nn.Sequential(
             nn.Conv1d(bins, bins, kernel_size=11, padding=5, groups=bins, bias=bias),
@@ -207,23 +239,23 @@ class FrameTransformerDecoder(nn.Module):
             nn.Conv1d(feedforward_dim*2, feedforward_dim*2, kernel_size=7, padding=3, groups=feedforward_dim, bias=bias),
             nn.Conv1d(feedforward_dim*2, bins, kernel_size=1, padding=0, bias=bias))
         self.norm3 = nn.LayerNorm(bins)
-        self.dropout2 = nn.Dropout(dropout) if dropout > 0 else nn.Identity()
+        self.dropout2 = nn.Dropout(dropout)
 
         self.self_attn2 = MultibandFrameAttention(num_bands, bins, cropsize)
         self.norm4 = nn.LayerNorm(bins)
-        self.dropout3 = nn.Dropout(dropout) if dropout > 0 else nn.Identity()
+        self.dropout3 = nn.Dropout(dropout)
 
         self.enc_attn2 = MultibandFrameAttention(num_bands, bins, cropsize)
         self.norm5 = nn.LayerNorm(bins)
-        self.dropout4 = nn.Dropout(dropout) if dropout > 0 else nn.Identity()
+        self.dropout4 = nn.Dropout(dropout)
 
         self.conv3 = nn.Linear(bins, feedforward_dim * 2, bias=bias)
         self.swish = nn.SiLU(inplace=True)
         self.conv4 = nn.Linear(feedforward_dim * 2, bins, bias=bias)
         self.norm6 = nn.LayerNorm(bins)
-        self.dropout5 = nn.Dropout(dropout) if dropout > 0 else nn.Identity()
+        self.dropout5 = nn.Dropout(dropout)
 
-    def __call__(self, x, mem):
+    def __call__(self, x, mem, hs1a=None, hm1a=None, hs2a=None, hm2a=None):
         x = self.relu(self.bottleneck_norm(self.bottleneck_linear(x.transpose(1,3)).transpose(1,3)))
         mem = self.relu(self.mem_bottleneck_norm(self.mem_bottleneck_linear(mem.transpose(1,3)).transpose(1,3)))
         b,_,h,w = x.shape
@@ -231,9 +263,9 @@ class FrameTransformerDecoder(nn.Module):
         x = x.transpose(2,3).reshape(b,w,h)
         mem = mem.transpose(2,3).reshape(b,w,h)
 
-        hs = self.self_attn1(x)
-        hm = self.enc_attn1(x, mem=mem)
-        x = self.norm1(x + self.dropout1(hs + hm))
+        hs1, hs1a = self.self_attn1(x, prev=hs1a)
+        hm1, hm1a = self.enc_attn1(x, mem=mem, prev=hm1a)
+        x = self.norm1(x + self.dropout1(hs1 + hm1))
 
         hL = self.relu(self.conv1L(x.transpose(1,2)).transpose(1,2))
         hR = self.conv1R(x.transpose(1,2)).transpose(1,2)
@@ -242,82 +274,52 @@ class FrameTransformerDecoder(nn.Module):
         h = self.dropout2(self.conv2(h.transpose(1,2)).transpose(1,2))
         x = self.norm3(x + h)
 
-        h = self.dropout3(self.self_attn2(x))
-        x = self.norm4(x + h)
+        hs2, hs2a = self.self_attn2(x, prev=hs2a)
+        hs2 = self.dropout3(hs2)
+        x = self.norm4(x + hs2)
 
-        h = self.dropout4(self.enc_attn2(x, mem=mem))
-        x = self.norm5(x + h)
+        hm2, hm2a = self.enc_attn2(x, mem=mem, prev=hm2a)
+        hm2 = self.dropout4(hm2)
+        x = self.norm5(x + hm2)
 
         h = self.conv3(x)
         h = self.swish(h)
         h = self.dropout5(self.conv4(h))
         x = self.norm6(x + h)
                 
-        return x.transpose(1, 2).unsqueeze(1)
+        return x.transpose(1, 2).unsqueeze(1), hs1a, hm1a, hs2a, hm2a
 
 class MultibandFrameAttention(nn.Module):
     def __init__(self, num_bands, bins, cropsize):
         super().__init__()
 
         self.num_bands = num_bands
-
-        # need to test bias here further; bias appears to cause issues with learning when used here and I'm curious as to why
         self.q_proj = nn.Linear(bins, bins)
         self.k_proj = nn.Linear(bins, bins)
         self.v_proj = nn.Linear(bins, bins)
         self.o_proj = nn.Linear(bins, bins)
-
         self.er = nn.Parameter(torch.empty(bins // num_bands, cropsize))
-        nn.init.kaiming_uniform_(self.er, a=math.sqrt(5))
-
-        # will probably be trying just standard fixed relative positional encoding in order to be able
-        # to extrapolate to new sequence lengths without having to retrain
-
-        # I don't actually know if this helps (doesn't seem to hurt though); the general idea was to allow each band to focus on different regions in relation to its position to allow for some locality to be learned if useful.
-        self.register_buffer('distances', torch.empty(num_bands, cropsize, cropsize))
         self.distance_weight = nn.Parameter(torch.empty(num_bands).unsqueeze(1).expand((-1, cropsize)).unsqueeze(2).clone())
+        self.register_buffer('distances', torch.empty(num_bands, cropsize, cropsize))
+        nn.init.kaiming_uniform_(self.er, a=math.sqrt(5))
         nn.init.kaiming_uniform_(self.distance_weight, a=math.sqrt(5.0))
 
         for i in range(cropsize):
             for j in range(cropsize):
-                self.distances[:, i, j] = abs(i - j) / 2
+                self.distances[:, i, j] = abs(i - j)
 
-    def forward(self, x, mem=None):
-        b,w,c = x.shape
+    def forward(self, x, mem=None, prev=None):
+        b,w,h = x.shape
         q = self.q_proj(x).reshape(b, w, self.num_bands, -1).permute(0,2,1,3)
         k = self.k_proj(x if mem is None else mem).reshape(b, w, self.num_bands, -1).permute(0,2,3,1)
         v = self.v_proj(x if mem is None else mem).reshape(b, w, self.num_bands, -1).permute(0,2,1,3)
+
         p = (self.distances * self.distance_weight) + F.pad(torch.matmul(q,self.er), (1,0)).transpose(2,3)[:,:,1:,:]
-        #qk = (torch.matmul(q,k) + p) / math.sqrt(c)
-        qk = torch.matmul(q,k) / math.sqrt(c)
-        a = F.softmax(qk+p, dim=-1)
-        a = torch.matmul(a,v).transpose(1,2).reshape(b,w,-1)
-        o = self.o_proj(a)
-        return o
+        a = (torch.matmul(q,k)+p) / math.sqrt(h)
+        a = a + prev if prev is not None else a
+        attn = F.softmax(a, dim=-1)
 
-class FrameConv(nn.Module):
-    def __init__(self, in_channels, out_channels, kernel_size=3, stride=1, padding=1, dilation=1, groups=1, activate=nn.ReLU, norm=True):
-        super(FrameConv, self).__init__()
+        v = torch.matmul(attn,v).transpose(1,2).reshape(b,w,-1)
+        o = self.o_proj(v)
 
-        self.conv = nn.Conv2d(
-                in_channels, out_channels,
-                kernel_size=(kernel_size, 1),
-                stride=(stride, 1),
-                padding=(padding, 0),
-                dilation=(dilation, 1),
-                groups=groups,
-                bias=False)
-
-        self.norm = nn.BatchNorm2d(out_channels) if norm else None
-        self.activate = activate(inplace=True) if activate is not None else None
-
-    def __call__(self, x):
-        h = self.conv(x)
-        
-        if self.norm is not None:
-            h = self.norm(h)
-
-        if self.activate is not None:
-            h = self.activate(h)
-
-        return h
+        return o, a

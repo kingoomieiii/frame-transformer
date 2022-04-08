@@ -129,19 +129,18 @@ def main():
     p.add_argument('--lr_warmup_steps', '-LW', type=int, default=4)
     p.add_argument('--lr_warmup_current_step', type=int, default=0)
     p.add_argument('--channels', type=int, default=8)
-    p.add_argument('--num_encoders', type=int, default=2)
     p.add_argument('--num_decoders', type=int, default=4)
     p.add_argument('--num_bands', type=int, default=8)
     p.add_argument('--feedforward_dim', type=int, default=2048)
     p.add_argument('--bias', type=str, default='true')
     p.add_argument('--debug', action='store_true')
-    p.add_argument('--session_name', type=str, default='')
+    p.add_argument('--id', type=str, default='')
     args = p.parse_args()
 
     args.progress_bar = str.lower(args.progress_bar) == 'true'
     args.bias = str.lower(args.bias) == 'true'
 
-    logger.info(f'feedforward_dim={args.feedforward_dim}, num_encoders={args.num_encoders}, num_decoders={args.num_decoders}, num_bands={args.num_bands}, channels={args.channels}')
+    logger.info(f'id={args.id} feedforward_dim={args.feedforward_dim}, num_decoders={args.num_decoders}, num_bands={args.num_bands}, channels={args.channels}')
 
     random.seed(args.seed)
     np.random.seed(args.seed)
@@ -164,7 +163,7 @@ def main():
     device = torch.device('cpu')
 
     # 8 is used for the width here as it seems to be a sweet spot; using a larger channel count doesn't seem to help and just adds computational cost, and using a lower width starts to impact the frame transformers accuracy.
-    model = FrameTransformer(channels=args.channels, n_fft=args.n_fft, num_encoders=args.num_encoders, num_decoders=args.num_decoders, num_bands=args.num_bands, feedforward_dim=args.feedforward_dim, bias=args.bias, cropsize=args.cropsize)
+    model = FrameTransformer(channels=args.channels, n_fft=args.n_fft, num_decoders=args.num_decoders, num_bands=args.num_bands, feedforward_dim=args.feedforward_dim, bias=args.bias, cropsize=args.cropsize)
 
     if args.pretrained_model is not None:
         model.load_state_dict(torch.load(args.pretrained_model, map_location=device))
