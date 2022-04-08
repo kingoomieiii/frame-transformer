@@ -43,31 +43,31 @@ class FrameTransformer(nn.Module):
         h = e5
         sa1, ea1, sa2, ea2 = None, None, None, None
         for module in self.dec4_transformer:
-            t, sa1, ea1, sa2, ea2 = module(h, mem=e5, hs1a=sa1, hm1a=ea1, hs2a=sa2, hm2a=ea2)
+            t, sa1, ea1, sa2, ea2 = module(h, mem=e5, sa1=sa1, ea1=ea1, sa2=sa2, ea2=ea2)
             h = torch.cat((h, t), dim=1)
         
         h = self.dec4(h, e4)        
         sa1, ea1, sa2, ea2 = None, None, None, None
         for module in self.dec3_transformer:
-            t, sa1, ea1, sa2, ea2 = module(h, mem=e4, hs1a=sa1, hm1a=ea1, hs2a=sa2, hm2a=ea2)
+            t, sa1, ea1, sa2, ea2 = module(h, mem=e4, sa1=sa1, ea1=ea1, sa2=sa2, ea2=ea2)
             h = torch.cat((h, t), dim=1)
 
         h = self.dec3(h, e3)        
         sa1, ea1, sa2, ea2 = None, None, None, None
         for module in self.dec2_transformer:
-            t, sa1, ea1, sa2, ea2 = module(h, mem=e3, hs1a=sa1, hm1a=ea1, hs2a=sa2, hm2a=ea2)
+            t, sa1, ea1, sa2, ea2 = module(h, mem=e3, sa1=sa1, ea1=ea1, sa2=sa2, ea2=ea2)
             h = torch.cat((h, t), dim=1)
 
         h = self.dec2(h, e2)        
         sa1, ea1, sa2, ea2 = None, None, None, None
         for module in self.dec1_transformer:
-            t, sa1, ea1, sa2, ea2 = module(h, mem=e2, hs1a=sa1, hm1a=ea1, hs2a=sa2, hm2a=ea2)
+            t, sa1, ea1, sa2, ea2 = module(h, mem=e2, sa1=sa1, ea1=ea1, sa2=sa2, ea2=ea2)
             h = torch.cat((h, t), dim=1)
 
         h = self.dec1(h, e1)
         sa1, ea1, sa2, ea2 = None, None, None, None
         for module in self.out_transformer:
-            t, sa1, ea1, sa2, ea2 = module(h, mem=e1, hs1a=sa1, hm1a=ea1, hs2a=sa2, hm2a=ea2)
+            t, sa1, ea1, sa2, ea2 = module(h, mem=e1, sa1=sa1, ea1=ea1, sa2=sa2, ea2=ea2)
             h = torch.cat((h, t), dim=1)
 
         return F.pad(
