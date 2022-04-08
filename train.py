@@ -141,9 +141,6 @@ def main():
     args.progress_bar = str.lower(args.progress_bar) == 'true'
     args.bias = str.lower(args.bias) == 'true'
 
-    if args.sesssion_name != '':
-        logger.info(f'session: {args.session_name}')
-
     logger.info(f'feedforward_dim={args.feedforward_dim}, num_encoders={args.num_encoders}, num_decoders={args.num_decoders}, num_bands={args.num_bands}, channels={args.channels}')
 
     random.seed(args.seed)

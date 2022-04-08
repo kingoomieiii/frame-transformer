@@ -40,34 +40,29 @@ class FrameTransformer(nn.Module):
         e4 = self.enc4(e3)
         e5 = self.enc5(e4)
 
-        t = None
         h = e5
         for module in self.dec4_transformer:
-            t = module(h, prev=t, mem=e5)
+            t = module(h, mem=e5)
             h = torch.cat((h, t), dim=1)
         
-        t = None    
         h = self.dec4(h, e4)        
         for module in self.dec3_transformer:
-            t = module(h, prev=t, mem=e4)
+            t = module(h, mem=e4)
             h = torch.cat((h, t), dim=1)
 
-        t = None
         h = self.dec3(h, e3)        
         for module in self.dec2_transformer:
-            t = module(h, prev=t, mem=e3)
+            t = module(h, mem=e3)
             h = torch.cat((h, t), dim=1)
 
-        t = None
         h = self.dec2(h, e2)        
         for module in self.dec1_transformer:
-            t = module(h, prev=t, mem=e2)
+            t = module(h, mem=e2)
             h = torch.cat((h, t), dim=1)
 
-        t = None
         h = self.dec1(h, e1)
         for module in self.out_transformer:
-            t = module(h, prev=t, mem=e1)
+            t = module(h, mem=e1)
             h = torch.cat((h, t), dim=1)
 
         return F.pad(
@@ -196,8 +191,6 @@ class FrameTransformerDecoder(nn.Module):
         self.mem_bottleneck_linear = nn.Linear(mem_channels, 1, bias=bias)
         self.mem_bottleneck_norm = nn.BatchNorm2d(1)
 
-        self.prev_norm = nn.BatchNorm2d(1) if prev else None
-
         self.self_attn1 = MultibandFrameAttention(num_bands, bins, cropsize)
         self.enc_attn1 = MultibandFrameAttention(num_bands, bins, cropsize)
         self.norm1 = nn.LayerNorm(bins)
@@ -230,14 +223,10 @@ class FrameTransformerDecoder(nn.Module):
         self.norm6 = nn.LayerNorm(bins)
         self.dropout5 = nn.Dropout(dropout) if dropout > 0 else nn.Identity()
 
-    def __call__(self, x, mem, prev=None):
+    def __call__(self, x, mem):
         x = self.relu(self.bottleneck_norm(self.bottleneck_linear(x.transpose(1,3)).transpose(1,3)))
         mem = self.relu(self.mem_bottleneck_norm(self.mem_bottleneck_linear(mem.transpose(1,3)).transpose(1,3)))
         b,_,h,w = x.shape
-
-        if prev is not None:
-            x = self.prev_norm(x + prev)
-            prev = prev.transpose(2,3).reshape(b,w,h)
 
         x = x.transpose(2,3).reshape(b,w,h)
         mem = mem.transpose(2,3).reshape(b,w,h)
