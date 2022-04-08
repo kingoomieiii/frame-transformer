@@ -131,16 +131,20 @@ def main():
     p.add_argument('--channels', type=int, default=8)
     p.add_argument('--num_encoders', type=int, default=2)
     p.add_argument('--num_decoders', type=int, default=4)
-    p.add_argument('--num_bands', type=str, default=8)
+    p.add_argument('--num_bands', type=int, default=8)
     p.add_argument('--feedforward_dim', type=int, default=2048)
     p.add_argument('--bias', type=str, default='true')
     p.add_argument('--debug', action='store_true')
+    p.add_argument('--session_name', type=str, default='')
     args = p.parse_args()
 
     args.progress_bar = str.lower(args.progress_bar) == 'true'
     args.bias = str.lower(args.bias) == 'true'
 
-    logger.debug(vars(args))
+    if args.sesssion_name != '':
+        logger.info(f'session: {args.session_name}')
+
+    logger.info(f'feedforward_dim={args.feedforward_dim}, num_encoders={args.num_encoders}, num_decoders={args.num_decoders}, num_bands={args.num_bands}, channels={args.channels}')
 
     random.seed(args.seed)
     np.random.seed(args.seed)
@@ -175,8 +179,7 @@ def main():
         path="C://cs256_sr44100_hl1024_nf2048_of0",
         extra_path="G://cs256_sr44100_hl1024_nf2048_of0",
         vocal_path="G://cs256_sr44100_hl1024_nf2048_of0_VOCALS",
-        is_validation=False,
-        #epoch_size=4096
+        is_validation=False
     )
 
     train_dataloader = torch.utils.data.DataLoader(
@@ -256,7 +259,7 @@ def main():
 
 
 if __name__ == '__main__':
-    timestamp = datetime.now().strftime('%Y%m%d%H%M%S')
+    timestamp = datetime.now().strftime('%Y.%m.%d-%H.%M.%S')
     logger = setup_logger(__name__, 'train_{}.log'.format(timestamp))
 
     try:

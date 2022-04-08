@@ -16,19 +16,19 @@ class FrameTransformer(nn.Module):
         self.enc4 = Encoder(channels * 4, channels * 6, kernel_size=3, stride=2, padding=1)
         self.enc5 = Encoder(channels * 6, channels * 8, kernel_size=3, stride=2, padding=1)
         
-        self.dec4_transformer = nn.ModuleList([FrameTransformerDecoder(channels * 8 + i, channels * 8, num_bands, cropsize, n_fft, downsamples=4, feedforward_dim=feedforward_dim, bias=bias) for i in range(num_decoders)])
+        self.dec4_transformer = nn.ModuleList([FrameTransformerDecoder(channels * 8 + i, channels * 8, num_bands, cropsize, n_fft, downsamples=4, feedforward_dim=feedforward_dim, bias=bias, prev=i>0) for i in range(num_decoders)])
         self.dec4 = Decoder(channels * (6 + 8) + num_decoders, channels * 6, kernel_size=3, padding=1)
 
-        self.dec3_transformer = nn.ModuleList([FrameTransformerDecoder(channels * 6 + i, channels * 6, num_bands, cropsize, n_fft, downsamples=3, feedforward_dim=feedforward_dim, bias=bias) for i in range(num_decoders)])
+        self.dec3_transformer = nn.ModuleList([FrameTransformerDecoder(channels * 6 + i, channels * 6, num_bands, cropsize, n_fft, downsamples=3, feedforward_dim=feedforward_dim, bias=bias, prev=i>0) for i in range(num_decoders)])
         self.dec3 = Decoder(channels * (4 + 6) + num_decoders, channels * 4, kernel_size=3, padding=1)
 
-        self.dec2_transformer = nn.ModuleList([FrameTransformerDecoder(channels * 4 + i, channels * 4, num_bands, cropsize, n_fft, downsamples=2, feedforward_dim=feedforward_dim, bias=bias) for i in range(num_decoders)])
+        self.dec2_transformer = nn.ModuleList([FrameTransformerDecoder(channels * 4 + i, channels * 4, num_bands, cropsize, n_fft, downsamples=2, feedforward_dim=feedforward_dim, bias=bias, prev=i>0) for i in range(num_decoders)])
         self.dec2 = Decoder(channels * (2 + 4) + num_decoders, channels * 2, kernel_size=3, padding=1)
 
-        self.dec1_transformer = nn.ModuleList([FrameTransformerDecoder(channels * 2 + i, channels * 2, num_bands, cropsize, n_fft, downsamples=1, feedforward_dim=feedforward_dim, bias=bias) for i in range(num_decoders)])
+        self.dec1_transformer = nn.ModuleList([FrameTransformerDecoder(channels * 2 + i, channels * 2, num_bands, cropsize, n_fft, downsamples=1, feedforward_dim=feedforward_dim, bias=bias, prev=i>0) for i in range(num_decoders)])
         self.dec1 = Decoder(channels * (1 + 2) + num_decoders, channels * 1, kernel_size=3, padding=1)
 
-        self.out_transformer = nn.ModuleList([FrameTransformerDecoder(channels + i, channels, num_bands, cropsize, n_fft, downsamples=0, feedforward_dim=feedforward_dim, bias=bias) for i in range(num_decoders)])
+        self.out_transformer = nn.ModuleList([FrameTransformerDecoder(channels + i, channels, num_bands, cropsize, n_fft, downsamples=0, feedforward_dim=feedforward_dim, bias=bias, prev=i>0) for i in range(num_decoders)])
         self.out = nn.Linear(channels + num_decoders, 2, bias=bias)
 
     def __call__(self, x):
@@ -40,36 +40,39 @@ class FrameTransformer(nn.Module):
         e4 = self.enc4(e3)
         e5 = self.enc5(e4)
 
+        t = None
         h = e5
         for module in self.dec4_transformer:
-            t = module(h, mem=e5)
+            t = module(h, prev=t, mem=e5)
             h = torch.cat((h, t), dim=1)
-            
+        
+        t = None    
         h = self.dec4(h, e4)        
         for module in self.dec3_transformer:
-            t = module(h, mem=e4)
+            t = module(h, prev=t, mem=e4)
             h = torch.cat((h, t), dim=1)
 
+        t = None
         h = self.dec3(h, e3)        
         for module in self.dec2_transformer:
-            t = module(h, mem=e3)
+            t = module(h, prev=t, mem=e3)
             h = torch.cat((h, t), dim=1)
 
+        t = None
         h = self.dec2(h, e2)        
         for module in self.dec1_transformer:
-            t = module(h, mem=e2)
+            t = module(h, prev=t, mem=e2)
             h = torch.cat((h, t), dim=1)
 
+        t = None
         h = self.dec1(h, e1)
         for module in self.out_transformer:
-            t = module(h, mem=e1)
+            t = module(h, prev=t, mem=e1)
             h = torch.cat((h, t), dim=1)
 
-        out = self.out(h.transpose(1,3)).transpose(1,3)
-
         return F.pad(
-            input=torch.sigmoid(out),
-            pad=(0, 0, 0, self.output_bin - out.size()[2]),
+            input=torch.sigmoid(self.out(h.transpose(1,3)).transpose(1,3)),
+            pad=(0, 0, 0, self.output_bin - self.max_bin),
             mode='replicate'
         )
         
@@ -174,7 +177,7 @@ class FrameTransformerEncoder(nn.Module):
         return x.transpose(1, 2).unsqueeze(1)
 
 class FrameTransformerDecoder(nn.Module):
-    def __init__(self, channels, mem_channels, num_bands=4, cropsize=256, n_fft=2048, feedforward_dim=2048, downsamples=0, bias=False, dropout=0.1):
+    def __init__(self, channels, mem_channels, num_bands=4, cropsize=256, n_fft=2048, feedforward_dim=2048, downsamples=0, bias=False, dropout=0.1, prev=False):
         super(FrameTransformerDecoder, self).__init__()
 
         bins = (n_fft // 2)
@@ -187,11 +190,13 @@ class FrameTransformerDecoder(nn.Module):
         self.num_bands = num_bands
 
         self.relu = nn.ReLU(inplace=True)
-        
+
         self.bottleneck_linear = nn.Linear(channels, 1, bias=bias)
         self.bottleneck_norm = nn.BatchNorm2d(1)
         self.mem_bottleneck_linear = nn.Linear(mem_channels, 1, bias=bias)
         self.mem_bottleneck_norm = nn.BatchNorm2d(1)
+
+        self.prev_norm = nn.BatchNorm2d(1) if prev else None
 
         self.self_attn1 = MultibandFrameAttention(num_bands, bins, cropsize)
         self.enc_attn1 = MultibandFrameAttention(num_bands, bins, cropsize)
@@ -200,14 +205,14 @@ class FrameTransformerDecoder(nn.Module):
 
         self.conv1L = nn.Sequential(
             nn.Conv1d(bins, bins, kernel_size=11, padding=5, groups=bins, bias=bias),
-            nn.Conv1d(bins, feedforward_dim * 2, kernel_size=1, padding=0, bias=bias))
+            nn.Conv1d(bins, feedforward_dim*2, kernel_size=1, padding=0, bias=bias))
         self.conv1R = nn.Sequential(
             nn.Conv1d(bins, bins, kernel_size=7, padding=3, groups=bins, bias=bias),
             nn.Conv1d(bins, feedforward_dim // 2, kernel_size=1, padding=0, bias=bias))
-        self.norm2 = nn.LayerNorm(feedforward_dim * 2)
+        self.norm2 = nn.LayerNorm(feedforward_dim*2)
         self.conv2 = nn.Sequential(
-            nn.Conv1d(feedforward_dim * 2, feedforward_dim * 2, kernel_size=7, padding=3, groups=feedforward_dim*2, bias=bias),
-            nn.Conv1d(feedforward_dim * 2, bins, kernel_size=1, padding=0, bias=bias))
+            nn.Conv1d(feedforward_dim*2, feedforward_dim*2, kernel_size=7, padding=3, groups=feedforward_dim, bias=bias),
+            nn.Conv1d(feedforward_dim*2, bins, kernel_size=1, padding=0, bias=bias))
         self.norm3 = nn.LayerNorm(bins)
         self.dropout2 = nn.Dropout(dropout) if dropout > 0 else nn.Identity()
 
@@ -225,11 +230,15 @@ class FrameTransformerDecoder(nn.Module):
         self.norm6 = nn.LayerNorm(bins)
         self.dropout5 = nn.Dropout(dropout) if dropout > 0 else nn.Identity()
 
-    def __call__(self, x, mem):
+    def __call__(self, x, mem, prev=None):
         x = self.relu(self.bottleneck_norm(self.bottleneck_linear(x.transpose(1,3)).transpose(1,3)))
         mem = self.relu(self.mem_bottleneck_norm(self.mem_bottleneck_linear(mem.transpose(1,3)).transpose(1,3)))
+        b,_,h,w = x.shape
 
-        b, _, h, w = x.shape
+        if prev is not None:
+            x = self.prev_norm(x + prev)
+            prev = prev.transpose(2,3).reshape(b,w,h)
+
         x = x.transpose(2,3).reshape(b,w,h)
         mem = mem.transpose(2,3).reshape(b,w,h)
 

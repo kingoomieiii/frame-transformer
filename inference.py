@@ -125,16 +125,17 @@ def main():
     p.add_argument('--postprocess', '-p', action='store_true')
     p.add_argument('--channels', type=int, default=8)
     p.add_argument('--num_encoders', type=int, default=2)
-    p.add_argument('--num_decoders', type=int, default=3)
+    p.add_argument('--num_decoders', type=int, default=4)
     p.add_argument('--num_bands', type=str, default=8)
     p.add_argument('--feedforward_dim', type=int, default=2048)
     p.add_argument('--bias', type=str, default='true')
     p.add_argument('--tta', '-t', action='store_true')
+    p.add_argument('--output_prefix', type=str, default='')
     args = p.parse_args()
 
     print('loading model...', end=' ')
     device = torch.device('cpu')
-    model = FrameTransformer(channels=args.channels, n_fft=args.n_fft, num_encoders=args.num_encoders, num_decoders=args.num_decoders, num_bands=args.num_bands, feedforward_dim=args.feedforward_dim, bias=args.bias, cropsize=args.cropsize)
+    model = FrameTransformer(channels=args.channels, n_fft=args.n_fft, num_decoders=args.num_decoders, num_bands=args.num_bands, feedforward_dim=args.feedforward_dim, bias=args.bias, cropsize=args.cropsize)
     model.load_state_dict(torch.load(args.pretrained_model, map_location=device))
     if torch.cuda.is_available() and args.gpu >= 0:
         device = torch.device('cuda:{}'.format(args.gpu))
@@ -157,6 +158,9 @@ def main():
         convert = [] if convert is None else convert
         copy = [] if copy is None else copy
 
+        if output != '' and not os.path.exists(output):
+            os.makedirs(output)
+
         for file in tqdm(copy):
             basename = os.path.splitext(os.path.basename(file))[0]
             shutil.copyfile(file, '{}{}_Instruments.wav'.format(output, basename))
@@ -167,9 +171,6 @@ def main():
                 file, args.sr, False, dtype=np.float32, res_type='kaiser_fast')
             basename = os.path.splitext(os.path.basename(file))[0]
             print('done')
-
-            if output != '' and not os.path.exists(output):
-                os.makedirs(output)
 
             if X.ndim == 1:
                 X = np.asarray([X, X])
