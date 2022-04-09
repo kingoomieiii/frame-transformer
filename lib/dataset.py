@@ -398,7 +398,43 @@ if __name__ == "__main__":
         v_image = spec_utils.spectrogram_to_image(v_mag)
         utils.imwrite(outpath, v_image)
 
-def make_dataset(filelist, cropsize, sr, hop_length, n_fft, offset=0, is_validation=False, normalize=True, suffix='', root=''):
+def make_vocal_stems(dataset, cropsize=1024, sr=44100, hop_length=512, n_fft=1024, offset=0, root=''):
+    input_exts = ['.wav', '.m4a', '.mp3', '.mp4', '.flac']
+
+    filelist = sorted([
+        os.path.join(dataset, fname)
+        for fname in os.listdir(dataset)
+        if os.path.splitext(fname)[1] in input_exts])
+
+    for i, X_path in enumerate(tqdm(filelist)):
+        basename = os.path.splitext(os.path.basename(X_path))[0]
+        xw, _ = spec_utils.load_wave(X_path, X_path, sr)
+
+        patch_dir = '{}cs{}_sr{}_hl{}_nf{}_of{}{}'.format(root, cropsize, sr, hop_length, n_fft, 0, "_VOCALS")
+        os.makedirs(patch_dir, exist_ok=True)
+
+        X, _ = spec_utils.to_spec(xw, xw, hop_length=hop_length, n_fft=n_fft)
+        coef = np.abs(xw).max()
+
+        l, r, roi_size = make_padding(X.shape[2], cropsize, offset)
+        X_pad = np.pad(X, ((0, 0), (0, 0), (l, r)), mode='constant')
+
+        len_dataset = int(np.ceil(X.shape[2] / roi_size))
+        for j in range(len_dataset):
+            outpath = os.path.join(patch_dir, '{}_p{}.npz'.format(basename, j))
+
+            start = j * roi_size
+            if not os.path.exists(outpath) and coef != 0:
+                xp = X_pad[:, :, start:start + cropsize]
+                xc = np.abs(xp).mean()
+
+                if xc > 0:
+                    np.savez(
+                        outpath,
+                        X=xp,
+                        c=coef)
+
+def make_dataset(filelist, cropsize, sr, hop_length, n_fft, offset=0, is_validation=False, suffix='', root=''):
     patch_list = []
     if is_validation:
         suffix = "_VALIDATION"
