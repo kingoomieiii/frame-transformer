@@ -286,7 +286,11 @@ def train_val_split(dataset_dir, val_filelist, selected_validation=[], voxaug=Fa
 
     for i, entry in enumerate(filelist):
         if len(selected_validation) > 0:
-            validation_file = entry[0] in selected_validation
+            validation_file = False
+            for v in selected_validation:
+                if entry[0].find(v) != -1:
+                    validation_file = True
+                    break
             
             if validation_file:
                 val_filelist.append(entry)
