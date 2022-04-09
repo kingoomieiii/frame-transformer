@@ -253,24 +253,49 @@ class VocalRemoverValidationSet(torch.utils.data.Dataset):
         return X_mag, y_mag
 
 
-def make_pair(mix_dir, inst_dir):
+def make_pair(mix_dir, inst_dir, voxaug=False):
     input_exts = ['.wav', '.m4a', '.mp3', '.mp4', '.flac']
 
-    X_list = sorted([
-        os.path.join(mix_dir, fname)
-        for fname in os.listdir(mix_dir)
-        if os.path.splitext(fname)[1] in input_exts
-    ])
     y_list = sorted([
         os.path.join(inst_dir, fname)
         for fname in os.listdir(inst_dir)
-        if os.path.splitext(fname)[1] in input_exts
-    ])
+        if os.path.splitext(fname)[1] in input_exts])
+
+    if not voxaug:    
+        X_list = sorted([
+        os.path.join(mix_dir, fname)
+        for fname in os.listdir(mix_dir)
+        if os.path.splitext(fname)[1] in input_exts])
+
+    else:
+        X_list = y_list
 
     filelist = list(zip(X_list, y_list))
 
     return filelist
 
+
+def train_val_split(dataset_dir, val_filelist, selected_validation=[], voxaug=False):
+    filelist = make_pair(
+        os.path.join(dataset_dir, 'mixtures'),
+        os.path.join(dataset_dir, 'instruments'),
+        voxaug=voxaug)
+
+    train_filelist = list()
+    val_filelist = list()
+
+    for i, entry in enumerate(filelist):
+        if len(selected_validation) > 0:
+            validation_file = entry[0] in selected_validation
+            
+            if validation_file:
+                val_filelist.append(entry)
+            else:
+                train_filelist.append(entry)
+        else:
+            train_filelist.append(entry)
+
+    return train_filelist, val_filelist
 
 def train_val_split(dataset_dir, split_mode, val_rate, val_filelist):
     if split_mode == 'random':
