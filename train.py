@@ -174,7 +174,9 @@ def main():
     train_dataset = dataset.VocalAugmentationDataset(
         path="C://cs256_sr44100_hl1024_nf2048_of0",
         extra_path="G://cs256_sr44100_hl1024_nf2048_of0",
+        pair_path="G:\cs256_sr44100_hl1024_nf2048_of0_PAIRS",
         vocal_path="G://cs256_sr44100_hl1024_nf2048_of0_VOCALS",
+        pair_mul=1,
         is_validation=False
     )
 

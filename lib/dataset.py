@@ -12,10 +12,22 @@ except ModuleNotFoundError:
     import spec_utils
 
 class VocalAugmentationDataset(torch.utils.data.Dataset):
-    def __init__(self, path, extra_path=None, vocal_path="", is_validation=False, mul=1, downsamples=0, epoch_size=None):
+    def __init__(self, path, extra_path=None, pair_path=None, vocal_path="", is_validation=False, mul=1, downsamples=0, epoch_size=None, pair_mul=1):
         self.epoch_size = epoch_size
         self.mul = mul
         patch_list = [os.path.join(path, f) for f in os.listdir(path) if os.path.isfile(os.path.join(path, f))]
+
+        if pair_path is not None and pair_mul > 0:
+            pairs = [os.path.join(pair_path, f) for f in os.listdir(pair_path) if os.path.isfile(os.path.join(pair_path, f))]
+            pair_list = []
+
+            for p in pairs:
+                if pair_mul > 1:
+                    for _ in range(pair_mul):
+                        pair_list.append(p)
+                else:
+                    if np.random.uniform() < pair_mul:
+                        pair_list.append(p)
 
         if extra_path is not None:
             extra_list = [os.path.join(extra_path, f) for f in os.listdir(extra_path) if os.path.isfile(os.path.join(extra_path, f))]
@@ -31,6 +43,10 @@ class VocalAugmentationDataset(torch.utils.data.Dataset):
         self.curr_list = []
         for p in patch_list:
             self.curr_list.append(p)
+
+        if pair_path is not None:
+            for p in pair_list:
+                self.curr_list.append(p)
 
         self.downsamples = downsamples
         self.full_list = self.curr_list
