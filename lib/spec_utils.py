@@ -166,6 +166,35 @@ def cache_or_load(mix_path, inst_path, sr, hop_length, n_fft):
 
     return X, y, mix_cache_path, inst_cache_path
 
+def load(mix_path, inst_path, sr, hop_length, n_fft):
+    cache_dir = 'sr{}_hl{}_nf{}'.format(sr, hop_length, n_fft)
+    mix_cache_dir = os.path.join(os.path.dirname(mix_path), cache_dir)
+    inst_cache_dir = os.path.join(os.path.dirname(inst_path), cache_dir)
+    os.makedirs(mix_cache_dir, exist_ok=True)
+    os.makedirs(inst_cache_dir, exist_ok=True)
+
+    X, _ = librosa.load(
+        mix_path, sr, False, dtype=np.float32, res_type='kaiser_fast')
+
+    if X.ndim == 1:
+        X = np.array([X, X])
+
+    if mix_path != inst_path:
+        y, _ = librosa.load(
+            inst_path, sr, False, dtype=np.float32, res_type='kaiser_fast')
+
+        if y.ndim == 1:
+            y = np.array([y, y])
+
+        X, y = align_wave_head_and_tail(X, y, sr)
+        y = wave_to_spectrogram(y, hop_length, n_fft)
+        X = wave_to_spectrogram(X, hop_length, n_fft)
+    else:
+        X = wave_to_spectrogram(X, hop_length, n_fft)
+        y = X
+
+    return X, y
+
 
 def spectrogram_to_wave(spec, hop_length=1024):
     if spec.ndim == 2:

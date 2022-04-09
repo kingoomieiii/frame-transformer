@@ -397,3 +397,45 @@ if __name__ == "__main__":
         outpath = '{}/{}_Vocal.jpg'.format(outdir, mix_basename)
         v_image = spec_utils.spectrogram_to_image(v_mag)
         utils.imwrite(outpath, v_image)
+
+def make_dataset(filelist, cropsize, sr, hop_length, n_fft, offset=0, is_validation=False, normalize=True, suffix='', root=''):
+    patch_list = []
+    if is_validation:
+        suffix = "_VALIDATION"
+    
+    patch_dir = f'{root}cs{cropsize}_sr{sr}_hl{hop_length}_nf{n_fft}_of{offset}{suffix}'
+    os.makedirs(patch_dir, exist_ok=True)
+
+    for i, (X_path, Y_path) in enumerate(tqdm(filelist)):
+        basename = os.path.splitext(os.path.basename(X_path))[0]
+
+        voxaug = X_path == Y_path
+
+        X, Y = spec_utils.load(X_path, Y_path, sr, hop_length, n_fft)
+
+        coef = np.max([np.abs(X).max(), np.abs(Y).max()])
+
+        l, r, roi_size = make_padding(X.shape[2], cropsize, offset)
+        X_pad = np.pad(X, ((0, 0), (0, 0), (l, r)), mode='constant')
+        Y_pad = np.pad(Y, ((0, 0), (0, 0), (l, r)), mode='constant')
+
+        len_dataset = int(np.ceil(X.shape[2] / roi_size))
+        for j in range(len_dataset):
+            outpath = os.path.join(patch_dir, '{}_p{}.npz'.format(basename, j))
+            patch_list.append(outpath)
+
+            start = j * roi_size
+            if not os.path.exists(outpath):
+                if voxaug:
+                    np.savez(
+                        outpath,
+                        X=X_pad[:, :, start:start + cropsize],
+                        c=coef.item())
+                else:
+                    np.savez(
+                        outpath,
+                        X=X_pad[:, :, start:start + cropsize],
+                        Y=Y_pad[:, :, start:start + cropsize],
+                        c=coef.item())
+
+    return VocalRemoverValidationSet(patch_list, is_validation=is_validation)
