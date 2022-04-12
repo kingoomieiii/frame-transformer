@@ -2,6 +2,7 @@ import argparse
 from datetime import datetime
 import json
 import logging
+import math
 import os
 import random
 
@@ -140,7 +141,7 @@ def main():
     p.add_argument('--epoch_size', type=int, default=None)
     p.add_argument('--reduction_rate', '-R', type=float, default=0.0)
     p.add_argument('--reduction_level', '-L', type=float, default=0.2)
-    p.add_argument('--fake_data_ratio', type=float, default=0.75)
+    p.add_argument('--fake_data_ratio', type=float, default=math.nan)
     p.add_argument('--mixup_rate', '-M', type=float, default=0.0)
     p.add_argument('--mixup_alpha', '-a', type=float, default=1.0)
     p.add_argument('--pretrained_model', '-P', type=str, default=None)
@@ -191,13 +192,12 @@ def main():
         model.to(device)
 
     train_dataset = dataset.VocalAugmentationDataset(
-        instrumental_a_path="C://cs256_sr44100_hl1024_nf2048_of0",
-        instrumental_b_path="G://cs256_sr44100_hl1024_nf2048_of0",
+        inst_a_path="C://cs256_sr44100_hl1024_nf2048_of0",
+        inst_b_path="G://cs256_sr44100_hl1024_nf2048_of0",
         pair_path="G:\cs256_sr44100_hl1024_nf2048_of0_PAIRS",
         vocal_path="G://cs256_sr44100_hl1024_nf2048_of0_VOCALS",
-        fake_data_ratio=args.fake_data_ratio,
-        is_validation=False,
-        epoch_size=args.epoch_size
+        fake_data_amount=args.fake_data_ratio,
+        is_validation=False
     )
 
     train_dataloader = torch.utils.data.DataLoader(
@@ -208,7 +208,7 @@ def main():
     )
     
     val_dataset = dataset.VocalAugmentationDataset(
-        instrumental_a_path="C://cs256_sr44100_hl1024_nf2048_of0_VALIDATION",
+        inst_a_path="C://cs256_sr44100_hl1024_nf2048_of0_VALIDATION",
         is_validation=True
     )
 
