@@ -12,7 +12,7 @@ The main difference with this architecture is that it makes use of frame convolu
 
 Current architecture is testing out usage of residual attention layers within decoding steps as described in https://arxiv.org/pdf/2012.11747.pdf. Each attention module, self and encoder attention, has its own residual connection between attention layers. 
 
-Currently working on a branch for using TPUs and after that will modify it for GPUs.
+Currently working on a branch for using TPUs and after that will modify it for GPUs. Haven't been able to test the TPU version because my jobs keep failing after starting (and billing me) with the error that no TPU resources are available (feels a little scammy...). GPU version is working well with DistributedDataParallel, will get that added in another branch after work.
 
 This fork also makes use of vocal augmentations. This takes a random vocal spectrogram and adds it to an isntrumental spectrogram for training (and sometimes a mix for another layer of vocals); the dataset takes a path to a directory with vocal spectrogram npz files (need to update the dataset generator code still, the new vocal augmentation dataset expects unnormalied magnitudes with the normalization coefficient set in its own property in the npz file; old dataset class is still in dataset py). Mixup is also applied to vocals in the dataset to mix various vocals together.
 
