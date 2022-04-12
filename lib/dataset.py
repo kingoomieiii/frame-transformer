@@ -124,12 +124,12 @@ class VocalAugmentationDataset(torch.utils.data.Dataset):
 
             if np.random.uniform() < 0.5:
                 X = X[::-1]
-                Y = Y[::-1]
+                Y = Y[::-1]        
+                
+            if np.random.uniform() < 0.02:
+                X = Y
+                c = Xc
         else:
-            c = Xc
-
-        if np.random.uniform() < 0.02:
-            X = Y
             c = Xc
 
         Xm = np.clip(np.abs(X) / c, 0, 1)
@@ -265,14 +265,14 @@ class VocalAugmentationFullDataset(torch.utils.data.Dataset):
 
                 c = Xc
 
+            if np.random.uniform() < 0.025:
+                X = Y
+                c = Xc
+
             if np.random.uniform() < 0.5:
                 X = X[::-1]
                 Y = Y[::-1]
         else:
-            c = Xc
-
-        if np.random.uniform() < 0.025:
-            X = Y
             c = Xc
 
         Xm = np.clip(np.abs(X) / c, 0, 1)

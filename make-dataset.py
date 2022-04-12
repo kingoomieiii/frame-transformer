@@ -18,8 +18,6 @@ fft = 2048
 train_filelist, val_filelist = train_val_split(
     dataset_dir=dataset,
     val_filelist=[],
-    val_size=-1,
-    train_size=-1,
     voxaug=False)
 
 val_dataset = make_dataset(
