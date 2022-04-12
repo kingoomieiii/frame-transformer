@@ -15,10 +15,10 @@ except ModuleNotFoundError:
     import spec_utils
 
 class VocalAugmentationDataset(torch.utils.data.Dataset):
-    def __init__(self, inst_a_path, inst_b_path=None, pair_path=None, vocal_path=None, is_validation=False, epoch_size=None, fake_data_amount=math.nan):
+    def __init__(self, inst_a_path, inst_b_path=None, pair_path=None, vocal_path=None, is_validation=False, epoch_size=None, fake_data_prob=math.nan):
         self.epoch_size = epoch_size
         self.is_validation = is_validation
-        self.fake_data_amount = fake_data_amount
+        self.fake_data_prob = fake_data_prob
         self.inst_list = []
         self.pair_list = []
         self.curr_list = []
@@ -42,9 +42,9 @@ class VocalAugmentationDataset(torch.utils.data.Dataset):
     def rebuild(self):
         self.curr_list = []
 
-        if not math.isnan(self.fake_data_amount):
+        if not math.isnan(self.fake_data_prob):
             for _ in range(self.epoch_size if self.epoch_size is not None else (len(self.pair_list) + len(self.inst_list))):
-                if np.random.uniform() < self.fake_data_amount:
+                if np.random.uniform() < self.fake_data_prob:
                     idx = np.random.randint(len(self.inst_list))
                     self.curr_list.append(self.inst_list[idx])
                 else:
@@ -71,12 +71,12 @@ class VocalAugmentationDataset(torch.utils.data.Dataset):
                 Y = Y[::-1]
 
             if aug or np.random.uniform() < 0.05:
-                V, Vc = self.get_vocals()
+                V, Vc = self._getvocals()
                 X = Y + V
                 c = np.max([Xc, Vc, np.abs(X).max()])
             else:
                 if np.random.uniform() < 0.33:
-                    V, Vc = self.get_vocals()
+                    V, Vc = self._getvocals()
                     X = X + (V * np.random.uniform())
                     c = np.max([Xc, Vc, np.abs(X).max()])
                 else:
@@ -90,7 +90,7 @@ class VocalAugmentationDataset(torch.utils.data.Dataset):
 
         return np.abs(X) / c, np.abs(Y) / c
 
-    def get_vocals(self, noise_prob=0.25, pan_prob=1, recurse_prob=0.25, recurse_prob_decay=2):
+    def _getvocals(self, noise_prob=0.25, pan_prob=0.5, recurse_prob=0.25, recurse_prob_decay=2):
         idx = np.random.randint(len(self.vocal_list))        
         path = self.vocal_list[idx]
         data = np.load(str(path))
@@ -99,17 +99,18 @@ class VocalAugmentationDataset(torch.utils.data.Dataset):
         if np.random.uniform() < 0.5:
             V = V[::-1]
 
-        if np.random.uniform() < 0.5:
-            V[0] = V[0] * np.random.uniform()
-        else:
-            V[1] = V[1] * np.random.uniform()
+        if np.random.uniform() < pan_prob:
+            if np.random.uniform() < 0.5:
+                V[0] = V[0] * np.random.uniform()
+            else:
+                V[1] = V[1] * np.random.uniform()
 
         if np.random.uniform() < noise_prob:
             noise = np.random.uniform(0, 1.25, size=(V.shape[0], V.shape[1], V.shape[2])).astype('f')
             V = V * noise
 
         if np.random.uniform() < recurse_prob:
-            V2, Vc2 = self.get_vocals(noise_prob=noise_prob, pan_prob=pan_prob, recurse_prob=recurse_prob // recurse_prob_decay)
+            V2, Vc2 = self._getvocals(noise_prob=noise_prob, pan_prob=pan_prob, recurse_prob=recurse_prob / recurse_prob_decay)
             a = np.random.uniform()
             Vc = (a * Vc2) + ((1-a) * Vc)
             V = (a * V2) + ((1-a) * V)

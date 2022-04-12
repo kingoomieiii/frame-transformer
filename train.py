@@ -141,7 +141,7 @@ def main():
     p.add_argument('--epoch_size', type=int, default=None)
     p.add_argument('--reduction_rate', '-R', type=float, default=0.0)
     p.add_argument('--reduction_level', '-L', type=float, default=0.2)
-    p.add_argument('--fake_data_ratio', type=float, default=math.nan)
+    p.add_argument('--fake_data_prob', type=float, default=math.nan)
     p.add_argument('--mixup_rate', '-M', type=float, default=0.0)
     p.add_argument('--mixup_alpha', '-a', type=float, default=1.0)
     p.add_argument('--pretrained_model', '-P', type=str, default=None)
@@ -196,7 +196,7 @@ def main():
         inst_b_path="G://cs256_sr44100_hl1024_nf2048_of0",
         pair_path="G:\cs256_sr44100_hl1024_nf2048_of0_PAIRS",
         vocal_path="G://cs256_sr44100_hl1024_nf2048_of0_VOCALS",
-        fake_data_amount=args.fake_data_ratio,
+        fake_data_prob=args.fake_data_prob,
         is_validation=False
     )
 

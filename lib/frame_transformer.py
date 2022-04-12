@@ -72,29 +72,23 @@ class FrameTransformer(nn.Module):
         )
 
 class FrameConv(nn.Module):
-    def __init__(self, in_channels, out_channels, kernel_size=3, stride=1, padding=1, dilation=1, groups=1, activate=nn.ReLU, norm=True):
+    def __init__(self, in_channels, out_channels, kernel_size=3, stride=1, padding=1, dilation=1, groups=1, activate=nn.ReLU):
         super(FrameConv, self).__init__()
 
-        self.conv = nn.Conv2d(
+        self.body = nn.Sequential(
+            nn.Conv2d(
                 in_channels, out_channels,
                 kernel_size=(kernel_size, 1),
                 stride=(stride, 1),
                 padding=(padding, 0),
                 dilation=(dilation, 1),
                 groups=groups,
-                bias=False)
-
-        self.norm = nn.BatchNorm2d(out_channels) if norm else None
-        self.activate = activate(inplace=True) if activate is not None else None
+                bias=False),
+            nn.BatchNorm2d(out_channels),
+            activate(inplace=True))
 
     def __call__(self, x):
-        h = self.conv(x)
-        
-        if self.norm is not None:
-            h = self.norm(h)
-
-        if self.activate is not None:
-            h = self.activate(h)
+        h = self.body(x)
 
         return h
         
