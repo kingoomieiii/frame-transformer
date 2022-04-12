@@ -1,5 +1,6 @@
 import os
 import random
+import time
 
 import numpy as np
 import torch
@@ -12,6 +13,131 @@ except ModuleNotFoundError:
     import spec_utils
 
 class VocalAugmentationDataset(torch.utils.data.Dataset):
+    def __init__(self, instrumental_a_path, instrumental_b_path=None, pair_path=None, vocal_path="", is_validation=False, epoch_size=None, fake_data_ratio=1):
+        self.epoch_size = epoch_size
+        self.is_validation = is_validation
+        self.gen_data_ratio = fake_data_ratio
+        self.instrumental_list = []
+        self.pair_list = []
+        self.curr_list = []
+        
+        if not is_validation:
+            if vocal_path != "":
+                self.vocal_list = [os.path.join(vocal_path, f) for f in os.listdir(vocal_path) if os.path.isfile(os.path.join(vocal_path, f))]
+
+            if pair_path is not None:
+                self.pair_list = [os.path.join(pair_path, f) for f in os.listdir(pair_path) if os.path.isfile(os.path.join(pair_path, f))]
+
+            self.instrumental_list = [os.path.join(instrumental_a_path, f) for f in os.listdir(instrumental_a_path) if os.path.isfile(os.path.join(instrumental_a_path, f))]
+            if instrumental_b_path is not None:
+                instrumental_b_list = [os.path.join(instrumental_b_path, f) for f in os.listdir(instrumental_b_path) if os.path.isfile(os.path.join(instrumental_b_path, f))]
+                for f in instrumental_b_list:
+                    self.instrumental_list.append(f)
+
+            self.rebuild()
+        else:
+            self.curr_list = [os.path.join(instrumental_a_path, f) for f in os.listdir(instrumental_a_path) if os.path.isfile(os.path.join(instrumental_a_path, f))]
+
+    def rebuild(self):
+        size = self.epoch_size if self.epoch_size is not None else (len(self.pair_list) + len(self.instrumental_list))
+        self.curr_list = []
+        for _ in range(size):
+            if np.random.uniform() < self.gen_data_ratio:
+                idx = np.random.randint(len(self.instrumental_list))
+                self.curr_list.append(self.instrumental_list[idx])
+            else:
+                idx = np.random.randint(len(self.pair_list))
+                self.curr_list.append(self.pair_list[idx])
+
+    def __len__(self):
+        return len(self.curr_list)
+
+    def __getitem__(self, idx):
+        path = self.curr_list[idx % len(self.curr_list)]
+        data = np.load(str(path))
+        aug = "Y" not in data.files
+
+        X, Xc = data['X'], data['c']
+        Y = X if aug else data['Y']
+
+        if not self.is_validation:
+            if aug or np.random.uniform() < 0.05:
+                vidx = np.random.randint(len(self.vocal_list))                
+                vpath = self.vocal_list[vidx]
+                vdata = np.load(str(vpath))
+                V, Vc = vdata['X'], vdata['c']
+
+                if np.random.uniform() < 0.5:
+                    V = V[::-1]
+
+                if np.random.uniform() < 0.02:
+                    if np.random.uniform() < 0.5:
+                        V[0] = V[0] * 0
+                    else:
+                        V[1] = V[1] * 0
+
+                if np.random.uniform() < 0.5:
+                    vidx2 = np.random.randint(len(self.vocal_list))
+                    
+                    vpath2 = self.vocal_list[vidx2]
+                    vdata2 = np.load(str(vpath2))
+                    V2, Vc2 = vdata2['X'], vdata2['c']
+
+                    if np.random.uniform() < 0.5:
+                        V2 = V2[::-1]
+
+                    if np.random.uniform() < 0.02:
+                        if np.random.uniform() < 0.5:
+                            V2[0] = V2[0] * 0
+                        else:
+                            V2[1] = V2[1] * 0
+
+                    lam = np.random.beta(1, 1)
+                    inv = 1 - lam
+
+                    Vc = (Vc * lam) + (Vc2 * inv)
+                    V = (V * lam) + (V2 * inv)
+
+                X = Y + V
+                c = np.max([Xc, Vc])
+            else:
+                if np.random.uniform() < 0.33:
+                    vidx = np.random.randint(len(self.vocal_list))
+                    
+                    vpath = self.vocal_list[vidx]
+                    vdata = np.load(str(vpath))
+                    V, Vc = vdata['X'], vdata['c']
+
+                    if np.random.uniform() < 0.5:
+                        V = V[::-1]
+
+                    if np.random.uniform() < 0.02:
+                        if np.random.uniform() < 0.5:
+                            V[0] = V[0] * 0
+                        else:
+                            V[1] = V[1] * 0
+
+                    a = np.random.beta(1, 1)
+                    X = X + (V * a)
+
+                c = Xc
+
+            if np.random.uniform() < 0.5:
+                X = X[::-1]
+                Y = Y[::-1]
+        else:
+            c = Xc
+
+        if np.random.uniform() < 0.02:
+            X = Y
+            c = Xc
+
+        Xm = np.clip(np.abs(X) / c, 0, 1)
+        Ym = np.clip(np.abs(Y) / c, 0, 1)
+
+        return Xm, Ym
+        
+class VocalAugmentationFullDataset(torch.utils.data.Dataset):
     def __init__(self, path, extra_path=None, pair_path=None, vocal_path="", is_validation=False, mul=1, downsamples=0, epoch_size=None, pair_mul=1):
         self.epoch_size = epoch_size
         self.mul = mul
@@ -399,34 +525,6 @@ def get_oracle_data(X, y, oracle_loss, oracle_rate, oracle_drop_rate):
 
     return oracle_X, oracle_y, indices
 
-
-if __name__ == "__main__":
-    import sys
-    import utils
-
-    mix_dir = sys.argv[1]
-    inst_dir = sys.argv[2]
-    outdir = sys.argv[3]
-
-    os.makedirs(outdir, exist_ok=True)
-
-    filelist = make_pair(mix_dir, inst_dir)
-    for mix_path, inst_path in tqdm(filelist):
-        mix_basename = os.path.splitext(os.path.basename(mix_path))[0]
-
-        X_spec, y_spec, _, _ = spec_utils.cache_or_load(
-            mix_path, inst_path, 44100, 1024, 2048
-        )
-
-        X_mag = np.abs(X_spec)
-        y_mag = np.abs(y_spec)
-        v_mag = X_mag - y_mag
-        v_mag *= v_mag > y_mag
-
-        outpath = '{}/{}_Vocal.jpg'.format(outdir, mix_basename)
-        v_image = spec_utils.spectrogram_to_image(v_mag)
-        utils.imwrite(outpath, v_image)
-
 def make_vocal_stems(dataset, cropsize=1024, sr=44100, hop_length=512, n_fft=1024, offset=0, root=''):
     input_exts = ['.wav', '.m4a', '.mp3', '.mp4', '.flac']
 
@@ -464,14 +562,11 @@ def make_vocal_stems(dataset, cropsize=1024, sr=44100, hop_length=512, n_fft=102
                         c=coef)
 
 def make_dataset(filelist, cropsize, sr, hop_length, n_fft, offset=0, is_validation=False, suffix='', root=''):
-    patch_list = []
-    if is_validation:
-        suffix = "_VALIDATION"
-    
+    patch_list = []    
     patch_dir = f'{root}cs{cropsize}_sr{sr}_hl{hop_length}_nf{n_fft}_of{offset}{suffix}'
     os.makedirs(patch_dir, exist_ok=True)
 
-    for i, (X_path, Y_path) in enumerate(tqdm(filelist)):
+    for X_path, Y_path in tqdm(filelist):
         basename = os.path.splitext(os.path.basename(X_path))[0]
 
         voxaug = X_path == Y_path
@@ -504,3 +599,31 @@ def make_dataset(filelist, cropsize, sr, hop_length, n_fft, offset=0, is_validat
                         c=coef.item())
 
     return VocalRemoverValidationSet(patch_list, is_validation=is_validation)
+
+
+if __name__ == "__main__":
+    import sys
+    import utils
+
+    mix_dir = sys.argv[1]
+    inst_dir = sys.argv[2]
+    outdir = sys.argv[3]
+
+    os.makedirs(outdir, exist_ok=True)
+
+    filelist = make_pair(mix_dir, inst_dir)
+    for mix_path, inst_path in tqdm(filelist):
+        mix_basename = os.path.splitext(os.path.basename(mix_path))[0]
+
+        X_spec, y_spec, _, _ = spec_utils.cache_or_load(
+            mix_path, inst_path, 44100, 1024, 2048
+        )
+
+        X_mag = np.abs(X_spec)
+        y_mag = np.abs(y_spec)
+        v_mag = X_mag - y_mag
+        v_mag *= v_mag > y_mag
+
+        outpath = '{}/{}_Vocal.jpg'.format(outdir, mix_basename)
+        v_image = spec_utils.spectrogram_to_image(v_mag)
+        utils.imwrite(outpath, v_image)

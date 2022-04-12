@@ -16,19 +16,19 @@ class FrameTransformer(nn.Module):
         self.enc4 = Encoder(channels * 4, channels * 6, kernel_size=3, stride=2, padding=1)
         self.enc5 = Encoder(channels * 6, channels * 8, kernel_size=3, stride=2, padding=1)
         
-        self.dec4_transformer = nn.ModuleList([FrameTransformerDecoder(channels * 8 + i, channels * 8, num_bands, cropsize, n_fft, downsamples=4, feedforward_dim=feedforward_dim, bias=bias, prev=i>0) for i in range(num_decoders)])
+        self.dec4_transformer = nn.ModuleList([FrameTransformerDecoder(channels * 8 + i, channels * 8, num_bands, cropsize, n_fft, downsamples=4, feedforward_dim=feedforward_dim, bias=bias) for i in range(num_decoders)])
         self.dec4 = Decoder(channels * (6 + 8) + num_decoders, channels * 6, kernel_size=3, padding=1)
 
-        self.dec3_transformer = nn.ModuleList([FrameTransformerDecoder(channels * 6 + i, channels * 6, num_bands, cropsize, n_fft, downsamples=3, feedforward_dim=feedforward_dim, bias=bias, prev=i>0) for i in range(num_decoders)])
+        self.dec3_transformer = nn.ModuleList([FrameTransformerDecoder(channels * 6 + i, channels * 6, num_bands, cropsize, n_fft, downsamples=3, feedforward_dim=feedforward_dim, bias=bias) for i in range(num_decoders)])
         self.dec3 = Decoder(channels * (4 + 6) + num_decoders, channels * 4, kernel_size=3, padding=1)
 
-        self.dec2_transformer = nn.ModuleList([FrameTransformerDecoder(channels * 4 + i, channels * 4, num_bands, cropsize, n_fft, downsamples=2, feedforward_dim=feedforward_dim, bias=bias, prev=i>0) for i in range(num_decoders)])
+        self.dec2_transformer = nn.ModuleList([FrameTransformerDecoder(channels * 4 + i, channels * 4, num_bands, cropsize, n_fft, downsamples=2, feedforward_dim=feedforward_dim, bias=bias) for i in range(num_decoders)])
         self.dec2 = Decoder(channels * (2 + 4) + num_decoders, channels * 2, kernel_size=3, padding=1)
 
-        self.dec1_transformer = nn.ModuleList([FrameTransformerDecoder(channels * 2 + i, channels * 2, num_bands, cropsize, n_fft, downsamples=1, feedforward_dim=feedforward_dim, bias=bias, prev=i>0) for i in range(num_decoders)])
+        self.dec1_transformer = nn.ModuleList([FrameTransformerDecoder(channels * 2 + i, channels * 2, num_bands, cropsize, n_fft, downsamples=1, feedforward_dim=feedforward_dim, bias=bias) for i in range(num_decoders)])
         self.dec1 = Decoder(channels * (1 + 2) + num_decoders, channels * 1, kernel_size=3, padding=1)
 
-        self.out_transformer = nn.ModuleList([FrameTransformerDecoder(channels + i, channels, num_bands, cropsize, n_fft, downsamples=0, feedforward_dim=feedforward_dim, bias=bias, prev=i>0) for i in range(num_decoders)])
+        self.out_transformer = nn.ModuleList([FrameTransformerDecoder(channels + i, channels, num_bands, cropsize, n_fft, downsamples=0, feedforward_dim=feedforward_dim, bias=bias) for i in range(num_decoders)])
         self.out = nn.Linear(channels + num_decoders, 2, bias=bias)
 
     def __call__(self, x):
@@ -40,32 +40,27 @@ class FrameTransformer(nn.Module):
         e4 = self.enc4(e3)
         e5 = self.enc5(e4)
 
-        h = e5
-        sa1, ea1, sa2, ea2 = None, None, None, None
+        h, sa1, ea1, sa2, ea2 = e5, None, None, None, None
         for module in self.dec4_transformer:
             t, sa1, ea1, sa2, ea2 = module(h, mem=e5, sa1=sa1, ea1=ea1, sa2=sa2, ea2=ea2)
             h = torch.cat((h, t), dim=1)
         
-        h = self.dec4(h, e4)        
-        sa1, ea1, sa2, ea2 = None, None, None, None
+        h, sa1, ea1, sa2, ea2 = self.dec4(h, e4), None, None, None, None
         for module in self.dec3_transformer:
             t, sa1, ea1, sa2, ea2 = module(h, mem=e4, sa1=sa1, ea1=ea1, sa2=sa2, ea2=ea2)
             h = torch.cat((h, t), dim=1)
 
-        h = self.dec3(h, e3)        
-        sa1, ea1, sa2, ea2 = None, None, None, None
+        h, sa1, ea1, sa2, ea2 = self.dec3(h, e3), None, None, None, None
         for module in self.dec2_transformer:
             t, sa1, ea1, sa2, ea2 = module(h, mem=e3, sa1=sa1, ea1=ea1, sa2=sa2, ea2=ea2)
             h = torch.cat((h, t), dim=1)
 
-        h = self.dec2(h, e2)        
-        sa1, ea1, sa2, ea2 = None, None, None, None
+        h, sa1, ea1, sa2, ea2 = self.dec2(h, e2), None, None, None, None
         for module in self.dec1_transformer:
             t, sa1, ea1, sa2, ea2 = module(h, mem=e2, sa1=sa1, ea1=ea1, sa2=sa2, ea2=ea2)
             h = torch.cat((h, t), dim=1)
 
-        h = self.dec1(h, e1)
-        sa1, ea1, sa2, ea2 = None, None, None, None
+        h, sa1, ea1, sa2, ea2 = self.dec1(h, e1), None, None, None, None
         for module in self.out_transformer:
             t, sa1, ea1, sa2, ea2 = module(h, mem=e1, sa1=sa1, ea1=ea1, sa2=sa2, ea2=ea2)
             h = torch.cat((h, t), dim=1)
@@ -154,9 +149,7 @@ class FrameTransformerEncoder(nn.Module):
         self.bottleneck_norm = nn.BatchNorm2d(1)
        
         # This isn't like how they have it in the evolved transformer paper; expanding the features by 2 allows for addition without padding, however they simply pad the output in the paper. Need to see if this performs better or worse.
-        self.glu = nn.Sequential(
-            nn.Linear(bins, bins * 2, bias=bias),
-            nn.GLU())
+        self.glu = nn.GLU()
         self.norm1 = nn.LayerNorm(bins)
         self.dropout1 = nn.Dropout(dropout) if dropout > 0 else nn.Identity()
 
@@ -204,7 +197,7 @@ class FrameTransformerEncoder(nn.Module):
         return x.transpose(1, 2).unsqueeze(1)
 
 class FrameTransformerDecoder(nn.Module):
-    def __init__(self, channels, mem_channels, num_bands=4, cropsize=256, n_fft=2048, feedforward_dim=2048, downsamples=0, bias=False, dropout=0.1, prev=False):
+    def __init__(self, channels, mem_channels, num_bands=4, cropsize=256, n_fft=2048, feedforward_dim=2048, downsamples=0, bias=False, dropout=0.1):
         super(FrameTransformerDecoder, self).__init__()
 
         bins = (n_fft // 2)
@@ -299,22 +292,22 @@ class MultibandFrameAttention(nn.Module):
         self.v_proj = nn.Linear(bins, bins)
         self.o_proj = nn.Linear(bins, bins)
         self.er = nn.Parameter(torch.empty(bins // num_bands, cropsize))
-        self.distance_weight = nn.Parameter(torch.empty(num_bands).unsqueeze(1).expand((-1, cropsize)).unsqueeze(2).clone())
-        self.register_buffer('distances', torch.empty(num_bands, cropsize, cropsize))
+        # self.distance_weight = nn.Parameter(torch.empty(num_bands).unsqueeze(1).expand((-1, cropsize)).unsqueeze(2).clone())
+        # self.register_buffer('distances', torch.empty(num_bands, cropsize, cropsize))
         nn.init.kaiming_uniform_(self.er, a=math.sqrt(5))
-        nn.init.kaiming_uniform_(self.distance_weight, a=math.sqrt(5.0))
+        #nn.init.kaiming_uniform_(self.distance_weight, a=math.sqrt(5.0))
 
-        for i in range(cropsize):
-            for j in range(cropsize):
-                self.distances[:, i, j] = abs(i - j)
+        # for i in range(cropsize):
+        #     for j in range(cropsize):
+        #         self.distances[:, i, j] = abs(i - j)
 
-    def forward(self, x, mem=None, prev=None):
+    def __call__(self, x, mem=None, prev=None):
         b,w,h = x.shape
         q = self.q_proj(x).reshape(b, w, self.num_bands, -1).permute(0,2,1,3)
         k = self.k_proj(x if mem is None else mem).reshape(b, w, self.num_bands, -1).permute(0,2,3,1)
         v = self.v_proj(x if mem is None else mem).reshape(b, w, self.num_bands, -1).permute(0,2,1,3)
 
-        p = (self.distances * self.distance_weight) + F.pad(torch.matmul(q,self.er), (1,0)).transpose(2,3)[:,:,1:,:]
+        p = F.pad(torch.matmul(q,self.er), (1,0)).transpose(2,3)[:,:,1:,:]
         a = (torch.matmul(q,k)+p) / math.sqrt(h)
         a = a + prev if prev is not None else a
         attn = F.softmax(a, dim=-1)

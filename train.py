@@ -37,17 +37,34 @@ def setup_logger(name, logfile='LOGFILENAME.log'):
 
     return logger
 
+def mixup(X, Y, alpha=1):
+    indices = torch.randperm(X.size(0))
+    X2 = X[indices]
+    Y2 = Y[indices]
+    alpha = np.full((X.shape[0]), fill_value=alpha)
+    lam = torch.FloatTensor(np.random.beta(alpha, alpha))
+    inv_lam = torch.ones_like(lam) - lam
+    lam = lam.unsqueeze(1).unsqueeze(2).unsqueeze(3).to(X.device)
+    inv_lam = inv_lam.unsqueeze(1).unsqueeze(2).unsqueeze(3).to(X.device)
+    X = X * lam + X2 * inv_lam
+    Y = Y * lam + Y2 * inv_lam
+    return X, Y
 
-def train_epoch(dataloader, model, device, optimizer, accumulation_steps, grad_scaler, progress_bar):
+def train_epoch(dataloader, model, device, optimizer, accumulation_steps, grad_scaler, progress_bar, mixup_rate, mixup_alpha):
     model.train()
     sum_loss = 0
     batch_loss = 0
     crit = nn.L1Loss()
 
+    dataloader.dataset.rebuild()
+
     pbar = tqdm(dataloader) if progress_bar else dataloader
     for itr, (X_batch, y_batch) in enumerate(pbar):
         X_batch = X_batch.to(device)
         y_batch = y_batch.to(device)
+
+        if np.random.uniform() < mixup_rate:
+            X_batch, y_batch = mixup(X_batch, y_batch, mixup_alpha)
 
         with torch.cuda.amp.autocast_mode.autocast():
             pred = model(X_batch)
@@ -120,8 +137,10 @@ def main():
     p.add_argument('--val_cropsize', '-c', type=int, default=256)
     p.add_argument('--num_workers', '-w', type=int, default=6)
     p.add_argument('--epoch', '-E', type=int, default=200)
+    p.add_argument('--epoch_size', type=int, default=None)
     p.add_argument('--reduction_rate', '-R', type=float, default=0.0)
     p.add_argument('--reduction_level', '-L', type=float, default=0.2)
+    p.add_argument('--fake_data_ratio', type=float, default=0.75)
     p.add_argument('--mixup_rate', '-M', type=float, default=0.0)
     p.add_argument('--mixup_alpha', '-a', type=float, default=1.0)
     p.add_argument('--pretrained_model', '-P', type=str, default=None)
@@ -129,7 +148,7 @@ def main():
     p.add_argument('--lr_warmup_steps', '-LW', type=int, default=4)
     p.add_argument('--lr_warmup_current_step', type=int, default=0)
     p.add_argument('--channels', type=int, default=8)
-    p.add_argument('--num_decoders', type=int, default=4)
+    p.add_argument('--num_decoders', type=int, default=2)
     p.add_argument('--num_bands', type=int, default=8)
     p.add_argument('--feedforward_dim', type=int, default=2048)
     p.add_argument('--bias', type=str, default='true')
@@ -172,12 +191,13 @@ def main():
         model.to(device)
 
     train_dataset = dataset.VocalAugmentationDataset(
-        path="C://cs256_sr44100_hl1024_nf2048_of0",
-        extra_path="G://cs256_sr44100_hl1024_nf2048_of0",
+        instrumental_a_path="C://cs256_sr44100_hl1024_nf2048_of0",
+        instrumental_b_path="G://cs256_sr44100_hl1024_nf2048_of0",
         pair_path="G:\cs256_sr44100_hl1024_nf2048_of0_PAIRS",
         vocal_path="G://cs256_sr44100_hl1024_nf2048_of0_VOCALS",
-        pair_mul=1,
-        is_validation=False
+        fake_data_ratio=args.fake_data_ratio,
+        is_validation=False,
+        epoch_size=args.epoch_size
     )
 
     train_dataloader = torch.utils.data.DataLoader(
@@ -188,7 +208,7 @@ def main():
     )
     
     val_dataset = dataset.VocalAugmentationDataset(
-        path="C://cs256_sr44100_hl1024_nf2048_of0_VALIDATION",
+        instrumental_a_path="C://cs256_sr44100_hl1024_nf2048_of0_VALIDATION",
         is_validation=True
     )
 
@@ -212,7 +232,7 @@ def main():
     log = []
     best_loss = np.inf
     for epoch in range(args.epoch):
-        train_dataset.reset()
+        train_dataset.rebuild()
 
         if current_warmup_step < warmup_steps:
             lr = (current_warmup_step + 1) * (target_learning_rate / warmup_steps)
@@ -235,7 +255,7 @@ def main():
             print(f'# lr: {lr}')
 
         logger.info('# epoch {}'.format(epoch))
-        train_loss = train_epoch(train_dataloader, model, device, optimizer, args.accumulation_steps, grad_scaler, args.progress_bar)
+        train_loss = train_epoch(train_dataloader, model, device, optimizer, args.accumulation_steps, grad_scaler, args.progress_bar, args.mixup_rate, args.mixup_alpha)
         val_loss = validate_epoch(val_dataloader, model, device)
 
         logger.info(
@@ -251,7 +271,7 @@ def main():
             model_path = 'models/model_iter{}.pth'.format(epoch)
             torch.save(model.state_dict(), model_path)
 
-        log.append([train_loss, val_loss])
+        log.append([1, val_loss])
         with open('loss_{}.json'.format(timestamp), 'w', encoding='utf8') as f:
             json.dump(log, f, ensure_ascii=False)
 
