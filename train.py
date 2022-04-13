@@ -57,8 +57,6 @@ def train_epoch(dataloader, model, device, optimizer, accumulation_steps, grad_s
     batch_loss = 0
     crit = nn.L1Loss()
 
-    dataloader.dataset.rebuild()
-
     pbar = tqdm(dataloader) if progress_bar else dataloader
     for itr, (X_batch, y_batch) in enumerate(pbar):
         X_batch = X_batch.to(device)
