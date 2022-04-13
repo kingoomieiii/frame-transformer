@@ -18,17 +18,18 @@ class VocalAugmentationDataset(torch.utils.data.Dataset):
     def __init__(self, inst_a_path, inst_b_path=None, pair_path=None, vocal_path=None, is_validation=False, epoch_size=None, fake_data_prob=math.nan, vocal_recurse_prob=0.25, vocal_recurse_prob_decay=0.5, vocal_noise_prob=0.5, vocal_noise_magnitude=0.5, vocal_pan_prob=0.5, instrumental_mixup_rate=0.25):
         self.epoch_size = epoch_size
         self.is_validation = is_validation
-        self.fake_data_prob = fake_data_prob
-        self.inst_list = []
-        self.pair_list = []
-        self.curr_list = []
 
+        self.fake_data_prob = fake_data_prob
         self.vocal_recurse_prob = vocal_recurse_prob
         self.vocal_recurse_prob_decay = vocal_recurse_prob_decay
         self.vocal_noise_prob = vocal_noise_prob
         self.vocal_noise_magnitude = vocal_noise_magnitude
         self.vocal_pan_prob = vocal_pan_prob
         self.instrumental_mixup_rate = instrumental_mixup_rate
+        
+        self.inst_list = []
+        self.pair_list = []
+        self.curr_list = []
         
         if not is_validation:
             if vocal_path is not None:
@@ -83,18 +84,18 @@ class VocalAugmentationDataset(torch.utils.data.Dataset):
                     data2 = np.load(str(path2))
                     X2, X2c = data2['X'], data2['c']
                     Y2 = X2 if "Y" not in data2.files else data2['Y']
-                    a = np.random.uniform()
+                    a = np.random.beta(0.4, 0.4)
                     X2c = (a * X2c) + ((1-a) * Xc)
                     Y = (a * Y2) + ((1-a) * Y)
                     Xc = np.max([Xc, X2c, np.abs(Y).max()])
 
-                V, Vc = self._getvocals()
+                V, Vc = self._get_vocals()
                 X = Y + V
                 c = np.max([Xc, Vc, np.abs(X).max()])
             else:
                 if np.random.uniform() < 0.33:
-                    V, Vc = self._getvocals()
-                    X = X + (V * np.random.uniform())
+                    V, Vc = self._get_vocals()
+                    X = X + (V * np.random.beta(0.4, 1))
                     c = np.max([Xc, Vc, np.abs(X).max()])
                 else:
                     c = Xc  
@@ -107,7 +108,7 @@ class VocalAugmentationDataset(torch.utils.data.Dataset):
 
         return np.abs(X) / c, np.abs(Y) / c
 
-    def _getvocals(self, recurse_prob=None):
+    def _get_vocals(self, recurse_prob=None):
         recurse_prob = self.vocal_recurse_prob if recurse_prob is None else recurse_prob
         idx = np.random.randint(len(self.vocal_list))        
         path = self.vocal_list[idx]
@@ -119,17 +120,17 @@ class VocalAugmentationDataset(torch.utils.data.Dataset):
 
         if np.random.uniform() < self.vocal_pan_prob:
             if np.random.uniform() < 0.5:
-                V[0] = V[0] * np.random.uniform()
+                V[0] = V[0] * np.random.beta(0.4,1)
             else:
-                V[1] = V[1] * np.random.uniform()
+                V[1] = V[1] * np.random.beta(0.4,1)
 
         if np.random.uniform() < self.vocal_noise_prob:
-            noise = np.random.uniform(0, 1, size=(V.shape[0], V.shape[1], V.shape[2])).astype('f')
+            noise = np.random.beta(1, 1, size=(V.shape[0], V.shape[1], V.shape[2])).astype('f')
             V = ((1-self.vocal_noise_magnitude) * V) + (self.vocal_noise_magnitude * noise * V)
 
         if np.random.uniform() < recurse_prob:
-            V2, Vc2 = self._getvocals(recurse_prob=recurse_prob * self.vocal_recurse_prob_decay)
-            a = np.random.uniform()
+            V2, Vc2 = self._get_vocals(recurse_prob=recurse_prob * self.vocal_recurse_prob_decay)
+            a = np.random.beta(0.4, 0.4)
             Vc = (a * Vc2) + ((1-a) * Vc)
             V = (a * V2) + ((1-a) * V)
 
