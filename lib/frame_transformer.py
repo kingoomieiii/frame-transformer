@@ -104,6 +104,8 @@ class FrameConv(nn.Module):
         super(FrameConv, self).__init__()
 
         self.body = nn.Sequential(
+            nn.BatchNorm2d(in_channels),
+            activate(inplace=True),
             nn.Conv2d(
                 in_channels, out_channels,
                 kernel_size=(kernel_size, 1),
@@ -111,9 +113,7 @@ class FrameConv(nn.Module):
                 padding=(padding, 0),
                 dilation=(dilation, 1),
                 groups=groups,
-                bias=False),
-            nn.BatchNorm2d(out_channels),
-            activate(inplace=True))
+                bias=False))
 
     def __call__(self, x):
         h = self.body(x)
@@ -167,55 +167,59 @@ class FrameTransformerEncoder(nn.Module):
         self.num_bands = num_bands
 
         self.relu = nn.ReLU(inplace=True)
+        self.bottleneck_norm = nn.BatchNorm2d(channels)
         self.bottleneck_linear = nn.Linear(channels, 1, bias=bias)
-        self.bottleneck_norm = nn.BatchNorm2d(1)
 
+        self.norm1 = nn.LayerNorm(bins)
         self.glu_values = nn.Linear(bins, bins, bias=bias)
         self.glu_gates = nn.Linear(bins, bins, bias=bias)
-        self.norm1 = nn.LayerNorm(bins)
         self.dropout1 = nn.Dropout(dropout) if dropout > 0 else nn.Identity()
 
+        self.norm2 = nn.LayerNorm(bins)
         self.conv1L = nn.Linear(bins, feedforward_dim * 2, bias=bias)
         self.conv1R = nn.Conv1d(bins, feedforward_dim // 2, kernel_size=3, padding=1, bias=bias)
-        self.norm2 = nn.LayerNorm(feedforward_dim * 2)
+        self.norm3 = nn.LayerNorm(feedforward_dim * 2)
         self.conv2 = nn.Sequential(
             nn.Conv1d(feedforward_dim*2, feedforward_dim*2, kernel_size=9, padding=4, groups=feedforward_dim*2, bias=bias),
             nn.Conv1d(feedforward_dim*2, feedforward_dim//2, kernel_size=1, padding=0, bias=bias))
-        self.norm3 = nn.LayerNorm(bins)
         self.dropout2 = nn.Dropout(dropout) if dropout > 0 else nn.Identity()
 
-        self.attn = MultibandFrameAttention(num_bands, bins, cropsize)
         self.norm4 = nn.LayerNorm(bins)
+        self.attn = MultibandFrameAttention(num_bands, bins, cropsize)
         self.dropout3 = nn.Dropout(dropout) if dropout > 0 else nn.Identity()
 
+        self.norm5 = nn.LayerNorm(bins)
         self.conv3 = nn.Linear(bins, feedforward_dim * 2, bias=bias)
         self.conv4 = nn.Linear(feedforward_dim * 2, bins, bias=bias)
-        self.norm5 = nn.LayerNorm(bins)
         self.dropout4 = nn.Dropout(dropout) if dropout > 0 else nn.Identity()
 
     def __call__(self, x, sa=None):
-        x = self.relu(self.bottleneck_norm(self.bottleneck_linear(x.transpose(1,3)).transpose(1,3)))
+        x = self.relu(self.bottleneck_linear(self.bottleneck_norm(x).transpose(1,3)).transpose(1,3))
 
         b, _, h, w = x.shape
         x = x.transpose(2,3).reshape(b,w,h)
 
-        h = self.dropout1(self.glu_values(x) * torch.sigmoid(self.glu_gates(x)))
-        x = self.norm1(x + F.pad(input=h, pad=(0,x.shape[2]-h.shape[2])))
+        h = self.norm1(x)
+        h = self.dropout1(self.glu_values(h) * torch.sigmoid(self.glu_gates(h)))
+        x = x + F.pad(input=h, pad=(0,x.shape[2]-h.shape[2]))
 
-        hL = self.relu(self.conv1L(x))
-        hR = self.relu(self.conv1R(x.transpose(1,2)).transpose(1,2))
-        h = self.norm2(hL + F.pad(input=hR, pad=(0,hL.shape[2]-hR.shape[2])))
+        h = self.norm2(x)
+        hL = self.relu(self.conv1L(h))
+        hR = self.relu(self.conv1R(h.transpose(1,2)).transpose(1,2))
+        h = self.norm3(hL + F.pad(hR, (0,hL.shape[2]-hR.shape[2])))
         h = self.dropout2(self.conv2(h.transpose(1,2)).transpose(1,2))
-        x = self.norm3(x + F.pad(input=h, pad=(0,x.shape[2]-h.shape[2])))
+        x = x + F.pad(h, (0,x.shape[2]-h.shape[2]))
 
-        h, sa = self.attn(x, prev=sa)
+        h = self.norm4(x)
+        h, sa = self.attn(h, prev=sa)
         h = self.dropout3(h)
-        x = self.norm4(x + h)
+        x = x + h
 
-        h = self.conv3(x)
+        h = self.norm5(x)
+        h = self.conv3(h)
         h = self.relu(h)
         h = self.dropout4(self.conv4(h))
-        x = self.norm5(x + h)
+        x = x + h
                 
         return x.transpose(1, 2).unsqueeze(1), sa
 
@@ -234,74 +238,76 @@ class FrameTransformerDecoder(nn.Module):
 
         self.relu = nn.ReLU(inplace=True)
 
+        self.bottleneck_norm = nn.BatchNorm2d(channels)
         self.bottleneck_linear = nn.Linear(channels, 1, bias=bias)
-        self.bottleneck_norm = nn.BatchNorm2d(1)
+        self.mem_bottleneck_norm = nn.BatchNorm2d(mem_channels)
         self.mem_bottleneck_linear = nn.Linear(mem_channels, 1, bias=bias)
-        self.mem_bottleneck_norm = nn.BatchNorm2d(1)
 
+        self.norm1 = nn.LayerNorm(bins)
         self.self_attn1 = MultibandFrameAttention(num_bands, bins, cropsize)
         self.enc_attn1 = MultibandFrameAttention(num_bands, bins, cropsize)
-        self.norm1 = nn.LayerNorm(bins)
         self.dropout1 = nn.Dropout(dropout)
 
+        self.norm2 = nn.LayerNorm(bins)
         self.conv1L = nn.Sequential(
             nn.Conv1d(bins, bins, kernel_size=11, padding=5, groups=bins, bias=bias),
             nn.Conv1d(bins, feedforward_dim, kernel_size=1, padding=0, bias=bias))
         self.conv1R = nn.Sequential(
             nn.Conv1d(bins, bins, kernel_size=7, padding=3, groups=bins, bias=bias),
             nn.Conv1d(bins, feedforward_dim // 2, kernel_size=1, padding=0, bias=bias))
-        self.norm2 = nn.LayerNorm(feedforward_dim)
+        self.norm3 = nn.LayerNorm(feedforward_dim)
         self.conv2 = nn.Sequential(
             nn.Conv1d(feedforward_dim, feedforward_dim, kernel_size=7, padding=3, groups=feedforward_dim, bias=bias),
             nn.Conv1d(feedforward_dim, bins, kernel_size=1, padding=0, bias=bias))
-        self.norm3 = nn.LayerNorm(bins)
         self.dropout2 = nn.Dropout(dropout)
 
-        self.self_attn2 = MultibandFrameAttention(num_bands, bins, cropsize)
         self.norm4 = nn.LayerNorm(bins)
+        self.self_attn2 = MultibandFrameAttention(num_bands, bins, cropsize)
         self.dropout3 = nn.Dropout(dropout)
 
-        self.enc_attn2 = MultibandFrameAttention(num_bands, bins, cropsize)
         self.norm5 = nn.LayerNorm(bins)
+        self.enc_attn2 = MultibandFrameAttention(num_bands, bins, cropsize)
         self.dropout4 = nn.Dropout(dropout)
 
+        self.norm6 = nn.LayerNorm(bins)
         self.conv3 = nn.Linear(bins, feedforward_dim * 2, bias=bias)
         self.swish = nn.SiLU(inplace=True)
         self.conv4 = nn.Linear(feedforward_dim * 2, bins, bias=bias)
-        self.norm6 = nn.LayerNorm(bins)
         self.dropout5 = nn.Dropout(dropout)
 
     def __call__(self, x, mem, sa1=None, ea1=None, sa2=None, ea2=None):
-        x = self.relu(self.bottleneck_norm(self.bottleneck_linear(x.transpose(1,3)).transpose(1,3)))
-        mem = self.relu(self.mem_bottleneck_norm(self.mem_bottleneck_linear(mem.transpose(1,3)).transpose(1,3)))
+        x = self.relu(self.bottleneck_linear(self.bottleneck_norm(x).transpose(1,3)).transpose(1,3))
+        mem = self.relu(self.mem_bottleneck_linear(self.mem_bottleneck_norm(mem).transpose(1,3)).transpose(1,3))
         b,_,h,w = x.shape
 
         x = x.transpose(2,3).reshape(b,w,h)
         mem = mem.transpose(2,3).reshape(b,w,h)
 
-        hs1, sa1 = self.self_attn1(x, prev=sa1)
-        hm1, ea1 = self.enc_attn1(x, mem=mem, prev=ea1)
-        x = self.norm1(x + self.dropout1(hs1 + hm1))
+        h = self.norm1(x)
+        hs1, sa1 = self.self_attn1(h, prev=sa1)
+        hm1, ea1 = self.enc_attn1(h, mem=mem, prev=ea1)
+        x = x + self.dropout1(hs1 + hm1)
 
-        hL = self.relu(self.conv1L(x.transpose(1,2)).transpose(1,2))
-        hR = self.conv1R(x.transpose(1,2)).transpose(1,2)
-        h = self.norm2(hL + F.pad(hR, (0, hL.shape[2]-hR.shape[2])))
-
+        h = self.norm2(x)
+        hL = self.relu(self.conv1L(h.transpose(1,2)).transpose(1,2))
+        hR = self.conv1R(h.transpose(1,2)).transpose(1,2)
+        h = self.norm3(hL + F.pad(hR, (0, hL.shape[2]-hR.shape[2])))
         h = self.dropout2(self.conv2(h.transpose(1,2)).transpose(1,2))
-        x = self.norm3(x + h)
+        x = x + h
 
-        hs2, sa2 = self.self_attn2(x, prev=sa2)
+        h = self.norm4(x)
+        hs2, sa2 = self.self_attn2(h, prev=sa2)
         hs2 = self.dropout3(hs2)
-        x = self.norm4(x + hs2)
 
-        hm2, ea2 = self.enc_attn2(x, mem=mem, prev=ea2)
+        h = self.norm5(x)
+        hm2, ea2 = self.enc_attn2(h, mem=mem, prev=ea2)
         hm2 = self.dropout4(hm2)
-        x = self.norm5(x + hm2)
 
-        h = self.conv3(x)
+        h = self.norm6(x)
+        h = self.conv3(h)
         h = self.swish(h)
         h = self.dropout5(self.conv4(h))
-        x = self.norm6(x + h)
+        x = x + h
                 
         return x.transpose(1, 2).unsqueeze(1), sa1, ea1, sa2, ea2
 
