@@ -65,6 +65,7 @@ class FrameTransformer(nn.Module):
             e4 = torch.cat((e4, t), dim=1)
 
         h = self.enc5(e4)
+
         e5 = h
         for module in self.enc5_transformer:
             t, sa = module(e5, sa=sa)
@@ -167,6 +168,7 @@ class FrameTransformerEncoder(nn.Module):
         self.num_bands = num_bands
 
         self.relu = nn.ReLU(inplace=True)
+        
         self.bottleneck_norm = nn.BatchNorm2d(channels)
         self.bottleneck_linear = nn.Linear(channels, 1, bias=bias)
 
@@ -182,7 +184,7 @@ class FrameTransformerEncoder(nn.Module):
         self.norm3 = nn.LayerNorm(feedforward_dim * 2)
         self.conv2 = nn.Sequential(
             nn.Conv1d(feedforward_dim*2, feedforward_dim*2, kernel_size=9, padding=4, groups=feedforward_dim*2, bias=bias),
-            nn.Conv1d(feedforward_dim*2, feedforward_dim//2, kernel_size=1, padding=0, bias=bias))
+            nn.Conv1d(feedforward_dim*2, bins, kernel_size=1, padding=0, bias=bias))
         self.dropout2 = nn.Dropout(dropout) if dropout > 0 else nn.Identity()
 
         self.norm4 = nn.LayerNorm(bins)
@@ -202,14 +204,14 @@ class FrameTransformerEncoder(nn.Module):
 
         h = self.norm1(x)
         h = self.dropout1(self.glu(h))
-        x = x + F.pad(input=h, pad=(0,x.shape[2]-h.shape[2]))
+        x = x + h
 
         h = self.norm2(x)
         hL = self.relu(self.conv1L(h))
         hR = self.relu(self.conv1R(h.transpose(1,2)).transpose(1,2))
         h = self.norm3(hL + F.pad(hR, (0,hL.shape[2]-hR.shape[2])))
-        h = self.dropout2(self.conv2(h.transpose(1,2)).transpose(1,2))
-        x = x + F.pad(h, (0,x.shape[2]-h.shape[2]))
+        h = self.dropout2(self.conv2(h.transpose(1,2)).transpose(1,2)) 
+        x = x + h
 
         h = self.norm4(x)
         h, sa = self.attn(h, prev=sa)
@@ -252,14 +254,14 @@ class FrameTransformerDecoder(nn.Module):
         self.norm2 = nn.LayerNorm(bins)
         self.conv1L = nn.Sequential(
             nn.Conv1d(bins, bins, kernel_size=11, padding=5, groups=bins, bias=bias),
-            nn.Conv1d(bins, feedforward_dim, kernel_size=1, padding=0, bias=bias))
+            nn.Conv1d(bins, feedforward_dim * 2, kernel_size=1, padding=0, bias=bias))
         self.conv1R = nn.Sequential(
             nn.Conv1d(bins, bins, kernel_size=7, padding=3, groups=bins, bias=bias),
             nn.Conv1d(bins, feedforward_dim // 2, kernel_size=1, padding=0, bias=bias))
-        self.norm3 = nn.LayerNorm(feedforward_dim)
+        self.norm3 = nn.LayerNorm(feedforward_dim * 2)
         self.conv2 = nn.Sequential(
-            nn.Conv1d(feedforward_dim, feedforward_dim, kernel_size=7, padding=3, groups=feedforward_dim, bias=bias),
-            nn.Conv1d(feedforward_dim, bins, kernel_size=1, padding=0, bias=bias))
+            nn.Conv1d(feedforward_dim * 2, feedforward_dim * 2, kernel_size=7, padding=3, groups=feedforward_dim * 2, bias=bias),
+            nn.Conv1d(feedforward_dim * 2, bins, kernel_size=1, padding=0, bias=bias))
         self.dropout2 = nn.Dropout(dropout)
 
         self.norm4 = nn.LayerNorm(bins)

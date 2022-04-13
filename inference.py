@@ -119,23 +119,22 @@ def main():
     p.add_argument('--sr', '-r', type=int, default=44100)
     p.add_argument('--n_fft', '-f', type=int, default=2048)
     p.add_argument('--hop_length', '-H', type=int, default=1024)
-    p.add_argument('--batchsize', '-B', type=int, default=4)
+    p.add_argument('--batchsize', '-B', type=int, default=8)
     p.add_argument('--cropsize', '-c', type=int, default=256)
     p.add_argument('--output_image', '-I', action='store_true')
     p.add_argument('--postprocess', '-p', action='store_true')
     p.add_argument('--channels', type=int, default=8)
     p.add_argument('--num_encoders', type=int, default=2)
-    p.add_argument('--num_decoders', type=int, default=4)
-    p.add_argument('--num_bands', type=str, default=8)
+    p.add_argument('--num_decoders', type=int, default=2)
+    p.add_argument('--num_bands', type=str, default=16)
     p.add_argument('--feedforward_dim', type=int, default=2048)
     p.add_argument('--bias', type=str, default='true')
     p.add_argument('--tta', '-t', action='store_true')
-    p.add_argument('--output_prefix', type=str, default='')
     args = p.parse_args()
 
     print('loading model...', end=' ')
     device = torch.device('cpu')
-    model = FrameTransformer(channels=args.channels, n_fft=args.n_fft, num_decoders=args.num_decoders, num_bands=args.num_bands, feedforward_dim=args.feedforward_dim, bias=args.bias, cropsize=args.cropsize)
+    model = FrameTransformer(channels=args.channels, n_fft=args.n_fft, num_encoders=args.num_encoders, num_decoders=args.num_decoders, num_bands=args.num_bands, feedforward_dim=args.feedforward_dim, bias=args.bias, cropsize=args.cropsize)
     model.load_state_dict(torch.load(args.pretrained_model, map_location=device))
     if torch.cuda.is_available() and args.gpu >= 0:
         device = torch.device('cuda:{}'.format(args.gpu))
@@ -145,25 +144,27 @@ def main():
     if str.endswith(args.input, '.json'):
         convert = None
         copy = None
-        output = None
-
+        output_folder = None
 
         with open(args.input, 'r', encoding='utf8') as f:
             obj = json.load(f)
             convert = obj.get('convert')
             copy = obj.get('copy')
-            output = obj.get('output')
+            output_folder = obj.get('output')
             
-        output = '' if output is None else output
+        output_folder = '' if output_folder is None else output_folder
         convert = [] if convert is None else convert
         copy = [] if copy is None else copy
 
-        if output != '' and not os.path.exists(output):
-            os.makedirs(output)
+        if args.output != '':
+            output_folder = f'{args.output}/{output_folder}/'
+
+        if output_folder != '' and not os.path.exists(output_folder):
+            os.makedirs(output_folder)
 
         for file in tqdm(copy):
             basename = os.path.splitext(os.path.basename(file))[0]
-            shutil.copyfile(file, '{}{}_Instruments.wav'.format(output, basename))
+            shutil.copyfile(file, '{}{}_Instruments.wav'.format(output_folder, basename))
 
         for file in tqdm(convert):
             print('loading wave source...', end=' ')
@@ -189,18 +190,18 @@ def main():
             print('inverse stft of instruments...', end=' ')
             wave = spec_utils.spectrogram_to_wave(y_spec, hop_length=args.hop_length)
             print('done')
-            sf.write('{}{}_Instruments.wav'.format(output, basename), wave.T, sr)
+            sf.write('{}{}_Instruments.wav'.format(output_folder, basename), wave.T, sr)
 
             print('inverse stft of vocals...', end=' ')
             wave = spec_utils.spectrogram_to_wave(v_spec, hop_length=args.hop_length)
             print('done')
-            sf.write('{}{}_Vocals.wav'.format(output, basename), wave.T, sr)
+            sf.write('{}{}_Vocals.wav'.format(output_folder, basename), wave.T, sr)
 
             if args.output_image:
                 image = spec_utils.spectrogram_to_image(y_spec)
-                utils.imwrite('{}{}_Instruments.jpg'.format(output, basename), image)
+                utils.imwrite('{}{}_Instruments.jpg'.format(output_folder, basename), image)
                 image = spec_utils.spectrogram_to_image(v_spec)
-                utils.imwrite('{}{}_Vocals.jpg'.format(output, basename), image)
+                utils.imwrite('{}{}_Vocals.jpg'.format(output_folder, basename), image)
             
     else:
         print('loading wave source...', end=' ')

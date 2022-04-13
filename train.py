@@ -115,6 +115,20 @@ def validate_epoch(dataloader, model, device):
 
 def main():
     p = argparse.ArgumentParser()
+    p.add_argument('--id', type=str, default='')
+    p.add_argument('--channels', type=int, default=8)
+    p.add_argument('--num_encoders', type=int, default=2)
+    p.add_argument('--num_decoders', type=int, default=2)
+    p.add_argument('--num_bands', type=int, default=16)
+    p.add_argument('--feedforward_dim', type=int, default=2048)
+    p.add_argument('--bias', type=str, default='true')
+    p.add_argument('--vocal_recurse_prob', type=float, default=0.5)
+    p.add_argument('--vocal_recurse_prob_decay', type=float, default=0.5)
+    p.add_argument('--vocal_noise_prob', type=float, default=0.5)
+    p.add_argument('--vocal_noise_magnitude', type=float, default=0.5)
+    p.add_argument('--vocal_pan_prob', type=float, default=0.5)
+    p.add_argument('--batchsize', '-B', type=int, default=4)
+    p.add_argument('--accumulation_steps', '-A', type=int, default=4)
     p.add_argument('--gpu', '-g', type=int, default=-1)
     p.add_argument('--seed', '-s', type=int, default=51)
     p.add_argument('--sr', '-r', type=int, default=44100)
@@ -126,15 +140,13 @@ def main():
     p.add_argument('--lr_min', type=float, default=0.0001)
     p.add_argument('--lr_decay_factor', type=float, default=0.9)
     p.add_argument('--lr_decay_patience', type=int, default=6)
-    p.add_argument('--batchsize', '-B', type=int, default=4)
-    p.add_argument('--accumulation_steps', '-A', type=int, default=1)
     p.add_argument('--cropsize', '-C', type=int, default=256)
     p.add_argument('--patches', '-p', type=int, default=16)
     p.add_argument('--val_rate', '-v', type=float, default=0.2)
     p.add_argument('--val_filelist', '-V', type=str, default=None)
     p.add_argument('--val_batchsize', '-b', type=int, default=4)
     p.add_argument('--val_cropsize', '-c', type=int, default=256)
-    p.add_argument('--num_workers', '-w', type=int, default=6)
+    p.add_argument('--num_workers', '-w', type=int, default=4)
     p.add_argument('--epoch', '-E', type=int, default=200)
     p.add_argument('--epoch_size', type=int, default=None)
     p.add_argument('--reduction_rate', '-R', type=float, default=0.0)
@@ -146,25 +158,13 @@ def main():
     p.add_argument('--progress_bar', '-pb', type=str, default='true')
     p.add_argument('--lr_warmup_steps', '-LW', type=int, default=4)
     p.add_argument('--lr_warmup_current_step', type=int, default=0)
-    p.add_argument('--channels', type=int, default=8)
-    p.add_argument('--num_encoders', type=int, default=2)
-    p.add_argument('--num_decoders', type=int, default=2)
-    p.add_argument('--num_bands', type=int, default=8)
-    p.add_argument('--feedforward_dim', type=int, default=2048)
-    p.add_argument('--bias', type=str, default='true')
     p.add_argument('--debug', action='store_true')
-    p.add_argument('--vocal_recurse_prob', type=float, default=0.5)
-    p.add_argument('--vocal_recurse_prob_decay', type=float, default=0.5)
-    p.add_argument('--vocal_noise_prob', type=float, default=0.5)
-    p.add_argument('--vocal_noise_magnitude', type=float, default=0.5)
-    p.add_argument('--vocal_pan_prob', type=float, default=0.5)
-    p.add_argument('--id', type=str, default='')
     args = p.parse_args()
 
     args.progress_bar = str.lower(args.progress_bar) == 'true'
     args.bias = str.lower(args.bias) == 'true'
 
-    logger.info(f'id={args.id} feedforward_dim={args.feedforward_dim}, num_decoders={args.num_decoders}, num_bands={args.num_bands}, channels={args.channels}')
+    logger.info(args)
 
     random.seed(args.seed)
     np.random.seed(args.seed)
@@ -206,7 +206,8 @@ def main():
         vocal_noise_prob=args.vocal_noise_prob,
         vocal_noise_magnitude=args.vocal_noise_magnitude,
         vocal_pan_prob=args.vocal_pan_prob,
-        is_validation=False
+        is_validation=False,
+        epoch_size=args.epoch_size
     )
 
     train_dataloader = torch.utils.data.DataLoader(

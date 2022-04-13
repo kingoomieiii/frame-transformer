@@ -62,6 +62,9 @@ class VocalAugmentationDataset(torch.utils.data.Dataset):
             self.curr_list.extend(self.pair_list)
             self.curr_list.extend(self.inst_list)
 
+            if self.epoch_size is not None:
+                self.curr_list = self.curr_list[:self.epoch_size]
+
     def __len__(self):
         return len(self.curr_list)
 
@@ -98,8 +101,8 @@ class VocalAugmentationDataset(torch.utils.data.Dataset):
                     X = X + (V * np.random.beta(0.4, 1))
                     c = np.max([Xc, Vc, np.abs(X).max()])
                 else:
-                    c = Xc  
-                
+                    c = Xc          
+                    
             if np.random.uniform() < 0.02:
                 X = Y
                 c = Xc
