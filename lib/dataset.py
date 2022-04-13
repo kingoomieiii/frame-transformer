@@ -125,7 +125,7 @@ class VocalAugmentationDataset(torch.utils.data.Dataset):
                 V[1] = V[1] * np.random.beta(0.4,1)
 
         if np.random.uniform() < self.vocal_noise_prob:
-            noise = np.random.beta(1, 1, size=(V.shape[0], V.shape[1], V.shape[2])).astype('f')
+            noise = np.random.uniform(size=(V.shape[0], V.shape[1], V.shape[2])).astype('f')
             V = ((1-self.vocal_noise_magnitude) * V) + (self.vocal_noise_magnitude * noise * V)
 
         if np.random.uniform() < recurse_prob:

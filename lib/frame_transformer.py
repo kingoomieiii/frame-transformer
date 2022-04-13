@@ -65,12 +65,10 @@ class FrameTransformer(nn.Module):
             e4 = torch.cat((e4, t), dim=1)
 
         h = self.enc5(e4)
-
         e5 = h
         for module in self.enc5_transformer:
             t, sa = module(e5, sa=sa)
             e5 = torch.cat((e5, t), dim=1)
-
         for module in self.dec4_transformer:
             t, sa1, ea1, sa2, ea2 = module(h, mem=e5, sa1=sa1, ea1=ea1, sa2=sa2, ea2=ea2)
             h = torch.cat((h, t), dim=1)
@@ -171,8 +169,9 @@ class FrameTransformerEncoder(nn.Module):
         self.relu = nn.ReLU(inplace=True)
         self.bottleneck_linear = nn.Linear(channels, 1, bias=bias)
         self.bottleneck_norm = nn.BatchNorm2d(1)
-       
-        self.glu = nn.GLU()
+
+        self.glu_values = nn.Linear(bins, bins, bias=bias)
+        self.glu_gates = nn.Linear(bins, bins, bias=bias)
         self.norm1 = nn.LayerNorm(bins)
         self.dropout1 = nn.Dropout(dropout) if dropout > 0 else nn.Identity()
 
@@ -200,7 +199,7 @@ class FrameTransformerEncoder(nn.Module):
         b, _, h, w = x.shape
         x = x.transpose(2,3).reshape(b,w,h)
 
-        h = self.dropout1(self.glu(x))
+        h = self.dropout1(self.glu_values(x) * torch.sigmoid(self.glu_gates(x)))
         x = self.norm1(x + F.pad(input=h, pad=(0,x.shape[2]-h.shape[2])))
 
         hL = self.relu(self.conv1L(x))

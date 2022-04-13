@@ -153,7 +153,7 @@ def main():
     p.add_argument('--feedforward_dim', type=int, default=2048)
     p.add_argument('--bias', type=str, default='true')
     p.add_argument('--debug', action='store_true')
-    p.add_argument('--vocal_recurse_prob', type=float, default=0.25)
+    p.add_argument('--vocal_recurse_prob', type=float, default=0.5)
     p.add_argument('--vocal_recurse_prob_decay', type=float, default=0.5)
     p.add_argument('--vocal_noise_prob', type=float, default=0.5)
     p.add_argument('--vocal_noise_magnitude', type=float, default=0.5)
