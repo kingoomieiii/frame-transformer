@@ -154,6 +154,11 @@ def main():
     p.add_argument('--feedforward_dim', type=int, default=2048)
     p.add_argument('--bias', type=str, default='true')
     p.add_argument('--debug', action='store_true')
+    p.add_argument('--vocal_recurse_prob', type=float, default=0.25)
+    p.add_argument('--vocal_recurse_prob_decay', type=float, default=0.5)
+    p.add_argument('--vocal_noise_prob', type=float, default=0.5)
+    p.add_argument('--vocal_noise_magnitude', type=float, default=0.5)
+    p.add_argument('--vocal_pan_prob', type=float, default=0.5)
     p.add_argument('--id', type=str, default='')
     args = p.parse_args()
 
@@ -197,6 +202,11 @@ def main():
         pair_path="G:\cs256_sr44100_hl1024_nf2048_of0_PAIRS",
         vocal_path="G://cs256_sr44100_hl1024_nf2048_of0_VOCALS",
         fake_data_prob=args.fake_data_prob,
+        vocal_recurse_prob=args.vocal_recurse_prob,
+        vocal_recurse_prob_decay=args.vocal_recurse_prob_decay,
+        vocal_noise_prob=args.vocal_noise_prob,
+        vocal_noise_magnitude=args.vocal_noise_magnitude,
+        vocal_pan_prob=args.vocal_pan_prob,
         is_validation=False
     )
 
