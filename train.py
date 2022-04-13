@@ -126,7 +126,7 @@ def main():
     p.add_argument('--lr_min', type=float, default=0.0001)
     p.add_argument('--lr_decay_factor', type=float, default=0.9)
     p.add_argument('--lr_decay_patience', type=int, default=6)
-    p.add_argument('--batchsize', '-B', type=int, default=5)
+    p.add_argument('--batchsize', '-B', type=int, default=4)
     p.add_argument('--accumulation_steps', '-A', type=int, default=1)
     p.add_argument('--cropsize', '-C', type=int, default=256)
     p.add_argument('--patches', '-p', type=int, default=16)

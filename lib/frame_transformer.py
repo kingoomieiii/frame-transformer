@@ -194,7 +194,7 @@ class FrameTransformerEncoder(nn.Module):
         self.dropout4 = nn.Dropout(dropout) if dropout > 0 else nn.Identity()
 
     def __call__(self, x, sa=None):
-        x = self.relu(self.bottleneck_linear(self.bottleneck_norm(x).transpose(1,3)).transpose(1,3))
+        x = self.bottleneck_linear(self.relu(self.bottleneck_norm(x)).transpose(1,3)).transpose(1,3)
 
         b, _, h, w = x.shape
         x = x.transpose(2,3).reshape(b,w,h)
@@ -276,8 +276,8 @@ class FrameTransformerDecoder(nn.Module):
         self.dropout5 = nn.Dropout(dropout)
 
     def __call__(self, x, mem, sa1=None, ea1=None, sa2=None, ea2=None):
-        x = self.relu(self.bottleneck_linear(self.bottleneck_norm(x).transpose(1,3)).transpose(1,3))
-        mem = self.relu(self.mem_bottleneck_linear(self.mem_bottleneck_norm(mem).transpose(1,3)).transpose(1,3))
+        x = self.bottleneck_linear(self.relu(self.bottleneck_norm(x)).transpose(1,3)).transpose(1,3)
+        mem = self.mem_bottleneck_linear(self.relu(self.mem_bottleneck_norm(mem)).transpose(1,3)).transpose(1,3)
         b,_,h,w = x.shape
 
         x = x.transpose(2,3).reshape(b,w,h)
