@@ -298,12 +298,12 @@ class FrameTransformerDecoder(nn.Module):
         h = self.norm4(x)
         hs2, sa2 = self.self_attn2(h, prev=sa2)
         hs2 = self.dropout3(hs2)
-        x = x + h
+        x = x + hs2
 
         h = self.norm5(x)
         hm2, ea2 = self.enc_attn2(h, mem=mem, prev=ea2)
         hm2 = self.dropout4(hm2)
-        x = x + h
+        x = x + hm2
 
         h = self.norm6(x)
         h = self.conv3(h)
