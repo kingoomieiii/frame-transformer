@@ -171,8 +171,9 @@ class FrameTransformerEncoder(nn.Module):
         self.bottleneck_linear = nn.Linear(channels, 1, bias=bias)
 
         self.norm1 = nn.LayerNorm(bins)
-        self.glu_values = nn.Linear(bins, bins, bias=bias)
-        self.glu_gates = nn.Linear(bins, bins, bias=bias)
+        self.glu = nn.Sequential(
+            nn.Linear(bins, bins * 2, bias=bias),
+            nn.GLU())
         self.dropout1 = nn.Dropout(dropout) if dropout > 0 else nn.Identity()
 
         self.norm2 = nn.LayerNorm(bins)
@@ -200,7 +201,7 @@ class FrameTransformerEncoder(nn.Module):
         x = x.transpose(2,3).reshape(b,w,h)
 
         h = self.norm1(x)
-        h = self.dropout1(self.glu_values(h) * torch.sigmoid(self.glu_gates(h)))
+        h = self.dropout1(self.glu(h))
         x = x + F.pad(input=h, pad=(0,x.shape[2]-h.shape[2]))
 
         h = self.norm2(x)
