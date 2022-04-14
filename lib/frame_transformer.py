@@ -326,14 +326,7 @@ class MultibandFrameAttention(nn.Module):
         self.v_proj = nn.Linear(bins, bins)
         self.o_proj = nn.Linear(bins, bins)
         self.er = nn.Parameter(torch.empty(bins // num_bands, cropsize))
-        # self.distance_weight = nn.Parameter(torch.empty(num_bands).unsqueeze(1).expand((-1, cropsize)).unsqueeze(2).clone())
-        # self.register_buffer('distances', torch.empty(num_bands, cropsize, cropsize))
         nn.init.kaiming_uniform_(self.er, a=math.sqrt(5))
-        #nn.init.kaiming_uniform_(self.distance_weight, a=math.sqrt(5.0))
-
-        # for i in range(cropsize):
-        #     for j in range(cropsize):
-        #         self.distances[:, i, j] = abs(i - j)
 
     def __call__(self, x, mem=None, prev=None):
         b,w,h = x.shape
@@ -343,8 +336,7 @@ class MultibandFrameAttention(nn.Module):
 
         p = F.pad(torch.matmul(q,self.er), (1,0)).transpose(2,3)[:,:,1:,:]
         a = (torch.matmul(q,k)+p) / math.sqrt(h)
-        a = a + prev if prev is not None else a
-        attn = F.softmax(a, dim=-1)
+        attn = F.softmax(a + prev if prev is not None else a, dim=-1)
 
         v = torch.matmul(attn,v).transpose(1,2).reshape(b,w,-1)
         o = self.o_proj(v)
