@@ -336,6 +336,7 @@ class MultibandFrameAttention(nn.Module):
 
         p = F.pad(torch.matmul(q,self.er), (1,0)).transpose(2,3)[:,:,1:,:]
         a = (torch.matmul(q,k)+p) / math.sqrt(h)
+        a = a + prev if prev is not None else a
         attn = F.softmax(a + prev if prev is not None else a, dim=-1)
 
         v = torch.matmul(attn,v).transpose(1,2).reshape(b,w,-1)

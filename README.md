@@ -4,7 +4,7 @@ This is a deep-learning-based tool to extract instrumental track from your songs
 
 This is a variation of tsurumeso's vocal remover that I've been tinkering with for a while that I'm calling a frame transformer. The goal of this fork is to find a meaningful way to use the evolved transformer architecture for track separation. This isn't a very user-friendly version just yet, has a lot of stuff that is specific to my dataset and environment; will take at least 12gb of VRAM to train this given the settings in the code. Will pretty this up over time.
 
-This version consists of only a single u-net. This u-net includes modified evolved transformer encoders after each in projection / downsampling as well as modified evolved transformer decoders before each upsampling / out projection.
+This version consists of only a single u-net. This u-net includes modified evolved transformer encoders after each downsampling / in projection as well as modified evolved transformer decoders before each upsampling / out projection.
 
 Will update this repo in the coming days with checkpoints with listed settings. My personal dataset consists of 5,249 instrumental songs from many genres, 488 vocal tracks from many genres, and 345 instrumental + mix pairs mainly from metal but with some rap and tracks from MUSDB18 all of which comes out to around 1TB. An example of this architecture after 4 epochs on my dataset is here: https://www.youtube.com/watch?v=bAJ_zUlUcAA, a vocal extraction (warning, the vocals here are screams) is here: https://www.youtube.com/watch?v=Wny0gBz_3Og with instrumental counterpart here: https://www.youtube.com/watch?v=jMVcX9RQCbg
 
