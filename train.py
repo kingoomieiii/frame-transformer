@@ -112,7 +112,6 @@ def validate_epoch(dataloader, model, device):
 
     return sum_loss / len(dataloader.dataset)
 
-
 def main():
     p = argparse.ArgumentParser()
     p.add_argument('--id', type=str, default='')
@@ -128,6 +127,7 @@ def main():
     p.add_argument('--vocal_noise_magnitude', type=float, default=0.5)
     p.add_argument('--vocal_pan_prob', type=float, default=0.5)
     p.add_argument('--batchsize', '-B', type=int, default=4)
+    p.add_argument('--weight_decay', type=float, default=0)
     p.add_argument('--accumulation_steps', '-A', type=int, default=4)
     p.add_argument('--gpu', '-g', type=int, default=-1)
     p.add_argument('--seed', '-s', type=int, default=51)
@@ -239,30 +239,25 @@ def main():
     params = sum([np.prod(p.size()) for p in model_parameters])
     print(f'# num params: {params}')
 
+    optimizer = torch.optim.RAdam(
+        filter(lambda p: p.requires_grad, model.parameters()),
+        lr=args.learning_rate,
+        weight_decay=args.weight_decay
+    )
+
+    scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
+        optimizer,
+        factor=args.lr_decay_factor,
+        patience=args.lr_decay_patience,
+        threshold=1e-6,
+        min_lr=args.lr_min,
+        verbose=True
+    )
+        
     log = []
     best_loss = np.inf
     for epoch in range(args.epoch):
         train_dataset.rebuild()
-
-        if current_warmup_step < warmup_steps:
-            lr = (current_warmup_step + 1) * (target_learning_rate / warmup_steps)
-            current_warmup_step += 1
-
-            optimizer = torch.optim.Adam(
-                filter(lambda p: p.requires_grad, model.parameters()),
-                lr=lr
-            )
-
-            scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
-                optimizer,
-                factor=args.lr_decay_factor,
-                patience=args.lr_decay_patience,
-                threshold=1e-6,
-                min_lr=args.lr_min,
-                verbose=True
-            )
-
-            print(f'# lr: {lr}')
 
         logger.info('# epoch {}'.format(epoch))
         train_loss = train_epoch(train_dataloader, model, device, optimizer, args.accumulation_steps, grad_scaler, args.progress_bar, args.mixup_rate, args.mixup_alpha)
