@@ -206,17 +206,11 @@ def main():
         device = torch.device('cuda:{}'.format(args.gpu))
         model.to(device)
 
-    train_dataset = dataset.VocalAugmentationDataset(
-        inst_a_path="C://cs256_sr44100_hl1024_nf2048_of0",
-        inst_b_path="G://cs256_sr44100_hl1024_nf2048_of0",
+    train_dataset = dataset.VocalAugmentationOldDataset(
+        path="C://cs256_sr44100_hl1024_nf2048_of0",
+        extra_path="G://cs256_sr44100_hl1024_nf2048_of0",
         pair_path="G:\cs256_sr44100_hl1024_nf2048_of0_PAIRS",
         vocal_path="G://cs256_sr44100_hl1024_nf2048_of0_VOCALS",
-        fake_data_prob=args.fake_data_prob,
-        vocal_recurse_prob=args.vocal_recurse_prob,
-        vocal_recurse_prob_decay=args.vocal_recurse_prob_decay,
-        vocal_noise_prob=args.vocal_noise_prob,
-        vocal_noise_magnitude=args.vocal_noise_magnitude,
-        vocal_pan_prob=args.vocal_pan_prob,
         is_validation=False,
         epoch_size=args.epoch_size
     )
