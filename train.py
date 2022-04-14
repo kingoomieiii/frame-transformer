@@ -65,20 +65,28 @@ def train_epoch(dataloader, model, device, optimizer, accumulation_steps, grad_s
         if np.random.uniform() < mixup_rate:
             X_batch, y_batch = mixup(X_batch, y_batch, mixup_alpha)
 
-        with torch.cuda.amp.autocast_mode.autocast():
+        with torch.cuda.amp.autocast_mode.autocast(enabled=grad_scaler is not None):
             pred = model(X_batch)
 
         loss = crit(pred * X_batch, y_batch)
         accum_loss = loss / accumulation_steps
         batch_loss = batch_loss + accum_loss
 
-        grad_scaler.scale(accum_loss).backward()
+        if grad_scaler is not None:
+            grad_scaler.scale(accum_loss).backward()
+        else:
+            accum_loss.backward()
 
         if (itr + 1) % accumulation_steps == 0:
             if progress_bar:
                 pbar.set_description(str(batch_loss.item()))
-            grad_scaler.step(optimizer)
-            grad_scaler.update()
+
+            if grad_scaler is not None:
+                grad_scaler.step(optimizer)
+                grad_scaler.update()
+            else:
+                optimizer.step()
+
             model.zero_grad()
             batch_loss = 0
 
@@ -92,7 +100,7 @@ def train_epoch(dataloader, model, device, optimizer, accumulation_steps, grad_s
 
     return sum_loss / len(dataloader.dataset)
 
-def validate_epoch(dataloader, model, device):
+def validate_epoch(dataloader, model, device, grad_scaler):
     model.eval()
     sum_loss = 0
     crit = nn.L1Loss()
@@ -102,7 +110,7 @@ def validate_epoch(dataloader, model, device):
             X_batch = X_batch.to(device)
             y_batch = y_batch.to(device)
 
-            with torch.cuda.amp.autocast_mode.autocast():
+            with torch.cuda.amp.autocast_mode.autocast(enabled=grad_scaler is not None):
                 pred = model(X_batch)
 
             y_batch = spec_utils.crop_center(y_batch, pred)
@@ -158,11 +166,13 @@ def main():
     p.add_argument('--progress_bar', '-pb', type=str, default='true')
     p.add_argument('--lr_warmup_steps', '-LW', type=int, default=4)
     p.add_argument('--lr_warmup_current_step', type=int, default=0)
+    p.add_argument('--mixed_precision', type=str, default='true')
     p.add_argument('--debug', action='store_true')
     args = p.parse_args()
 
     args.progress_bar = str.lower(args.progress_bar) == 'true'
     args.bias = str.lower(args.bias) == 'true'
+    args.mixed_precision = str.lower(args.mixed_precision) == 'true'
 
     logger.info(args)
 
@@ -229,11 +239,7 @@ def main():
         num_workers=args.num_workers
     )
     
-    grad_scaler = torch.cuda.amp.grad_scaler.GradScaler()
-    
-    current_warmup_step = args.lr_warmup_current_step
-    target_learning_rate = args.learning_rate
-    warmup_steps = args.lr_warmup_steps
+    grad_scaler = torch.cuda.amp.grad_scaler.GradScaler() if args.mixed_precision else None
     
     model_parameters = filter(lambda p: p.requires_grad, model.parameters())
     params = sum([np.prod(p.size()) for p in model_parameters])
@@ -261,7 +267,7 @@ def main():
 
         logger.info('# epoch {}'.format(epoch))
         train_loss = train_epoch(train_dataloader, model, device, optimizer, args.accumulation_steps, grad_scaler, args.progress_bar, args.mixup_rate, args.mixup_alpha)
-        val_loss = validate_epoch(val_dataloader, model, device)
+        val_loss = validate_epoch(val_dataloader, model, device, grad_scaler)
 
         logger.info(
             '  * training loss = {:.6f}, validation loss = {:.6f}'
