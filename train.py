@@ -65,6 +65,7 @@ def train_epoch(dataloader, model, device, optimizer, accumulation_steps, grad_s
         if np.random.uniform() < mixup_rate:
             X_batch, y_batch = mixup(X_batch, y_batch, mixup_alpha)
 
+
         with torch.cuda.amp.autocast_mode.autocast(enabled=grad_scaler is not None):
             pred = model(X_batch)
 
@@ -244,26 +245,35 @@ def main():
     model_parameters = filter(lambda p: p.requires_grad, model.parameters())
     params = sum([np.prod(p.size()) for p in model_parameters])
     print(f'# num params: {params}')
-
-    optimizer = torch.optim.RAdam(
-        filter(lambda p: p.requires_grad, model.parameters()),
-        lr=args.learning_rate,
-        weight_decay=args.weight_decay
-    )
-
-    scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
-        optimizer,
-        factor=args.lr_decay_factor,
-        patience=args.lr_decay_patience,
-        threshold=1e-6,
-        min_lr=args.lr_min,
-        verbose=True
-    )
+    
+    current_warmup_step = args.lr_warmup_current_step
+    target_learning_rate = args.learning_rate
+    warmup_steps = args.lr_warmup_steps
         
     log = []
     best_loss = np.inf
     for epoch in range(args.epoch):
         train_dataset.rebuild()
+
+        if current_warmup_step < warmup_steps:
+            lr = (current_warmup_step + 1) * (target_learning_rate / warmup_steps)
+            current_warmup_step += 1
+
+            optimizer = torch.optim.Adam(
+                filter(lambda p: p.requires_grad, model.parameters()),
+                lr=lr
+            )
+
+            scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
+                optimizer,
+                factor=args.lr_decay_factor,
+                patience=args.lr_decay_patience,
+                threshold=1e-6,
+                min_lr=args.lr_min,
+                verbose=True
+            )
+
+            print(f'# lr: {lr}')
 
         logger.info('# epoch {}'.format(epoch))
         train_loss = train_epoch(train_dataloader, model, device, optimizer, args.accumulation_steps, grad_scaler, args.progress_bar, args.mixup_rate, args.mixup_alpha)
