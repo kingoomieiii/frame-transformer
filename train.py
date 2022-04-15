@@ -126,8 +126,8 @@ def main():
     p.add_argument('--id', type=str, default='')
     p.add_argument('--channels', type=int, default=8)
     p.add_argument('--num_encoders', type=int, default=2)
-    p.add_argument('--num_decoders', type=int, default=2)
-    p.add_argument('--num_bands', type=int, default=16)
+    p.add_argument('--num_decoders', type=int, default=4)
+    p.add_argument('--num_bands', type=int, default=8)
     p.add_argument('--feedforward_dim', type=int, default=2048)
     p.add_argument('--bias', type=str, default='true')
     p.add_argument('--vocal_recurse_prob', type=float, default=0.5)
@@ -206,7 +206,7 @@ def main():
         device = torch.device('cuda:{}'.format(args.gpu))
         model.to(device)
 
-    train_dataset = dataset.VocalAugmentationOldDataset(
+    train_dataset = dataset.VocalAugmentationDataset(
         path="C://cs256_sr44100_hl1024_nf2048_of0",
         extra_path="G://cs256_sr44100_hl1024_nf2048_of0",
         pair_path="G:\cs256_sr44100_hl1024_nf2048_of0_PAIRS",
@@ -223,7 +223,7 @@ def main():
     )
     
     val_dataset = dataset.VocalAugmentationDataset(
-        inst_a_path="C://cs256_sr44100_hl1024_nf2048_of0_VALIDATION",
+        path="C://cs256_sr44100_hl1024_nf2048_of0_VALIDATION",
         is_validation=True
     )
 
@@ -272,10 +272,13 @@ def main():
         logger.info('# epoch {}'.format(epoch))
         train_loss = train_epoch(train_dataloader, model, device, optimizer, args.accumulation_steps, grad_scaler, args.progress_bar, args.mixup_rate, args.mixup_alpha)
         val_loss = validate_epoch(val_dataloader, model, device, grad_scaler)
+        val_dataset.apply_inst_on_validation = True
+        val_loss_fake = validate_epoch(val_dataloader, model, device, grad_scaler)        
+        val_dataset.apply_inst_on_validation = False
 
         logger.info(
-            '  * training loss = {:.6f}, validation loss = {:.6f}'
-            .format(train_loss, val_loss)
+            '  * training loss = {:.6f}, validation loss = {:.6f}, stupid loss = {:6f}'
+            .format(train_loss, val_loss, val_loss_fake)
         )
 
         scheduler.step(val_loss)
