@@ -15,10 +15,11 @@ except ModuleNotFoundError:
     import spec_utils
 
 class VocalAugmentationDataset(torch.utils.data.Dataset):
-    def __init__(self, path, extra_path=None, pair_path=None, vocal_path="", is_validation=False, mul=1, downsamples=0, epoch_size=None, pair_mul=1):
+    def __init__(self, path, extra_path=None, pair_path=None, vocal_path="", is_validation=False, mul=1, downsamples=0, epoch_size=None, pair_mul=1, apply_inst_on_validation=False):
         self.epoch_size = epoch_size
         self.mul = mul
         patch_list = [os.path.join(path, f) for f in os.listdir(path) if os.path.isfile(os.path.join(path, f))]
+        self.apply_inst_on_validation = apply_inst_on_validation
 
         if pair_path is not None and pair_mul > 0:
             pairs = [os.path.join(pair_path, f) for f in os.listdir(pair_path) if os.path.isfile(os.path.join(pair_path, f))]
@@ -109,7 +110,9 @@ class VocalAugmentationDataset(torch.utils.data.Dataset):
                     a = np.random.beta(1, 1)
                     X = X + (V * a)
 
-                c = np.max([Xc, np.abs(X).max(), np.abs(V).max()])
+                    Xc = np.max([Xc, np.abs(X).max()])
+
+                c = np.max([Xc, np.abs(X).max()])
 
             if np.random.uniform() < 0.5:
                 X = X[::-1]
@@ -120,6 +123,11 @@ class VocalAugmentationDataset(torch.utils.data.Dataset):
                 c = Xc
         else:
             c = Xc
+
+        if self.is_validation and self.apply_inst_on_validation:
+            if np.random.uniform() < 0.025:
+                X = Y
+                c = Xc
 
         return np.abs(X) / c, np.abs(Y) / c
 

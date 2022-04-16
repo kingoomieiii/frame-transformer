@@ -10,6 +10,7 @@ import numpy as np
 import torch
 import torch.nn as nn
 import torch.utils.data
+from torch.nn.utils import clip_grad_norm_
 
 from lib import dataset
 from lib import nets
@@ -18,6 +19,7 @@ from lib import spec_utils
 from tqdm import tqdm
 
 from lib.frame_transformer import FrameTransformer
+from lib.warmup_lr import WarmupLR
 
 def setup_logger(name, logfile='LOGFILENAME.log'):
     logger = logging.getLogger(name)
@@ -51,7 +53,7 @@ def mixup(X, Y, alpha=1):
     Y = Y * lam + Y2 * inv_lam
     return X, Y
 
-def train_epoch(dataloader, model, device, optimizer, accumulation_steps, grad_scaler, progress_bar, mixup_rate, mixup_alpha):
+def train_epoch(dataloader, model, device, optimizer, accumulation_steps, grad_scaler, progress_bar, mixup_rate, mixup_alpha, lr_warmup=None):
     model.train()
     sum_loss = 0
     batch_loss = 0
@@ -64,7 +66,6 @@ def train_epoch(dataloader, model, device, optimizer, accumulation_steps, grad_s
 
         if np.random.uniform() < mixup_rate:
             X_batch, y_batch = mixup(X_batch, y_batch, mixup_alpha)
-
 
         with torch.cuda.amp.autocast_mode.autocast(enabled=grad_scaler is not None):
             pred = model(X_batch)
@@ -83,10 +84,15 @@ def train_epoch(dataloader, model, device, optimizer, accumulation_steps, grad_s
                 pbar.set_description(str(batch_loss.item()))
 
             if grad_scaler is not None:
+                grad_scaler.unscale_(optimizer)
+                clip_grad_norm_(model.parameters(), 0.5)
                 grad_scaler.step(optimizer)
                 grad_scaler.update()
             else:
                 optimizer.step()
+
+            if lr_warmup is not None:
+                lr_warmup.step()
 
             model.zero_grad()
             batch_loss = 0
@@ -95,6 +101,8 @@ def train_epoch(dataloader, model, device, optimizer, accumulation_steps, grad_s
 
     # the rest batch
     if (itr + 1) % accumulation_steps != 0:
+        grad_scaler.unscale_(optimizer)
+        clip_grad_norm_(model.parameters(), 0.5)
         grad_scaler.step(optimizer)
         grad_scaler.update()
         model.zero_grad()
@@ -165,7 +173,7 @@ def main():
     p.add_argument('--mixup_alpha', '-a', type=float, default=1.0)
     p.add_argument('--pretrained_model', '-P', type=str, default=None)
     p.add_argument('--progress_bar', '-pb', type=str, default='true')
-    p.add_argument('--lr_warmup_steps', '-LW', type=int, default=4)
+    p.add_argument('--lr_warmup_steps', '-LW', type=int, default=16000)
     p.add_argument('--lr_warmup_current_step', type=int, default=0)
     p.add_argument('--mixed_precision', type=str, default='true')
     p.add_argument('--debug', action='store_true')
@@ -240,42 +248,37 @@ def main():
     params = sum([np.prod(p.size()) for p in model_parameters])
     print(f'# num params: {params}')
     
-    current_warmup_step = args.lr_warmup_current_step
-    target_learning_rate = args.learning_rate
-    warmup_steps = args.lr_warmup_steps
-        
+    optimizer = torch.optim.Adam(
+        filter(lambda p: p.requires_grad, model.parameters()),
+        lr=args.learning_rate
+    )
+
+    lr_warmup = WarmupLR(optimizer, target_lr=args.learning_rate, num_steps=args.lr_warmup_steps, current_step=args.lr_warmup_current_step, verbose=True) if args.lr_warmup_steps > 0 else None
+
+    scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
+        optimizer,
+        factor=args.lr_decay_factor,
+        patience=args.lr_decay_patience,
+        threshold=1e-6,
+        min_lr=args.lr_min,
+        verbose=True
+    )
+
     log = []
     best_loss = np.inf
     for epoch in range(args.epoch):
         train_dataset.rebuild()
 
-        if current_warmup_step < warmup_steps:
-            lr = (current_warmup_step + 1) * (target_learning_rate / warmup_steps)
-            current_warmup_step += 1
-
-            optimizer = torch.optim.Adam(
-                filter(lambda p: p.requires_grad, model.parameters()),
-                lr=lr
-            )
-
-            scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
-                optimizer,
-                factor=args.lr_decay_factor,
-                patience=args.lr_decay_patience,
-                threshold=1e-6,
-                min_lr=args.lr_min,
-                verbose=True
-            )
-
-            print(f'# lr: {lr}')
-
         logger.info('# epoch {}'.format(epoch))
-        train_loss = train_epoch(train_dataloader, model, device, optimizer, args.accumulation_steps, grad_scaler, args.progress_bar, args.mixup_rate, args.mixup_alpha)
+        train_loss = train_epoch(train_dataloader, model, device, optimizer, args.accumulation_steps, grad_scaler, args.progress_bar, args.mixup_rate, args.mixup_alpha, lr_warmup=lr_warmup)
         val_loss = validate_epoch(val_dataloader, model, device, grad_scaler)
+        val_dataset.apply_inst_on_validation = True
+        val_loss_fake = validate_epoch(val_dataloader, model, device, grad_scaler)        
+        val_dataset.apply_inst_on_validation = False
 
         logger.info(
             '  * training loss = {:.6f}, validation loss = {:.6f}, stupid loss = {:6f}'
-            .format(train_loss, val_loss)
+            .format(train_loss, val_loss, val_loss_fake)
         )
 
         scheduler.step(val_loss)
