@@ -26,13 +26,13 @@ class WarmupLR(object):
                         ' of group {} to {:.4e}.'.format(self.current_step, i, self.current_lr))
 
     def step(self):
-        self.current_step = self.current_step + 1
         self.current_lr = (self.current_step + 1) * (self.target_lr / self.num_steps)
         for i, param_group in enumerate(self.optimizer.param_groups):
             param_group['lr'] = self.current_lr
             if self.verbose and self.current_step % self.verbose_skip_steps == 0:
                 print('Step {:5d}: increased learning rate'
                         ' of group {} to {:.4e}.'.format(self.current_step, i, self.current_lr))
+        self.current_step = self.current_step + 1
 
     def state_dict(self):
         return {key: value for key, value in self.__dict__.items() if key != 'optimizer'}
