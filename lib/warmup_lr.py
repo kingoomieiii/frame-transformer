@@ -16,9 +16,14 @@ class WarmupLR(object):
 
         self._reset()
 
+        self.current_step = self.num_steps
+        self.current_lr = (self.current_step) * (self.target_lr / self.num_steps)
+        print(self.current_lr)
+        quit()
+
     def _reset(self):
-        self.current_step = 0
-        self.current_lr = (self.current_step + 1) * (self.target_lr / self.num_steps)
+        self.current_step = 1
+        self.current_lr = (self.current_step) * (self.target_lr / self.num_steps)
         for i, param_group in enumerate(self.optimizer.param_groups):
             param_group['lr'] = self.current_lr
             if self.verbose and self.current_step % self.verbose_skip_steps == 0:
@@ -28,8 +33,8 @@ class WarmupLR(object):
     def step(self):
         if self.current_step < self.num_steps:
             self.current_step = self.current_step + 1
-            self.current_lr = min((self.current_step + 1) * (self.target_lr / self.num_steps), self.target_lr)
-            
+            self.current_lr = (self.current_step) * (self.target_lr / self.num_steps)
+
             for i, param_group in enumerate(self.optimizer.param_groups):
                 param_group['lr'] = self.current_lr
                 if self.verbose and self.current_step % self.verbose_skip_steps == 0:
