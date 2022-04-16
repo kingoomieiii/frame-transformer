@@ -13,13 +13,7 @@ class WarmupLR(object):
                 type(optimizer).__name__))
 
         self.optimizer = optimizer
-
         self._reset()
-
-        self.current_step = self.num_steps
-        self.current_lr = (self.current_step) * (self.target_lr / self.num_steps)
-        print(self.current_lr)
-        quit()
 
     def _reset(self):
         self.current_step = 1
