@@ -85,6 +85,28 @@ class VocalAugmentationDataset(torch.utils.data.Dataset):
             else:
                 V[1] = V[1] * 0
 
+        if np.random.uniform() < 0.5:
+            vidx2 = np.random.randint(len(self.vocal_list))
+            
+            vpath2 = self.vocal_list[vidx2]
+            vdata2 = np.load(str(vpath2))
+            V2, Vc2 = vdata2['X'], vdata2['c']
+
+            if np.random.uniform() < 0.5:
+                V2 = V2[::-1]
+
+            if np.random.uniform() < 0.025:
+                if np.random.uniform() < 0.5:
+                    V2[0] = V2[0] * 0
+                else:
+                    V2[1] = V2[1] * 0
+
+            a = np.random.beta(1, 1)
+            inv = 1 - a
+
+            Vc = (Vc * a) + (Vc2 * inv)
+            V = (V * a) + (V2 * inv)
+
         return V, Vc
 
     def __getitem__(self, idx):

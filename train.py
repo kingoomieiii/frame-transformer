@@ -133,9 +133,10 @@ def main():
     p = argparse.ArgumentParser()
     p.add_argument('--id', type=str, default='')
     p.add_argument('--channels', type=int, default=8)
-    p.add_argument('--num_encoders', type=int, default=2)
-    p.add_argument('--num_decoders', type=int, default=4)
-    p.add_argument('--num_bands', type=int, default=8)
+    p.add_argument('--num_encoders', type=int, default=0)
+    p.add_argument('--num_decoders', type=int, default=3)
+    p.add_argument('--num_heads', type=int, default=2)
+    p.add_argument('--num_bands', type=int, default=4)
     p.add_argument('--feedforward_dim', type=int, default=2048)
     p.add_argument('--bias', type=str, default='true')
     p.add_argument('--vocal_recurse_prob', type=float, default=0.5)
@@ -143,8 +144,9 @@ def main():
     p.add_argument('--vocal_noise_prob', type=float, default=0.5)
     p.add_argument('--vocal_noise_magnitude', type=float, default=0.5)
     p.add_argument('--vocal_pan_prob', type=float, default=0.5)
-    p.add_argument('--batchsize', '-B', type=int, default=4)
+    p.add_argument('--batchsize', '-B', type=int, default=5)
     p.add_argument('--weight_decay', type=float, default=0)
+    p.add_argument('--amsgrad', type=str, default='false')
     p.add_argument('--accumulation_steps', '-A', type=int, default=4)
     p.add_argument('--gpu', '-g', type=int, default=-1)
     p.add_argument('--seed', '-s', type=int, default=51)
@@ -173,12 +175,13 @@ def main():
     p.add_argument('--mixup_alpha', '-a', type=float, default=1.0)
     p.add_argument('--pretrained_model', '-P', type=str, default=None)
     p.add_argument('--progress_bar', '-pb', type=str, default='true')
-    p.add_argument('--lr_warmup_steps', '-LW', type=int, default=16000)
+    p.add_argument('--lr_warmup_steps', '-LW', type=int, default=48000)
     p.add_argument('--lr_warmup_current_step', type=int, default=0)
     p.add_argument('--mixed_precision', type=str, default='true')
     p.add_argument('--debug', action='store_true')
     args = p.parse_args()
 
+    args.amsgrad = str.lower(args.amsgrad) == 'true'
     args.progress_bar = str.lower(args.progress_bar) == 'true'
     args.bias = str.lower(args.bias) == 'true'
     args.mixed_precision = str.lower(args.mixed_precision) == 'true'
@@ -206,7 +209,7 @@ def main():
     device = torch.device('cpu')
 
     # 8 is used for the width here as it seems to be a sweet spot; using a larger channel count doesn't seem to help and just adds computational cost, and using a lower width starts to impact the frame transformers accuracy.
-    model = FrameTransformer(channels=args.channels, n_fft=args.n_fft, num_encoders=args.num_encoders, num_decoders=args.num_decoders, num_bands=args.num_bands, feedforward_dim=args.feedforward_dim, bias=args.bias, cropsize=args.cropsize)
+    model = FrameTransformer(channels=args.channels, n_fft=args.n_fft, num_encoders=args.num_encoders, num_decoders=args.num_decoders, num_heads=args.num_heads, num_bands=args.num_bands, feedforward_dim=args.feedforward_dim, bias=args.bias, cropsize=args.cropsize)
 
     if args.pretrained_model is not None:
         model.load_state_dict(torch.load(args.pretrained_model, map_location=device))
@@ -250,7 +253,8 @@ def main():
     
     optimizer = torch.optim.Adam(
         filter(lambda p: p.requires_grad, model.parameters()),
-        lr=args.learning_rate
+        lr=args.learning_rate,
+        amsgrad=args.amsgrad
     )
 
     lr_warmup = WarmupLR(optimizer, target_lr=args.learning_rate, num_steps=args.lr_warmup_steps, current_step=args.lr_warmup_current_step, verbose=True) if args.lr_warmup_steps > 0 else None
