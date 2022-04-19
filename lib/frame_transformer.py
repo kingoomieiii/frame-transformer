@@ -357,12 +357,6 @@ class MultiheadMultibandFrameAttention(nn.Module):
         q = self.q_proj(x).reshape(b, h, w, self.num_bands, -1).permute(0,1,3,2,4)
         k = self.k_proj(x if mem is None else mem).reshape(b, h, w, self.num_bands, -1).permute(0,1,3,4,2)
         v = self.v_proj(x if mem is None else mem).reshape(b, h, w, self.num_bands, -1).permute(0,1,3,2,4)
-        # p0 = (self.distances * self.distance_weight)
-        # p1 = F.pad(torch.matmul(q,self.er), (1,0)).transpose(3,4)[:,:,:,1:,:]
-        # print(p0.shape)
-        # print(p1.shape)
-        # print(q.shape)
-        # print(self.er.shape)
         p = (self.distances * self.distance_weight) + F.pad(torch.matmul(q,self.er), (1,0)).transpose(3,4)[:,:,:,1:,:]
         qk = torch.matmul(q,k) / math.sqrt(c)
         a = F.softmax(qk+p, dim=-1)
