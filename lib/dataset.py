@@ -15,11 +15,13 @@ except ModuleNotFoundError:
     import spec_utils
 
 class VocalAugmentationDataset(torch.utils.data.Dataset):
-    def __init__(self, path, extra_path=None, pair_path=None, vocal_path="", is_validation=False, mul=1, downsamples=0, epoch_size=None, pair_mul=1, apply_inst_on_validation=False):
+    def __init__(self, path, extra_path=None, pair_path=None, vocal_path="", is_validation=False, mul=1, downsamples=0, epoch_size=None, pair_mul=1, apply_inst_on_validation=False, slide=True, cropsize=256):
         self.epoch_size = epoch_size
+        self.slide = slide
         self.mul = mul
         patch_list = [os.path.join(path, f) for f in os.listdir(path) if os.path.isfile(os.path.join(path, f))]
         self.apply_inst_on_validation = apply_inst_on_validation
+        self.cropsize = cropsize
 
         if pair_path is not None and pair_mul > 0:
             pairs = [os.path.join(pair_path, f) for f in os.listdir(pair_path) if os.path.isfile(os.path.join(pair_path, f))]
@@ -85,6 +87,11 @@ class VocalAugmentationDataset(torch.utils.data.Dataset):
             else:
                 V[1] = V[1] * 0
 
+        if self.slide:
+            start = np.random.randint(0, V.shape[2] - self.cropsize)
+            stop = start + self.cropsize
+            V = V[:,:,start:stop].copy()
+
         if np.random.uniform() < 0.5:
             vidx2 = np.random.randint(len(self.vocal_list))
             
@@ -104,6 +111,11 @@ class VocalAugmentationDataset(torch.utils.data.Dataset):
             a = np.random.beta(1, 1)
             inv = 1 - a
 
+            if self.slide:
+                start = np.random.randint(0, V2.shape[2] - self.cropsize)
+                stop = start + self.cropsize
+                V2 = V2[:,:,start:stop].copy()
+
             Vc = (Vc * a) + (Vc2 * inv)
             V = (V * a) + (V2 * inv)
 
@@ -112,28 +124,27 @@ class VocalAugmentationDataset(torch.utils.data.Dataset):
     def __getitem__(self, idx):
         path = self.curr_list[idx % len(self.curr_list)]
         data = np.load(str(path))
-        aug = "Y" not in data.files
+        aug = 'Y' not in data.files
         X, Xc = data['X'], data['c']
-
-        if aug:
-            Y = X
-        else:
-            Y = data['Y']
+        Y = X if aug else data['Y']
 
         if not self.is_validation:
+            if self.slide:
+                start = np.random.randint(0, X.shape[2] - self.cropsize)
+                stop = start + self.cropsize
+                X = X[:,:,start:stop].copy()
+                Y = Y[:,:,start:stop].copy()
+
             if aug and np.random.uniform() > 0.02:
                 V, Vc = self._get_vocals()
                 X = Y + V
                 c = np.max([Xc, Vc, np.abs(X).max()])
             else:
-                if np.random.uniform() < 0.33:
+                if np.random.uniform() < 0.25:
                     V, Vc = self._get_vocals()
-
                     a = np.random.beta(1, 1)
                     X = X + (V * a)
-
-                    Xc = np.max([Xc, np.abs(X).max()])
-
+                
                 c = np.max([Xc, np.abs(X).max()])
 
             if np.random.uniform() < 0.5:
@@ -300,40 +311,46 @@ def train_val_split(dataset_dir, val_filelist, selected_validation=[], voxaug=Fa
 
     return train_filelist, val_filelist
 
-def train_val_split(dataset_dir, split_mode, val_rate, val_filelist):
-    if split_mode == 'random':
-        filelist = make_pair(
-            os.path.join(dataset_dir, 'mixtures'),
-            os.path.join(dataset_dir, 'instruments')
-        )
+def train_val_split(dataset_dir, val_filelist, val_size=-1, train_size=-1, selected_validation=[], voxaug=False):
+    filelist = make_pair(
+        os.path.join(dataset_dir, 'mixtures'),
+        os.path.join(dataset_dir, 'instruments'),
+        voxaug=voxaug)
 
-        random.shuffle(filelist)
+    train_filelist = list()
+    val_filelist = list()
 
-        if len(val_filelist) == 0:
-            val_size = int(len(filelist) * val_rate)
-            train_filelist = filelist[:-val_size]
-            val_filelist = filelist[-val_size:]
+    for i, entry in enumerate(filelist):
+        if len(selected_validation) > 0:
+            validation_file = False
+
+            for v in selected_validation:
+                if entry[0].find(v) != -1:
+                    validation_file = True
+                    break
+            
+            if validation_file:
+                val_filelist.append(entry)
+            else:
+                train_filelist.append(entry)
         else:
-            train_filelist = [
-                pair for pair in filelist
-                if list(pair) not in val_filelist
-            ]
-    elif split_mode == 'subdirs':
-        if len(val_filelist) != 0:
-            raise ValueError('`val_filelist` option is not available with `subdirs` mode')
+            train_filelist.append(entry)
 
-        train_filelist = make_pair(
-            os.path.join(dataset_dir, 'training/mixtures'),
-            os.path.join(dataset_dir, 'training/instruments')
-        )
+    if len(selected_validation) == 0:
+        if val_size != -1:
+            val_filelist = train_filelist[-val_size:]
 
-        val_filelist = make_pair(
-            os.path.join(dataset_dir, 'validation/mixtures'),
-            os.path.join(dataset_dir, 'validation/instruments')
-        )
+        if val_size == 0:
+            train_filelist = train_filelist
+        elif train_size != -1:
+            if val_size != -1:
+                train_filelist = train_filelist[-(train_size+val_size):-val_size]
+            else:
+                train_filelist = train_filelist[:train_size]
+        elif val_size != -1:
+            train_filelist = train_filelist[:-val_size]
 
     return train_filelist, val_filelist
-
 
 def make_padding(width, cropsize, offset):
     left = offset
@@ -470,9 +487,6 @@ def make_dataset(filelist, cropsize, sr, hop_length, n_fft, offset=0, is_validat
                         X=X_pad[:, :, start:start + cropsize],
                         Y=Y_pad[:, :, start:start + cropsize],
                         c=coef.item())
-
-    return VocalRemoverValidationSet(patch_list, is_validation=is_validation)
-
 
 if __name__ == "__main__":
     import sys

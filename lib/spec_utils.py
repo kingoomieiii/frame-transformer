@@ -133,6 +133,35 @@ def align_wave_head_and_tail(a, b, sr):
 
     return a, b
 
+def to_spec(X, Y, hop_length=1024, n_fft=2048, sr=44100, va=False):
+    X = wave_to_spectrogram(X, hop_length, n_fft)
+
+    if va:
+        Y = X
+    else:
+        Y = wave_to_spectrogram(Y, hop_length, n_fft)
+
+    return X, Y
+
+def load_wave(mix_path, inst_path, sr=44100, device=None):
+    X, _ = librosa.load(
+        mix_path, sr, False, dtype=np.float32, res_type='kaiser_fast')
+
+    if X.ndim == 1:
+        X = np.array([X, X])
+
+    if mix_path != inst_path:
+        Y, _ = librosa.load(
+            inst_path, sr, False, dtype=np.float32, res_type='kaiser_fast')
+
+        if Y.ndim == 1:
+            Y = np.array([Y, Y])
+
+        X, Y = align_wave_head_and_tail(X, Y, sr)
+    else:
+        Y = X
+
+    return X, Y
 
 def cache_or_load(mix_path, inst_path, sr, hop_length, n_fft):
     mix_basename = os.path.splitext(os.path.basename(mix_path))[0]

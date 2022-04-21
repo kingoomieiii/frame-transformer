@@ -17,6 +17,7 @@ from lib import nets
 from lib import spec_utils
 
 from tqdm import tqdm
+from lib import warmup_lr
 
 from lib.frame_transformer import FrameTransformer
 from lib.warmup_lr import WarmupLR
@@ -124,8 +125,12 @@ def validate_epoch(dataloader, model, device, grad_scaler):
 
             y_batch = spec_utils.crop_center(y_batch, pred)
             loss = crit(X_batch * pred, y_batch)
-
-            sum_loss += loss.item() * len(X_batch)
+    
+            if torch.logical_or(loss.isnan(), loss.isinf()):
+                print('non-finite or nan validation loss; aborting')
+                quit()
+            else:
+                sum_loss += loss.item() * len(X_batch)
 
     return sum_loss / len(dataloader.dataset)
 
@@ -217,10 +222,10 @@ def main():
         model.to(device)
 
     train_dataset = dataset.VocalAugmentationDataset(
-        path="C://cs256_sr44100_hl1024_nf2048_of0",
-        extra_path="G://cs256_sr44100_hl1024_nf2048_of0",
-        pair_path="G:\cs256_sr44100_hl1024_nf2048_of0_PAIRS",
-        vocal_path="G://cs256_sr44100_hl1024_nf2048_of0_VOCALS",
+        path="C://cs512_sr44100_hl1024_nf2048_of0",
+        extra_path="G://cs512_sr44100_hl1024_nf2048_of0",
+        pair_path="G://cs512_sr44100_hl1024_nf2048_of0_PAIRS",
+        vocal_path="G://cs512_sr44100_hl1024_nf2048_of0_VOCALS",
         is_validation=False,
         epoch_size=args.epoch_size
     )
@@ -284,11 +289,17 @@ def main():
             .format(train_loss, val_loss, val_loss_fake)
         )
 
-        scheduler.step(val_loss)
+        if lr_warmup.current_step == lr_warmup.num_steps:
+            print('stepping')
+            scheduler.step(val_loss)
+        else:
+            print('not stepping')
 
-        if val_loss < best_loss:
-            best_loss = val_loss
-            logger.info('  * best validation loss')
+        if val_loss < best_loss or lr_warmup.current_step < lr_warmup.num_steps:
+            if val_loss < best_loss:
+                best_loss = val_loss
+                logger.info('  * best validation loss')
+
             model_path = 'models/model_iter{}.pth'.format(epoch)
             torch.save(model.state_dict(), model_path)
 

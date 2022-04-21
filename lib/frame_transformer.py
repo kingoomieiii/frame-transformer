@@ -201,7 +201,8 @@ class MultibandFrameAttention(nn.Module):
         self.er = nn.Parameter(torch.empty(bins // num_bands, cropsize))
         nn.init.kaiming_uniform_(self.er, a=math.sqrt(5))
         self.register_buffer('distances', torch.empty(num_bands, cropsize, cropsize))
-        self.distance_weight = nn.Parameter(torch.empty(num_bands).unsqueeze(1).expand((-1, cropsize)).unsqueeze(2).clone())
+
+        self.distance_weight = nn.Parameter(torch.empty(num_bands).unsqueeze(1).expand((-1, cropsize)).unsqueeze(2).clone()) # NW1
         nn.init.kaiming_uniform_(self.distance_weight, a=math.sqrt(5.0))
 
         for i in range(cropsize):
