@@ -198,23 +198,16 @@ class MultibandFrameAttention(nn.Module):
         self.k_proj = nn.Linear(bins, bins)
         self.v_proj = nn.Linear(bins, bins)
         self.o_proj = nn.Linear(bins, bins)
+        
         self.er = nn.Parameter(torch.empty(bins // num_bands, cropsize))
         nn.init.kaiming_uniform_(self.er, a=math.sqrt(5))
-        self.register_buffer('distances', torch.empty(num_bands, cropsize, cropsize))
-
-        self.distance_weight = nn.Parameter(torch.empty(num_bands).unsqueeze(1).expand((-1, cropsize)).unsqueeze(2).clone()) # NW1
-        nn.init.kaiming_uniform_(self.distance_weight, a=math.sqrt(5.0))
-
-        for i in range(cropsize):
-            for j in range(cropsize):
-                self.distances[:, i, j] = abs(i - j)
 
     def forward(self, x, mem=None):
         b,w,c = x.shape
         q = self.q_proj(x).reshape(b, w, self.num_bands, -1).permute(0,2,1,3)
         k = self.k_proj(x if mem is None else mem).reshape(b, w, self.num_bands, -1).permute(0,2,3,1)
         v = self.v_proj(x if mem is None else mem).reshape(b, w, self.num_bands, -1).permute(0,2,1,3)
-        p = (self.distances * self.distance_weight) + F.pad(torch.matmul(q,self.er), (1,0)).transpose(2,3)[:,:,1:,:]
+        p = F.pad(torch.matmul(q,self.er), (1,0)).transpose(2,3)[:,:,1:,:]
         qk = (torch.matmul(q,k)+p) / math.sqrt(c)
         a = F.softmax(qk, dim=-1)
         a = torch.matmul(a,v).transpose(1,2).reshape(b,w,-1)

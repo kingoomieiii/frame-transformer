@@ -159,7 +159,7 @@ def main():
     p.add_argument('--n_fft', '-f', type=int, default=2048)
     p.add_argument('--dataset', '-d', required=False)
     p.add_argument('--split_mode', '-S', type=str, choices=['random', 'subdirs'], default='random')
-    p.add_argument('--learning_rate', '-l', type=float, default=2e-4)
+    p.add_argument('--learning_rate', '-l', type=float, default=1e-3)
     p.add_argument('--lr_min', type=float, default=0.0001)
     p.add_argument('--lr_decay_factor', type=float, default=0.9)
     p.add_argument('--lr_decay_patience', type=int, default=6)
@@ -179,7 +179,7 @@ def main():
     p.add_argument('--mixup_alpha', '-a', type=float, default=1.0)
     p.add_argument('--pretrained_model', '-P', type=str, default=None)
     p.add_argument('--progress_bar', '-pb', type=str, default='true')
-    p.add_argument('--lr_warmup_steps', '-LW', type=int, default=48000)
+    p.add_argument('--lr_warmup_steps', '-LW', type=int, default=64000)
     p.add_argument('--lr_warmup_current_step', type=int, default=0)
     p.add_argument('--mixed_precision', type=str, default='true')
     p.add_argument('--debug', action='store_true')
@@ -227,7 +227,8 @@ def main():
         pair_path="G://cs512_sr44100_hl1024_nf2048_of0_PAIRS",
         vocal_path="G://cs512_sr44100_hl1024_nf2048_of0_VOCALS",
         is_validation=False,
-        epoch_size=args.epoch_size
+        epoch_size=args.epoch_size,
+        mul=2
     )
 
     train_dataloader = torch.utils.data.DataLoader(
@@ -290,10 +291,7 @@ def main():
         )
 
         if lr_warmup.current_step == lr_warmup.num_steps:
-            print('stepping')
             scheduler.step(val_loss)
-        else:
-            print('not stepping')
 
         if val_loss < best_loss or lr_warmup.current_step < lr_warmup.num_steps:
             if val_loss < best_loss:
