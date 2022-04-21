@@ -198,9 +198,9 @@ class MultibandFrameAttention(nn.Module):
         self.k_proj = nn.Linear(bins, bins)
         self.v_proj = nn.Linear(bins, bins)
         self.o_proj = nn.Linear(bins, bins)
-        
+
         self.er = nn.Parameter(torch.empty(bins // num_bands, cropsize))
-        nn.init.kaiming_uniform_(self.er, a=math.sqrt(5))
+        nn.init.normal_(self.er)
 
     def forward(self, x, mem=None):
         b,w,c = x.shape

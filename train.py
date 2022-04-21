@@ -13,11 +13,8 @@ import torch.utils.data
 from torch.nn.utils import clip_grad_norm_
 
 from lib import dataset
-from lib import nets
 from lib import spec_utils
-
 from tqdm import tqdm
-from lib import warmup_lr
 
 from lib.frame_transformer import FrameTransformer
 from lib.warmup_lr import WarmupLR
@@ -133,7 +130,7 @@ def validate_epoch(dataloader, model, device, grad_scaler):
                 sum_loss += loss.item() * len(X_batch)
 
     return sum_loss / len(dataloader.dataset)
-
+nn.Embedding
 def main():
     p = argparse.ArgumentParser()
     p.add_argument('--id', type=str, default='')
@@ -151,7 +148,7 @@ def main():
     p.add_argument('--batchsize', '-B', type=int, default=4)
     p.add_argument('--weight_decay', type=float, default=0)
     p.add_argument('--amsgrad', type=str, default='false')
-    p.add_argument('--accumulation_steps', '-A', type=int, default=4)
+    p.add_argument('--accumulation_steps', '-A', type=int, default=2)
     p.add_argument('--gpu', '-g', type=int, default=-1)
     p.add_argument('--seed', '-s', type=int, default=51)
     p.add_argument('--sr', '-r', type=int, default=44100)
@@ -227,8 +224,7 @@ def main():
         pair_path="G://cs512_sr44100_hl1024_nf2048_of0_PAIRS",
         vocal_path="G://cs512_sr44100_hl1024_nf2048_of0_VOCALS",
         is_validation=False,
-        epoch_size=args.epoch_size,
-        mul=2
+        epoch_size=args.epoch_size
     )
 
     train_dataloader = torch.utils.data.DataLoader(
