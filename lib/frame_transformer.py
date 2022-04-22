@@ -29,7 +29,7 @@ class FrameTransformer(nn.Module):
         self.dec1 = Decoder(channels * (1 + 2) + num_decoders, channels * 1, n_fft=2048, downsamples=1, bias=bias)
 
         self.out_transformer = nn.ModuleList([FrameTransformerBlock(channels + i, channels, num_bands, cropsize, n_fft, downsamples=0, feedforward_dim=feedforward_dim, bias=bias) for i in range(num_decoders)])
-        self.out = Decoder(channels + num_decoders, 2, downsamples=0, upsample=False)
+        self.out = Decoder(channels + num_decoders + 2, 2, downsamples=0, upsample=False)
 
     def __call__(self, x):
         x = x[:, :, :self.max_bin]
@@ -65,7 +65,7 @@ class FrameTransformer(nn.Module):
             t = module(h, mem=e1)
             h = torch.cat((h, t), dim=1)
 
-        out = torch.sigmoid(self.out(h))
+        out = torch.sigmoid(self.out(h, x))
 
         return F.pad(
             input=out,
@@ -89,6 +89,7 @@ class Encoder(nn.Module):
     def __call__(self, x):
         h = self.activate(self.linear1(x.transpose(1,3))).transpose(2,3)
         h = self.activate(self.linear2(h)).permute(0,2,3,1)
+
         return h
 
 class Decoder(nn.Module):
