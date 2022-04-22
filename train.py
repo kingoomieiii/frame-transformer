@@ -62,6 +62,9 @@ def train_epoch(dataloader, model, device, optimizer, accumulation_steps, grad_s
         X_batch = X_batch.to(device)
         y_batch = y_batch.to(device)
 
+        if lr_warmup is not None:
+            lr_warmup.step()
+
         if np.random.uniform() < mixup_rate:
             X_batch, y_batch = mixup(X_batch, y_batch, mixup_alpha)
 
@@ -88,9 +91,6 @@ def train_epoch(dataloader, model, device, optimizer, accumulation_steps, grad_s
                 grad_scaler.update()
             else:
                 optimizer.step()
-
-            if lr_warmup is not None:
-                lr_warmup.step()
 
             model.zero_grad()
             batch_loss = 0

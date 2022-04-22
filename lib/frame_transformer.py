@@ -87,8 +87,8 @@ class Encoder(nn.Module):
         self.linear2 = nn.Linear(bins, bins // 2 if downsample else bins)
 
     def __call__(self, x):
-        h = self.linear1(x.transpose(1,3)).transpose(2,3) # B,C,H,W -> B,W,H,C -> B,W,2C,H
-        h = self.linear2(self.activate(h)).permute(0,2,3,1) # B,W,2C,H/2 -> B,2C,H/2,W
+        h = self.activate(self.linear1(x.transpose(1,3))).transpose(2,3)
+        h = self.activate(self.linear2(h)).permute(0,2,3,1)
         return h
 
 class Decoder(nn.Module):
@@ -105,12 +105,12 @@ class Decoder(nn.Module):
         self.linear2 = nn.Linear(in_channels, out_channels)
 
     def __call__(self, x, skip=None):
-        h = self.linear1(x.transpose(2,3)).transpose(2,3) # B,Ci,H,W -> B,Ci,2H,W
+        h = self.activate(self.linear1(x.transpose(2,3))).transpose(2,3)
 
         if skip is not None:
-            h = torch.cat((h, skip), dim=1) # B,C,2H,W
+            h = torch.cat((h, skip), dim=1)
 
-        h = self.linear2(self.activate(h.transpose(1,3))).transpose(1,3) # B,C/2,2H,W
+        h = self.activate(self.linear2(h.transpose(1,3))).transpose(1,3)
 
         return h
 
@@ -130,9 +130,9 @@ class FrameTransformerBlock(nn.Module):
         self.relu = nn.ReLU(inplace=True)
         
         self.bottleneck_linear = nn.Linear(channels, 1, bias=bias)
-        self.bottleneck_norm = nn.BatchNorm2d(1)
+        self.bottleneck_norm = nn.LayerNorm(bins)
         self.mem_bottleneck_linear = nn.Linear(mem_channels, 1, bias=bias)
-        self.mem_bottleneck_norm = nn.BatchNorm2d(1)
+        self.mem_bottleneck_norm = nn.LayerNorm(bins)
 
         self.self_attn1 = MultibandFrameAttention(num_bands, bins, cropsize)
         self.enc_attn1 = MultibandFrameAttention(num_bands, bins, cropsize)
@@ -167,12 +167,15 @@ class FrameTransformerBlock(nn.Module):
         self.dropout5 = nn.Dropout(dropout) if dropout > 0 else nn.Identity()
 
     def __call__(self, x, mem):
-        x = self.relu(self.bottleneck_norm(self.bottleneck_linear(x.transpose(1,3)).transpose(1,3)))
-        mem = self.relu(self.mem_bottleneck_norm(self.mem_bottleneck_linear(mem.transpose(1,3)).transpose(1,3)))
+        x = self.bottleneck_linear(x.transpose(1,3)).transpose(1,3)
+        mem = self.mem_bottleneck_linear(mem.transpose(1,3)).transpose(1,3)
 
         b, _, h, w = x.shape
         x = x.transpose(2,3).reshape(b,w,h)
         mem = mem.transpose(2,3).reshape(b,w,h)
+
+        x = self.relu(self.bottleneck_norm(x))
+        mem = self.relu(self.mem_bottleneck_norm(mem))
 
         hs = self.self_attn1(x)
         hm = self.enc_attn1(x, mem=mem)
