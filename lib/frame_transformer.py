@@ -88,7 +88,7 @@ class Encoder(nn.Module):
 
     def __call__(self, x):
         h = self.activate(self.linear1(x.transpose(1,3)).transpose(1,3)).transpose(2,3)
-        h = self.activate(self.linear2(h)).permute(0,1,3,2)
+        h = self.activate(self.linear2(h)).transpose(2,3)
 
         return h
 
@@ -101,10 +101,10 @@ class Decoder(nn.Module):
             for _ in range(downsamples):
                 bins = bins // 2
 
+        self.activate_out = activate_out
+        self.activate = activ(inplace=True)
         self.linear1 = nn.Linear(bins, bins * 2 if upsample else bins, bias=bias)
         self.linear2 = nn.Linear(in_channels, out_channels, bias=bias)
-        self.activate = activ(inplace=True)
-        self.activate_out = activate_out
 
     def __call__(self, x, skip=None):
         h = self.activate(self.linear1(x.transpose(2,3)).transpose(2,3))
