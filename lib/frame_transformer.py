@@ -82,8 +82,8 @@ class Encoder(nn.Module):
             for _ in range(downsamples):
                 bins = bins // 2
 
-        self.linear1 = nn.Linear(in_channels, out_channels, bias=bias)
         self.activate = activ(inplace=True)
+        self.linear1 = nn.Linear(in_channels, out_channels, bias=bias)
         self.linear2 = nn.Linear(bins, bins // 2 if downsample else bins, bias=bias)
 
     def __call__(self, x):
@@ -100,8 +100,8 @@ class Decoder(nn.Module):
             for _ in range(downsamples):
                 bins = bins // 2
 
-        self.linear1 = nn.Linear(bins, bins * 2 if upsample else bins, bias=bias)
         self.activate = activ(inplace=True)
+        self.linear1 = nn.Linear(bins, bins * 2 if upsample else bins, bias=bias)
         self.linear2 = nn.Linear(in_channels, out_channels, bias=bias)
 
     def __call__(self, x, skip=None):
