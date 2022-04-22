@@ -10,26 +10,26 @@ class FrameTransformer(nn.Module):
         self.max_bin = n_fft // 2
         self.output_bin = n_fft // 2 + 1
 
-        self.enc1 = Encoder(2, channels, n_fft=2048, downsamples=0, downsample=False, bias=bias)
-        self.enc2 = Encoder(channels * 1, channels * 2, n_fft=2048, downsamples=0, bias=bias)
-        self.enc3 = Encoder(channels * 2, channels * 4, n_fft=2048, downsamples=1, bias=bias)
-        self.enc4 = Encoder(channels * 4, channels * 6, n_fft=2048, downsamples=2, bias=bias)
-        self.enc5 = Encoder(channels * 6, channels * 8, n_fft=2048, downsamples=3, bias=bias)
+        self.enc1 = FrameConv(2, channels, 3, 1, 1)
+        self.enc2 = Encoder(channels * 1, channels * 2, kernel_size=3, stride=2, padding=1)
+        self.enc3 = Encoder(channels * 2, channels * 4, kernel_size=3, stride=2, padding=1)
+        self.enc4 = Encoder(channels * 4, channels * 6, kernel_size=3, stride=2, padding=1)
+        self.enc5 = Encoder(channels * 6, channels * 8, kernel_size=3, stride=2, padding=1)
         
         self.dec4_transformer = nn.ModuleList([FrameTransformerBlock(channels * 8 + i, channels * 8, num_bands, cropsize, n_fft, downsamples=4, feedforward_dim=feedforward_dim, bias=bias) for i in range(num_decoders)])
-        self.dec4 = Decoder(channels * (6 + 8) + num_decoders, channels * 6, n_fft=2048, downsamples=4, bias=bias)
+        self.dec4 = Decoder(channels * (6 + 8) + num_decoders, channels * 6, kernel_size=3, padding=1)
 
         self.dec3_transformer = nn.ModuleList([FrameTransformerBlock(channels * 6 + i, channels * 6, num_bands, cropsize, n_fft, downsamples=3, feedforward_dim=feedforward_dim, bias=bias) for i in range(num_decoders)])
-        self.dec3 = Decoder(channels * (4 + 6) + num_decoders, channels * 4, n_fft=2048, downsamples=3, bias=bias)
+        self.dec3 = Decoder(channels * (4 + 6) + num_decoders, channels * 4, kernel_size=3, padding=1)
 
         self.dec2_transformer = nn.ModuleList([FrameTransformerBlock(channels * 4 + i, channels * 4, num_bands, cropsize, n_fft, downsamples=2, feedforward_dim=feedforward_dim, bias=bias) for i in range(num_decoders)])
-        self.dec2 = Decoder(channels * (2 + 4) + num_decoders, channels * 2, n_fft=2048, downsamples=2, bias=bias)
+        self.dec2 = Decoder(channels * (2 + 4) + num_decoders, channels * 2, kernel_size=3, padding=1)
 
         self.dec1_transformer = nn.ModuleList([FrameTransformerBlock(channels * 2 + i, channels * 2, num_bands, cropsize, n_fft, downsamples=1, feedforward_dim=feedforward_dim, bias=bias) for i in range(num_decoders)])
-        self.dec1 = Decoder(channels * (1 + 2) + num_decoders, channels * 1, n_fft=2048, downsamples=1, bias=bias)
+        self.dec1 = Decoder(channels * (1 + 2) + num_decoders, channels * 1, kernel_size=3, padding=1)
 
         self.out_transformer = nn.ModuleList([FrameTransformerBlock(channels + i, channels, num_bands, cropsize, n_fft, downsamples=0, feedforward_dim=feedforward_dim, bias=bias) for i in range(num_decoders)])
-        self.out = Decoder(channels + num_decoders, 2, downsamples=0, upsample=False, activate_out=False)
+        self.out = nn.Linear(channels + num_decoders, 2, bias=bias)
 
     def __call__(self, x):
         x = x[:, :, :self.max_bin]
@@ -65,57 +65,43 @@ class FrameTransformer(nn.Module):
             t = module(h, mem=e1)
             h = torch.cat((h, t), dim=1)
 
-        out = torch.sigmoid(self.out(h))
+        out = self.out(h.transpose(1,3)).transpose(1,3)
 
         return F.pad(
-            input=out,
+            input=torch.sigmoid(out),
             pad=(0, 0, 0, self.output_bin - out.size()[2]),
             mode='replicate'
         )
-
+        
 class Encoder(nn.Module):
-    def __init__(self, in_channels, out_channels, n_fft=2048, downsamples=0, activ=nn.LeakyReLU, downsample=True, bias=True):
+    def __init__(self, nin, nout, kernel_size=3, stride=1, padding=1, activ=nn.LeakyReLU):
         super(Encoder, self).__init__()
-
-        bins = (n_fft // 2)
-        if downsamples > 0:
-            for _ in range(downsamples):
-                bins = bins // 2
-
-        self.activate = activ(inplace=True)
-        self.linear1 = nn.Linear(in_channels, out_channels, bias=bias)
-        self.linear2 = nn.Linear(bins, bins // 2 if downsample else bins, bias=bias)
+        self.conv1 = FrameConv(nin, nout, kernel_size, 1, padding, activate=activ)
+        self.conv2 = FrameConv(nout, nout, kernel_size, stride, padding, activate=activ)
 
     def __call__(self, x):
-        h = self.activate(self.linear1(x.transpose(1,3)).transpose(1,3)).transpose(2,3)
-        h = self.activate(self.linear2(h)).transpose(2,3)
+        h = self.conv1(x)
+        h = self.conv2(h)
 
         return h
 
 class Decoder(nn.Module):
-    def __init__(self, in_channels, out_channels, n_fft=2048, downsamples=0, activ=nn.LeakyReLU, bias=True, upsample=True, activate_out=True):
+    def __init__(self, nin, nout, kernel_size=3, padding=1, activ=nn.ReLU, dropout=False):
         super(Decoder, self).__init__()
-
-        bins = (n_fft // 2)
-        if downsamples > 0:
-            for _ in range(downsamples):
-                bins = bins // 2
-
-        self.activate_out = activate_out
-        self.activate = activ(inplace=True)
-        self.linear1 = nn.Linear(bins, bins * 2 if upsample else bins, bias=bias)
-        self.linear2 = nn.Linear(in_channels, out_channels, bias=bias)
+        self.conv = FrameConv(nin, nout, kernel_size, 1, padding, activate=activ)
+        self.dropout = nn.Dropout2d(0.1) if dropout else None
 
     def __call__(self, x, skip=None):
-        h = self.activate(self.linear1(x.transpose(2,3)).transpose(2,3))
+        x = F.interpolate(x, size=(skip.shape[2],skip.shape[3]), mode='bilinear', align_corners=True)
 
         if skip is not None:
-            h = torch.cat((h, skip), dim=1)
+            skip = spec_utils.crop_center(skip, x)
+            x = torch.cat([x, skip], dim=1)
 
-        h = self.linear2(h.transpose(1,3)).transpose(1,3)
+        h = self.conv(x)
 
-        if self.activate_out:
-            h = self.activate(h)
+        if self.dropout is not None:
+            h = self.dropout(h)
 
         return h
 
@@ -135,9 +121,9 @@ class FrameTransformerBlock(nn.Module):
         self.relu = nn.ReLU(inplace=True)
         
         self.bottleneck_linear = nn.Linear(channels, 1, bias=bias)
-        self.bottleneck_norm = nn.LayerNorm(bins)
+        self.bottleneck_norm = nn.BatchNorm2d(1)
         self.mem_bottleneck_linear = nn.Linear(mem_channels, 1, bias=bias)
-        self.mem_bottleneck_norm = nn.LayerNorm(bins)
+        self.mem_bottleneck_norm = nn.BatchNorm2d(1)
 
         self.self_attn1 = MultibandFrameAttention(num_bands, bins, cropsize)
         self.enc_attn1 = MultibandFrameAttention(num_bands, bins, cropsize)
@@ -172,15 +158,12 @@ class FrameTransformerBlock(nn.Module):
         self.dropout5 = nn.Dropout(dropout) if dropout > 0 else nn.Identity()
 
     def __call__(self, x, mem):
-        x = self.bottleneck_linear(x.transpose(1,3)).transpose(1,3)
-        mem = self.mem_bottleneck_linear(mem.transpose(1,3)).transpose(1,3)
+        x = self.relu(self.bottleneck_norm(self.bottleneck_linear(x.transpose(1,3)).transpose(1,3)))
+        mem = self.relu(self.mem_bottleneck_norm(self.mem_bottleneck_linear(mem.transpose(1,3)).transpose(1,3)))
 
         b, _, h, w = x.shape
         x = x.transpose(2,3).reshape(b,w,h)
         mem = mem.transpose(2,3).reshape(b,w,h)
-
-        x = self.relu(self.bottleneck_norm(x))
-        mem = self.relu(self.mem_bottleneck_norm(mem))
 
         hs = self.self_attn1(x)
         hm = self.enc_attn1(x, mem=mem)
@@ -215,6 +198,7 @@ class MultibandFrameAttention(nn.Module):
         self.k_proj = nn.Linear(bins, bins)
         self.v_proj = nn.Linear(bins, bins)
         self.o_proj = nn.Linear(bins, bins)
+
         self.er = nn.Parameter(torch.empty(bins // num_bands, cropsize))
         nn.init.normal_(self.er)
 
@@ -229,3 +213,30 @@ class MultibandFrameAttention(nn.Module):
         a = torch.matmul(a,v).transpose(1,2).reshape(b,w,-1)
         o = self.o_proj(a)
         return o
+
+class FrameConv(nn.Module):
+    def __init__(self, in_channels, out_channels, kernel_size=3, stride=1, padding=1, dilation=1, groups=1, activate=nn.ReLU, norm=True):
+        super(FrameConv, self).__init__()
+
+        self.conv = nn.Conv2d(
+                in_channels, out_channels,
+                kernel_size=(kernel_size, 1),
+                stride=(stride, 1),
+                padding=(padding, 0),
+                dilation=(dilation, 1),
+                groups=groups,
+                bias=False)
+
+        self.norm = nn.BatchNorm2d(out_channels) if norm else None
+        self.activate = activate(inplace=True) if activate is not None else None
+
+    def __call__(self, x):
+        h = self.conv(x)
+        
+        if self.norm is not None:
+            h = self.norm(h)
+
+        if self.activate is not None:
+            h = self.activate(h)
+
+        return h

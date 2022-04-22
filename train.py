@@ -81,9 +81,6 @@ def train_epoch(dataloader, model, device, optimizer, accumulation_steps, grad_s
             if progress_bar:
                 pbar.set_description(str(batch_loss.item()))
 
-            if lr_warmup is not None:
-                lr_warmup.step()
-
             if grad_scaler is not None:
                 grad_scaler.unscale_(optimizer)
                 clip_grad_norm_(model.parameters(), 0.5)
@@ -91,6 +88,9 @@ def train_epoch(dataloader, model, device, optimizer, accumulation_steps, grad_s
                 grad_scaler.update()
             else:
                 optimizer.step()
+
+            if lr_warmup is not None:
+                lr_warmup.step()
 
             model.zero_grad()
             batch_loss = 0
@@ -176,7 +176,7 @@ def main():
     p.add_argument('--mixup_alpha', '-a', type=float, default=1.0)
     p.add_argument('--pretrained_model', '-P', type=str, default=None)
     p.add_argument('--progress_bar', '-pb', type=str, default='true')
-    p.add_argument('--lr_warmup_steps', '-LW', type=int, default=32000)
+    p.add_argument('--lr_warmup_steps', '-LW', type=int, default=64000)
     p.add_argument('--lr_warmup_current_step', type=int, default=0)
     p.add_argument('--mixed_precision', type=str, default='true')
     p.add_argument('--debug', action='store_true')
