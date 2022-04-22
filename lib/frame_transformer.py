@@ -10,26 +10,26 @@ class FrameTransformer(nn.Module):
         self.max_bin = n_fft // 2
         self.output_bin = n_fft // 2 + 1
 
-        self.enc1 = Encoder(2, channels, n_fft=2048, downsamples=0, downsample=False)
-        self.enc2 = Encoder(channels * 1, channels * 2, n_fft=2048, downsamples=0)
-        self.enc3 = Encoder(channels * 2, channels * 4, n_fft=2048, downsamples=1)
-        self.enc4 = Encoder(channels * 4, channels * 6, n_fft=2048, downsamples=2)
-        self.enc5 = Encoder(channels * 6, channels * 8, n_fft=2048, downsamples=3)
+        self.enc1 = Encoder(2, channels, n_fft=2048, downsamples=0, downsample=False, bias=bias)
+        self.enc2 = Encoder(channels * 1, channels * 2, n_fft=2048, downsamples=0, bias=bias)
+        self.enc3 = Encoder(channels * 2, channels * 4, n_fft=2048, downsamples=1, bias=bias)
+        self.enc4 = Encoder(channels * 4, channels * 6, n_fft=2048, downsamples=2, bias=bias)
+        self.enc5 = Encoder(channels * 6, channels * 8, n_fft=2048, downsamples=3, bias=bias)
         
         self.dec4_transformer = nn.ModuleList([FrameTransformerBlock(channels * 8 + i, channels * 8, num_bands, cropsize, n_fft, downsamples=4, feedforward_dim=feedforward_dim, bias=bias) for i in range(num_decoders)])
-        self.dec4 = Decoder(channels * (6 + 8) + num_decoders, channels * 6, n_fft=2048, downsamples=4)
+        self.dec4 = Decoder(channels * (6 + 8) + num_decoders, channels * 6, n_fft=2048, downsamples=4, bias=bias)
 
         self.dec3_transformer = nn.ModuleList([FrameTransformerBlock(channels * 6 + i, channels * 6, num_bands, cropsize, n_fft, downsamples=3, feedforward_dim=feedforward_dim, bias=bias) for i in range(num_decoders)])
-        self.dec3 = Decoder(channels * (4 + 6) + num_decoders, channels * 4, n_fft=2048, downsamples=3)
+        self.dec3 = Decoder(channels * (4 + 6) + num_decoders, channels * 4, n_fft=2048, downsamples=3, bias=bias)
 
         self.dec2_transformer = nn.ModuleList([FrameTransformerBlock(channels * 4 + i, channels * 4, num_bands, cropsize, n_fft, downsamples=2, feedforward_dim=feedforward_dim, bias=bias) for i in range(num_decoders)])
-        self.dec2 = Decoder(channels * (2 + 4) + num_decoders, channels * 2, n_fft=2048, downsamples=2)
+        self.dec2 = Decoder(channels * (2 + 4) + num_decoders, channels * 2, n_fft=2048, downsamples=2, bias=bias)
 
         self.dec1_transformer = nn.ModuleList([FrameTransformerBlock(channels * 2 + i, channels * 2, num_bands, cropsize, n_fft, downsamples=1, feedforward_dim=feedforward_dim, bias=bias) for i in range(num_decoders)])
-        self.dec1 = Decoder(channels * (1 + 2) + num_decoders, channels * 1, n_fft=2048, downsamples=1)
+        self.dec1 = Decoder(channels * (1 + 2) + num_decoders, channels * 1, n_fft=2048, downsamples=1, bias=bias)
 
         self.out_transformer = nn.ModuleList([FrameTransformerBlock(channels + i, channels, num_bands, cropsize, n_fft, downsamples=0, feedforward_dim=feedforward_dim, bias=bias) for i in range(num_decoders)])
-        self.out = nn.Linear(channels + num_decoders, 2, bias=bias)
+        self.out = Decoder(channels + num_decoders, 2, downsamples=0, upsample=False)
 
     def __call__(self, x):
         x = x[:, :, :self.max_bin]
@@ -65,16 +65,16 @@ class FrameTransformer(nn.Module):
             t = module(h, mem=e1)
             h = torch.cat((h, t), dim=1)
 
-        out = self.out(h.transpose(1,3)).transpose(1,3)
+        out = torch.sigmoid(self.out(h))
 
         return F.pad(
-            input=torch.sigmoid(out),
+            input=out,
             pad=(0, 0, 0, self.output_bin - out.size()[2]),
             mode='replicate'
         )
 
 class Encoder(nn.Module):
-    def __init__(self, in_channels, out_channels, n_fft=2048, downsamples=0, activ=nn.LeakyReLU, downsample=True):
+    def __init__(self, in_channels, out_channels, n_fft=2048, downsamples=0, activ=nn.LeakyReLU, downsample=True, bias=True):
         super(Encoder, self).__init__()
 
         bins = (n_fft // 2)
@@ -82,9 +82,9 @@ class Encoder(nn.Module):
             for _ in range(downsamples):
                 bins = bins // 2
 
-        self.linear1 = nn.Linear(in_channels, out_channels)
+        self.linear1 = nn.Linear(in_channels, out_channels, bias=bias)
         self.activate = activ(inplace=True)
-        self.linear2 = nn.Linear(bins, bins // 2 if downsample else bins)
+        self.linear2 = nn.Linear(bins, bins // 2 if downsample else bins, bias=bias)
 
     def __call__(self, x):
         h = self.activate(self.linear1(x.transpose(1,3))).transpose(2,3)
@@ -92,7 +92,7 @@ class Encoder(nn.Module):
         return h
 
 class Decoder(nn.Module):
-    def __init__(self, in_channels, out_channels, n_fft=2048, downsamples=0, activ=nn.LeakyReLU):
+    def __init__(self, in_channels, out_channels, n_fft=2048, downsamples=0, activ=nn.LeakyReLU, bias=True, upsample=True):
         super(Decoder, self).__init__()
 
         bins = (n_fft // 2)
@@ -100,9 +100,9 @@ class Decoder(nn.Module):
             for _ in range(downsamples):
                 bins = bins // 2
 
-        self.linear1 = nn.Linear(bins, bins * 2)
+        self.linear1 = nn.Linear(bins, bins * 2 if upsample else bins, bias=bias)
         self.activate = activ(inplace=True)
-        self.linear2 = nn.Linear(in_channels, out_channels)
+        self.linear2 = nn.Linear(in_channels, out_channels, bias=bias)
 
     def __call__(self, x, skip=None):
         h = self.activate(self.linear1(x.transpose(2,3))).transpose(2,3)
