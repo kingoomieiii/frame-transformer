@@ -62,9 +62,6 @@ def train_epoch(dataloader, model, device, optimizer, accumulation_steps, grad_s
         X_batch = X_batch.to(device)
         y_batch = y_batch.to(device)
 
-        if lr_warmup is not None:
-            lr_warmup.step()
-
         if np.random.uniform() < mixup_rate:
             X_batch, y_batch = mixup(X_batch, y_batch, mixup_alpha)
 
@@ -83,6 +80,9 @@ def train_epoch(dataloader, model, device, optimizer, accumulation_steps, grad_s
         if (itr + 1) % accumulation_steps == 0:
             if progress_bar:
                 pbar.set_description(str(batch_loss.item()))
+
+            if lr_warmup is not None:
+                lr_warmup.step()
 
             if grad_scaler is not None:
                 grad_scaler.unscale_(optimizer)
@@ -176,7 +176,7 @@ def main():
     p.add_argument('--mixup_alpha', '-a', type=float, default=1.0)
     p.add_argument('--pretrained_model', '-P', type=str, default=None)
     p.add_argument('--progress_bar', '-pb', type=str, default='true')
-    p.add_argument('--lr_warmup_steps', '-LW', type=int, default=64000)
+    p.add_argument('--lr_warmup_steps', '-LW', type=int, default=32000)
     p.add_argument('--lr_warmup_current_step', type=int, default=0)
     p.add_argument('--mixed_precision', type=str, default='true')
     p.add_argument('--debug', action='store_true')
@@ -208,8 +208,6 @@ def main():
         logger.info('{} {} {}'.format(i + 1, os.path.basename(X_fname), os.path.basename(y_fname)))
 
     device = torch.device('cpu')
-
-    # 8 is used for the width here as it seems to be a sweet spot; using a larger channel count doesn't seem to help and just adds computational cost, and using a lower width starts to impact the frame transformers accuracy.
     model = FrameTransformer(channels=args.channels, n_fft=args.n_fft, num_encoders=args.num_encoders, num_decoders=args.num_decoders, num_bands=args.num_bands, feedforward_dim=args.feedforward_dim, bias=args.bias, cropsize=args.cropsize)
 
     if args.pretrained_model is not None:
