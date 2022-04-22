@@ -29,7 +29,7 @@ class FrameTransformer(nn.Module):
         self.dec1 = Decoder(channels * (1 + 2) + num_decoders, channels * 1, n_fft=2048, downsamples=1, bias=bias)
 
         self.out_transformer = nn.ModuleList([FrameTransformerBlock(channels + i, channels, num_bands, cropsize, n_fft, downsamples=0, feedforward_dim=feedforward_dim, bias=bias) for i in range(num_decoders)])
-        self.out = Decoder(channels + num_decoders, 2, downsamples=0, upsample=False)
+        self.out = Decoder(channels + num_decoders, 2, downsamples=0, upsample=False, activate_out=False)
 
     def __call__(self, x):
         x = x[:, :, :self.max_bin]
@@ -87,13 +87,13 @@ class Encoder(nn.Module):
         self.linear2 = nn.Linear(bins, bins // 2 if downsample else bins, bias=bias)
 
     def __call__(self, x):
-        h = self.activate(self.linear1(x.transpose(1,3))).transpose(2,3)
-        h = self.activate(self.linear2(h)).permute(0,2,3,1)
+        h = self.activate(self.linear1(x.transpose(1,3)).transpose(1,3)).transpose(2,3)
+        h = self.activate(self.linear2(h)).permute(0,1,3,2)
 
         return h
 
 class Decoder(nn.Module):
-    def __init__(self, in_channels, out_channels, n_fft=2048, downsamples=0, activ=nn.LeakyReLU, bias=True, upsample=True):
+    def __init__(self, in_channels, out_channels, n_fft=2048, downsamples=0, activ=nn.LeakyReLU, bias=True, upsample=True, activate_out=True):
         super(Decoder, self).__init__()
 
         bins = (n_fft // 2)
@@ -101,17 +101,21 @@ class Decoder(nn.Module):
             for _ in range(downsamples):
                 bins = bins // 2
 
-        self.activate = activ(inplace=True)
         self.linear1 = nn.Linear(bins, bins * 2 if upsample else bins, bias=bias)
         self.linear2 = nn.Linear(in_channels, out_channels, bias=bias)
+        self.activate = activ(inplace=True)
+        self.activate_out = activate_out
 
     def __call__(self, x, skip=None):
-        h = self.activate(self.linear1(x.transpose(2,3))).transpose(2,3)
+        h = self.activate(self.linear1(x.transpose(2,3)).transpose(2,3))
 
         if skip is not None:
             h = torch.cat((h, skip), dim=1)
 
-        h = self.activate(self.linear2(h.transpose(1,3))).transpose(1,3)
+        h = self.linear2(h.transpose(1,3)).transpose(1,3)
+
+        if self.activate_out:
+            h = self.activate(h)
 
         return h
 
