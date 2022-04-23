@@ -105,14 +105,13 @@ class Decoder(nn.Module):
 
         return h
 
-# lol im lazy
 class FrameNorm(nn.Module):
     def __init__(self, channels):
         super(FrameNorm, self).__init__()
-        self.norm = nn.BatchNorm1d(channels)
+        self.norm = nn.BatchNorm2d(1)
 
     def forward(self, x):
-        return self.norm(x.transpose(1,2)).transpose(1,2)
+        return self.norm(x.unsqueeze(1)).squeeze(1)
 
 class FrameTransformerBlock(nn.Module):
     def __init__(self, channels, mem_channels, num_bands=4, cropsize=256, n_fft=2048, feedforward_dim=2048, downsamples=0, bias=False, dropout=0.1):
