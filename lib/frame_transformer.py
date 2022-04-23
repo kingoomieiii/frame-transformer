@@ -74,7 +74,7 @@ class FrameTransformer(nn.Module):
         )
         
 class Encoder(nn.Module):
-    def __init__(self, nin, nout, kernel_size=3, stride=1, padding=1, activ=nn.LeakyReLU):
+    def __init__(self, nin, nout, kernel_size=3, stride=1, padding=1, activ=nn.GELU):
         super(Encoder, self).__init__()
         self.conv1 = FrameConv(nin, nout, kernel_size, 1, padding, activate=activ)
         self.conv2 = FrameConv(nout, nout, kernel_size, stride, padding, activate=activ)
@@ -86,7 +86,7 @@ class Encoder(nn.Module):
         return h
 
 class Decoder(nn.Module):
-    def __init__(self, nin, nout, kernel_size=3, padding=1, activ=nn.ReLU, dropout=False):
+    def __init__(self, nin, nout, kernel_size=3, padding=1, activ=nn.GELU, dropout=False):
         super(Decoder, self).__init__()
         self.conv = FrameConv(nin, nout, kernel_size, 1, padding, activate=activ)
         self.dropout = nn.Dropout2d(0.1) if dropout else None
@@ -118,7 +118,7 @@ class FrameTransformerBlock(nn.Module):
         self.cropsize = cropsize
         self.num_bands = num_bands
 
-        self.relu = nn.ReLU(inplace=True)
+        self.gelu = nn.GELU()
         
         self.bottleneck_linear = nn.Linear(channels, 1, bias=bias)
         self.bottleneck_norm = nn.BatchNorm2d(1)
@@ -158,8 +158,8 @@ class FrameTransformerBlock(nn.Module):
         self.dropout5 = nn.Dropout(dropout) if dropout > 0 else nn.Identity()
 
     def __call__(self, x, mem):
-        x = self.relu(self.bottleneck_norm(self.bottleneck_linear(x.transpose(1,3)).transpose(1,3)))
-        mem = self.relu(self.mem_bottleneck_norm(self.mem_bottleneck_linear(mem.transpose(1,3)).transpose(1,3)))
+        x = self.gelu(self.bottleneck_norm(self.bottleneck_linear(x.transpose(1,3)).transpose(1,3)))
+        mem = self.gelu(self.mem_bottleneck_norm(self.mem_bottleneck_linear(mem.transpose(1,3)).transpose(1,3)))
 
         b, _, h, w = x.shape
         x = x.transpose(2,3).reshape(b,w,h)
@@ -169,7 +169,7 @@ class FrameTransformerBlock(nn.Module):
         hm = self.enc_attn1(x, mem=mem)
         x = self.norm1(x + self.dropout1(hs + hm))
 
-        hL = self.relu(self.conv1L(x.transpose(1,2)).transpose(1,2))
+        hL = self.gelu(self.conv1L(x.transpose(1,2)).transpose(1,2))
         hR = self.conv1R(x.transpose(1,2)).transpose(1,2)
         h = self.norm2(hL + F.pad(hR, (0, hL.shape[2]-hR.shape[2])))
 
@@ -215,7 +215,7 @@ class MultibandFrameAttention(nn.Module):
         return o
 
 class FrameConv(nn.Module):
-    def __init__(self, in_channels, out_channels, kernel_size=3, stride=1, padding=1, dilation=1, groups=1, activate=nn.ReLU, norm=True):
+    def __init__(self, in_channels, out_channels, kernel_size=3, stride=1, padding=1, dilation=1, groups=1, activate=nn.GELU, norm=True):
         super(FrameConv, self).__init__()
 
         self.conv = nn.Conv2d(
@@ -228,7 +228,7 @@ class FrameConv(nn.Module):
                 bias=False)
 
         self.norm = nn.BatchNorm2d(out_channels) if norm else None
-        self.activate = activate(inplace=True) if activate is not None else None
+        self.activate = activate() if activate is not None else None
 
     def __call__(self, x):
         h = self.conv(x)
