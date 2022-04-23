@@ -118,7 +118,7 @@ class FrameTransformerBlock(nn.Module):
         self.cropsize = cropsize
         self.num_bands = num_bands
 
-        self.gelu = nn.GELU()
+        self.relu = nn.ReLU()
         
         self.bottleneck_linear = nn.Linear(channels, 1, bias=bias)
         self.bottleneck_norm = nn.BatchNorm2d(1)
@@ -152,14 +152,14 @@ class FrameTransformerBlock(nn.Module):
         self.dropout4 = nn.Dropout(dropout) if dropout > 0 else nn.Identity()
 
         self.conv3 = nn.Linear(bins, feedforward_dim * 2, bias=bias)
-        self.swish = nn.SiLU(inplace=True)
+        self.gelu = nn.GELU()
         self.conv4 = nn.Linear(feedforward_dim * 2, bins, bias=bias)
         self.norm6 = nn.LayerNorm(bins)
         self.dropout5 = nn.Dropout(dropout) if dropout > 0 else nn.Identity()
 
     def __call__(self, x, mem):
-        x = self.gelu(self.bottleneck_norm(self.bottleneck_linear(x.transpose(1,3)).transpose(1,3)))
-        mem = self.gelu(self.mem_bottleneck_norm(self.mem_bottleneck_linear(mem.transpose(1,3)).transpose(1,3)))
+        x = self.relu(self.bottleneck_norm(self.bottleneck_linear(x.transpose(1,3)).transpose(1,3)))
+        mem = self.relu(self.mem_bottleneck_norm(self.mem_bottleneck_linear(mem.transpose(1,3)).transpose(1,3)))
 
         b, _, h, w = x.shape
         x = x.transpose(2,3).reshape(b,w,h)
@@ -169,7 +169,7 @@ class FrameTransformerBlock(nn.Module):
         hm = self.enc_attn1(x, mem=mem)
         x = self.norm1(x + self.dropout1(hs + hm))
 
-        hL = self.gelu(self.conv1L(x.transpose(1,2)).transpose(1,2))
+        hL = self.relu(self.conv1L(x.transpose(1,2)).transpose(1,2))
         hR = self.conv1R(x.transpose(1,2)).transpose(1,2)
         h = self.norm2(hL + F.pad(hR, (0, hL.shape[2]-hR.shape[2])))
 
@@ -183,7 +183,7 @@ class FrameTransformerBlock(nn.Module):
         x = self.norm5(x + h)
 
         h = self.conv3(x)
-        h = self.swish(h)
+        h = self.gelu(h)
         h = self.dropout5(self.conv4(h))
         x = self.norm6(x + h)
                 
