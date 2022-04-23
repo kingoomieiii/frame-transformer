@@ -10,11 +10,11 @@ class FrameTransformer(nn.Module):
         self.max_bin = n_fft // 2
         self.output_bin = n_fft // 2 + 1
 
-        self.enc1 = FrameConv(2, channels, 3, 1, 1)
-        self.enc2 = Encoder(channels * 1, channels * 2, kernel_size=3, stride=2, padding=1)
-        self.enc3 = Encoder(channels * 2, channels * 4, kernel_size=3, stride=2, padding=1)
-        self.enc4 = Encoder(channels * 4, channels * 6, kernel_size=3, stride=2, padding=1)
-        self.enc5 = Encoder(channels * 6, channels * 8, kernel_size=3, stride=2, padding=1)
+        self.enc1 = FrameConv(2, channels, kernel_size=7, padding=3, stride=1)
+        self.enc2 = Encoder(channels * 1, channels * 2, kernel_size=7, stride=2, padding=3)
+        self.enc3 = Encoder(channels * 2, channels * 4, kernel_size=7, stride=2, padding=3)
+        self.enc4 = Encoder(channels * 4, channels * 6, kernel_size=7, stride=2, padding=3)
+        self.enc5 = Encoder(channels * 6, channels * 8, kernel_size=7, stride=2, padding=3)
         
         self.dec4_transformer = nn.ModuleList([FrameTransformerBlock(channels * 8 + i, channels * 8, num_bands, cropsize, n_fft, downsamples=4, feedforward_dim=feedforward_dim, bias=bias) for i in range(num_decoders)])
         self.dec4 = Decoder(channels * (6 + 8) + num_decoders, channels * 6, kernel_size=3, padding=1)
