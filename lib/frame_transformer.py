@@ -106,6 +106,8 @@ class Decoder(nn.Module):
         return h
 
 class FrameTransformerBlock(nn.Module):
+    decoder_ratio = 1
+
     def __init__(self, channels, mem_channels, num_bands=4, cropsize=256, n_fft=2048, feedforward_dim=2048, downsamples=0, bias=False, dropout=0.1):
         super(FrameTransformerBlock, self).__init__()
 
@@ -113,6 +115,8 @@ class FrameTransformerBlock(nn.Module):
         if downsamples > 0:
             for _ in range(downsamples):
                 bins = ((bins - 1) // 2) + 1
+
+        self.initialized = False
 
         self.bins = bins
         self.cropsize = cropsize
@@ -126,7 +130,7 @@ class FrameTransformerBlock(nn.Module):
         self.enc_attn1 = MultibandFrameAttention(num_bands, bins, cropsize)
         self.dropout1 = nn.Dropout(dropout) if dropout > 0 else nn.Identity()
         self.norm1 = nn.LayerNorm(bins)
-        self.register_buffer('omega1', torch.ones(1))
+        self.omega1 = nn.Parameter(torch.ones(bins))
 
         self.conv1L = nn.Sequential(
             nn.Conv1d(bins, bins, kernel_size=11, padding=5, groups=bins, bias=bias),
@@ -140,24 +144,24 @@ class FrameTransformerBlock(nn.Module):
             nn.Conv1d(feedforward_dim * 2, bins, kernel_size=1, padding=0, bias=bias))
         self.dropout2 = nn.Dropout(dropout) if dropout > 0 else nn.Identity()
         self.norm3 = nn.LayerNorm(bins)
-        self.register_buffer('omega2', torch.ones(1))
+        self.omega2 = nn.Parameter(torch.ones(bins))
 
         self.self_attn2 = MultibandFrameAttention(num_bands, bins, cropsize)
         self.dropout3 = nn.Dropout(dropout) if dropout > 0 else nn.Identity()
         self.norm4 = nn.LayerNorm(bins)
-        self.register_buffer('omega3', torch.ones(1))
+        self.omega3 = nn.Parameter(torch.ones(bins))
 
         self.enc_attn2 = MultibandFrameAttention(num_bands, bins, cropsize)
         self.dropout4 = nn.Dropout(dropout) if dropout > 0 else nn.Identity()
         self.norm5 = nn.LayerNorm(bins)
-        self.register_buffer('omega4', torch.ones(1))
+        self.omega4 = nn.Parameter(torch.ones(bins))
 
         self.conv3 = nn.Linear(bins, feedforward_dim * 2, bias=bias)
         self.swish = nn.SiLU(inplace=True)
         self.conv4 = nn.Linear(feedforward_dim * 2, bins, bias=bias)
         self.dropout5 = nn.Dropout(dropout) if dropout > 0 else nn.Identity()
         self.norm6 = nn.LayerNorm(bins)
-        self.register_buffer('omega5', torch.ones(1))
+        self.omega5 = nn.Parameter(torch.ones(bins))
 
     def __call__(self, x, mem):
         x = self.bottleneck_linear(x.transpose(1,3)).transpose(1,3)
@@ -169,40 +173,52 @@ class FrameTransformerBlock(nn.Module):
 
         hs = self.self_attn1(x)
         hm = self.enc_attn1(x, mem=mem)
-        istd = torch.var(x * self.omega1)
-        ostda = torch.var(hs)
-        ostdb = torch.var(hm)
+        if not self.initialized:
+            self.omega1.data.fill_(FrameTransformerBlock.decoder_ratio)
+            istd = torch.var(x * self.omega1)
+            ostda = torch.var(hs)
+            ostdb = torch.var(hm)
+            FrameTransformerBlock.decoder_ratio = torch.sqrt(istd + ostda + ostdb)
         x = self.norm1(x * self.omega1 + self.dropout1(hs + hm))
-        self.omega1 = torch.sqrt(istd + ostda + ostdb).detach()
 
         hL = self.relu(self.conv1L(x.transpose(1,2)).transpose(1,2))
         hR = self.conv1R(x.transpose(1,2)).transpose(1,2)
         h = self.norm2(hL + F.pad(hR, (0, hL.shape[2]-hR.shape[2])))
-        h = self.dropout2(self.conv2(h.transpose(1,2)).transpose(1,2))
-        istd = torch.var(x * self.omega2)
-        ostd = torch.var(h)
-        x = self.norm3(x * self.omega2 + h)
-        self.omega2 = torch.sqrt(istd + ostd).detach()
+        h = self.conv2(h.transpose(1,2)).transpose(1,2)
+        if not self.initialized:
+            self.omega2.data.fill_(FrameTransformerBlock.decoder_ratio)            
+            istd = torch.var(x * self.omega2)
+            ostd = torch.var(h)
+            FrameTransformerBlock.decoder_ratio = torch.sqrt(istd + ostd)
+        x = self.norm3(x * self.omega2 + self.dropout2(h))
 
-        h = self.dropout3(self.self_attn2(x))
-        istd = torch.var(x * self.omega3)
-        ostd = torch.var(h)
-        x = self.norm4(x * self.omega3 + h)
-        self.omega3 = torch.sqrt(istd + ostd).detach()
+        h = self.self_attn2(x)
+        if not self.initialized:
+            self.omega3.data.fill_(FrameTransformerBlock.decoder_ratio)            
+            istd = torch.var(x * self.omega3)
+            ostd = torch.var(h)
+            FrameTransformerBlock.decoder_ratio = torch.sqrt(istd + ostd)
+        x = self.norm4(x * self.omega3 + self.dropout3(h))
 
-        h = self.dropout4(self.enc_attn2(x, mem=mem))
-        istd = torch.var(x * self.omega4)
-        ostd = torch.var(h)
-        x = self.norm5(x * self.omega4 + h)
-        self.omega4 = torch.sqrt(istd + ostd).detach()
+        h = self.enc_attn2(x, mem=mem)
+        if not self.initialized:
+            self.omega4.data.fill_(FrameTransformerBlock.decoder_ratio)            
+            istd = torch.var(x * self.omega4)
+            ostd = torch.var(h)
+            FrameTransformerBlock.decoder_ratio = torch.sqrt(istd + ostd)
+        x = self.norm5(x * self.omega4 + self.dropout4(h))
 
         h = self.conv3(x)
         h = self.swish(h)
-        h = self.dropout5(self.conv4(h))
-        istd = torch.var(x * self.omega5)
-        ostd = torch.var(h)
-        x = self.norm6(x * self.omega5 + h)
-        self.omega5 = torch.sqrt(istd + ostd).detach()
+        h = self.dropout5(self.conv4(h))        
+        if not self.initialized:
+            self.omega5.data.fill_(FrameTransformerBlock.decoder_ratio)            
+            istd = torch.var(x * self.omega5)
+            ostd = torch.var(h)
+            FrameTransformerBlock.decoder_ratio = torch.sqrt(istd + ostd)
+            self.initialized = True
+
+        x = self.norm6(x * self.omega5 + self.dropout5(h))
                 
         return x.transpose(1, 2).unsqueeze(1)
 

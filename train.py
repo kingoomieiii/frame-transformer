@@ -19,12 +19,12 @@ from tqdm import tqdm
 from lib.frame_transformer import FrameTransformer
 from lib.warmup_lr import WarmupLR
 
-def setup_logger(name, logfile='LOGFILENAME.log'):
+def setup_logger(name, logfile='LOGFILENAME.log', out_dir='logs'):
     logger = logging.getLogger(name)
     logger.setLevel(logging.DEBUG)
     logger.propagate = False
 
-    fh = logging.FileHandler(logfile, encoding='utf8')
+    fh = logging.FileHandler(f'{out_dir}/{logfile}', encoding='utf8')
     fh.setLevel(logging.DEBUG)
     fh_formatter = logging.Formatter(
         '%(asctime)s - %(levelname)s - %(message)s')
