@@ -90,7 +90,7 @@ class VocalAugmentationDataset(torch.utils.data.Dataset):
         if self.slide:
             start = np.random.randint(0, V.shape[2] - self.cropsize)
             stop = start + self.cropsize
-            V = V[:,:,start:stop].copy()
+            V = V[:,:,start:stop]
 
         if np.random.uniform() < 0.5:
             vidx2 = np.random.randint(len(self.vocal_list))
@@ -114,7 +114,7 @@ class VocalAugmentationDataset(torch.utils.data.Dataset):
             if self.slide:
                 start = np.random.randint(0, V2.shape[2] - self.cropsize)
                 stop = start + self.cropsize
-                V2 = V2[:,:,start:stop].copy()
+                V2 = V2[:,:,start:stop]
 
             Vc = (Vc * a) + (Vc2 * inv)
             V = (V * a) + (V2 * inv)
@@ -129,6 +129,12 @@ class VocalAugmentationDataset(torch.utils.data.Dataset):
         Y = X if aug else data['Y']
 
         if not self.is_validation:
+            if self.slide:
+                start = np.random.randint(0, X.shape[2] - self.cropsize)
+                stop = start + self.cropsize
+                X = X[:,:,start:stop]
+                Y = Y[:,:,start:stop]
+
             if aug and np.random.uniform() > 0.02:
                 V, Vc = self._get_vocals()
                 X = Y + V

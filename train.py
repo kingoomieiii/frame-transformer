@@ -217,9 +217,8 @@ def main():
         model.to(device)
 
     train_dataset = dataset.VocalAugmentationDataset(
-        path="C://cs256_sr44100_hl1024_nf2048_of0",
-        extra_path="G://cs256_sr44100_hl1024_nf2048_of0",
-        pair_path="G://cs256_sr44100_hl1024_nf2048_of0_PAIRS",
+        path="C://cs512_sr44100_hl1024_nf2048_of0",
+        extra_path="G://cs512_sr44100_hl1024_nf2048_of0",
         vocal_path="G://cs512_sr44100_hl1024_nf2048_of0_VOCALS",
         is_validation=False,
         epoch_size=args.epoch_size
