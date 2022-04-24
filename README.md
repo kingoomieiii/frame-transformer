@@ -19,6 +19,6 @@ This fork makes use of vocal augmentations. The dataset takes an instrumental pa
 - [2] Takahashi et al., "Multi-scale Multi-band DenseNets for Audio Source Separation", https://arxiv.org/pdf/1706.09588.pdf
 - [3] Takahashi et al., "MMDENSELSTM: AN EFFICIENT COMBINATION OF CONVOLUTIONAL AND RECURRENT NEURAL NETWORKS FOR AUDIO SOURCE SEPARATION", https://arxiv.org/pdf/1805.02410.pdf
 - [4] Liutkus et al., "The 2016 Signal Separation Evaluation Campaign", Latent Variable Analysis and Signal Separation - 12th International Conference
-- [5] So, Liang, and Le, "The Evolved Transformer", https://arxiv.org/pdf/1901.11117.pdf
+- [5] So et al., "The Evolved Transformer", https://arxiv.org/pdf/1901.11117.pdf
 - [6] Huang et al., "Music Transformer: Generating Music with Long-Term Structure", https://arxiv.org/pdf/1809.04281.pdf
 - [7] Liu et al., "Understanding the Difficulty of Training Transformers", https://arxiv.org/pdf/2004.08249.pdf
