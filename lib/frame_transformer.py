@@ -74,7 +74,7 @@ class FrameTransformer(nn.Module):
         )
         
 class Encoder(nn.Module):
-    def __init__(self, nin, nout, kernel_size=3, stride=1, padding=1, activ=nn.GELU):
+    def __init__(self, nin, nout, kernel_size=3, stride=1, padding=1, activ=nn.LeakyReLU):
         super(Encoder, self).__init__()
         self.conv1 = FrameConv(nin, nout, kernel_size, 1, padding, activate=activ)
         self.conv2 = FrameConv(nout, nout, kernel_size, stride, padding, activate=activ)
@@ -86,7 +86,7 @@ class Encoder(nn.Module):
         return h
 
 class Decoder(nn.Module):
-    def __init__(self, nin, nout, kernel_size=3, padding=1, activ=nn.GELU, dropout=False):
+    def __init__(self, nin, nout, kernel_size=3, padding=1, activ=nn.LeakyReLU, dropout=False):
         super(Decoder, self).__init__()
         self.conv = FrameConv(nin, nout, kernel_size, 1, padding, activate=activ)
         self.dropout = nn.Dropout2d(0.1) if dropout else None
@@ -118,7 +118,7 @@ class FrameTransformerBlock(nn.Module):
         self.cropsize = cropsize
         self.num_bands = num_bands
 
-        self.relu = nn.ReLU()
+        self.relu = nn.LeakyReLU(inplace=True)
         
         self.bottleneck_linear = nn.Linear(channels, 1, bias=bias)
         self.bottleneck_norm = nn.BatchNorm2d(1)
@@ -152,7 +152,7 @@ class FrameTransformerBlock(nn.Module):
         self.dropout4 = nn.Dropout(dropout) if dropout > 0 else nn.Identity()
 
         self.conv3 = nn.Linear(bins, feedforward_dim * 2, bias=bias)
-        self.gelu = nn.GELU()
+        self.swish = nn.SiLU(inplace=True)
         self.conv4 = nn.Linear(feedforward_dim * 2, bins, bias=bias)
         self.norm6 = nn.LayerNorm(bins)
         self.dropout5 = nn.Dropout(dropout) if dropout > 0 else nn.Identity()
@@ -183,7 +183,7 @@ class FrameTransformerBlock(nn.Module):
         x = self.norm5(x + h)
 
         h = self.conv3(x)
-        h = self.gelu(h)
+        h = self.swish(h)
         h = self.dropout5(self.conv4(h))
         x = self.norm6(x + h)
                 
@@ -215,7 +215,7 @@ class MultibandFrameAttention(nn.Module):
         return o
 
 class FrameConv(nn.Module):
-    def __init__(self, in_channels, out_channels, kernel_size=3, stride=1, padding=1, dilation=1, groups=1, activate=nn.GELU, norm=True):
+    def __init__(self, in_channels, out_channels, kernel_size=3, stride=1, padding=1, dilation=1, groups=1, activate=nn.LeakyReLU, norm=True):
         super(FrameConv, self).__init__()
 
         self.conv = nn.Conv2d(
@@ -228,7 +228,7 @@ class FrameConv(nn.Module):
                 bias=False)
 
         self.norm = nn.BatchNorm2d(out_channels) if norm else None
-        self.activate = activate() if activate is not None else None
+        self.activate = activate(inplace=True) if activate is not None else None
 
     def __call__(self, x):
         h = self.conv(x)

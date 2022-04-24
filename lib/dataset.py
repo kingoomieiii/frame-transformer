@@ -129,12 +129,6 @@ class VocalAugmentationDataset(torch.utils.data.Dataset):
         Y = X if aug else data['Y']
 
         if not self.is_validation:
-            if self.slide:
-                start = np.random.randint(0, X.shape[2] - self.cropsize)
-                stop = start + self.cropsize
-                X = X[:,:,start:stop].copy()
-                Y = Y[:,:,start:stop].copy()
-
             if aug and np.random.uniform() > 0.02:
                 V, Vc = self._get_vocals()
                 X = Y + V
