@@ -121,8 +121,9 @@ class FrameTransformerBlock(nn.Module):
         self.bins = bins
         self.cropsize = cropsize
         self.num_bands = num_bands   
-        self.bottleneck_linear = nn.Linear(channels, 1, bias=bias)
-        self.mem_bottleneck_linear = nn.Linear(mem_channels, 1, bias=bias)
+
+        self.in_project = nn.Linear(channels, 1, bias=bias)
+        self.skip_project = nn.Linear(mem_channels, 1, bias=bias)
 
         self.relu = nn.LeakyReLU(inplace=True)     
 
@@ -164,8 +165,8 @@ class FrameTransformerBlock(nn.Module):
         self.omega5 = nn.Parameter(torch.ones(bins))
 
     def __call__(self, x, mem):
-        x = self.bottleneck_linear(x.transpose(1,3)).transpose(1,3)
-        mem = self.mem_bottleneck_linear(mem.transpose(1,3)).transpose(1,3)
+        x = self.in_project(x.transpose(1,3)).transpose(1,3)
+        mem = self.skip_project(mem.transpose(1,3)).transpose(1,3)
 
         b, _, h, w = x.shape
         x = x.transpose(2,3).reshape(b,w,h)
