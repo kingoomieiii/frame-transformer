@@ -116,8 +116,6 @@ class FrameTransformerBlock(nn.Module):
             for _ in range(downsamples):
                 bins = ((bins - 1) // 2) + 1
 
-        self.initialized = initialized
-
         self.bins = bins
         self.cropsize = cropsize
         self.num_bands = num_bands   
@@ -172,9 +170,11 @@ class FrameTransformerBlock(nn.Module):
         x = x.transpose(2,3).reshape(b,w,h)
         mem = mem.transpose(2,3).reshape(b,w,h)
 
+        initialized = self.omega1.min() != 1.0 and self.training
+
         hs = self.self_attn1(x)
         hm = self.enc_attn1(x, mem=mem)
-        if not self.initialized:
+        if not initialized:
             self.omega1.data.fill_(FrameTransformerBlock.decoder_ratio)
             istd = torch.var(x * self.omega1)
             ostda = torch.var(hs)
@@ -186,7 +186,7 @@ class FrameTransformerBlock(nn.Module):
         hR = self.conv1R(x.transpose(1,2)).transpose(1,2)
         h = self.norm2(hL + F.pad(hR, (0, hL.shape[2]-hR.shape[2])))
         h = self.conv2(h.transpose(1,2)).transpose(1,2)
-        if not self.initialized:
+        if not initialized:
             self.omega2.data.fill_(FrameTransformerBlock.decoder_ratio)            
             istd = torch.var(x * self.omega2)
             ostd = torch.var(h)
@@ -194,7 +194,7 @@ class FrameTransformerBlock(nn.Module):
         x = self.norm3(x * self.omega2 + self.dropout2(h))
 
         h = self.self_attn2(x)
-        if not self.initialized:
+        if not initialized:
             self.omega3.data.fill_(FrameTransformerBlock.decoder_ratio)            
             istd = torch.var(x * self.omega3)
             ostd = torch.var(h)
@@ -202,7 +202,7 @@ class FrameTransformerBlock(nn.Module):
         x = self.norm4(x * self.omega3 + self.dropout3(h))
 
         h = self.enc_attn2(x, mem=mem)
-        if not self.initialized:
+        if not initialized:
             self.omega4.data.fill_(FrameTransformerBlock.decoder_ratio)            
             istd = torch.var(x * self.omega4)
             ostd = torch.var(h)
@@ -212,12 +212,11 @@ class FrameTransformerBlock(nn.Module):
         h = self.conv3(x)
         h = self.swish(h)
         h = self.dropout5(self.conv4(h))        
-        if not self.initialized:
+        if not initialized:
             self.omega5.data.fill_(FrameTransformerBlock.decoder_ratio)            
             istd = torch.var(x * self.omega5)
             ostd = torch.var(h)
             FrameTransformerBlock.decoder_ratio = torch.sqrt(istd + ostd)
-            self.initialized = True
 
         x = self.norm6(x * self.omega5 + self.dropout5(h))
                 
