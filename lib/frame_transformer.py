@@ -128,8 +128,8 @@ class FrameTransformerBlock(nn.Module):
         self.self_attn1 = MultibandFrameAttention(num_bands, bins, cropsize)
         self.enc_attn1 = MultibandFrameAttention(num_bands, bins, cropsize)
         self.dropout1 = nn.Dropout(dropout) if dropout > 0 else nn.Identity()
-        self.norm1 = nn.LayerNorm(bins)
         self.omega1 = nn.Parameter(torch.ones(bins))
+        self.norm1 = nn.LayerNorm(bins)
 
         self.conv1L = nn.Sequential(
             nn.Conv1d(bins, bins, kernel_size=11, padding=5, groups=bins, bias=bias),
@@ -142,25 +142,25 @@ class FrameTransformerBlock(nn.Module):
             nn.Conv1d(feedforward_dim * 2, feedforward_dim * 2, kernel_size=7, padding=3, groups=feedforward_dim*2, bias=bias),
             nn.Conv1d(feedforward_dim * 2, bins, kernel_size=1, padding=0, bias=bias))
         self.dropout2 = nn.Dropout(dropout) if dropout > 0 else nn.Identity()
-        self.norm3 = nn.LayerNorm(bins)
         self.omega2 = nn.Parameter(torch.ones(bins))
+        self.norm3 = nn.LayerNorm(bins)
 
         self.self_attn2 = MultibandFrameAttention(num_bands, bins, cropsize)
         self.dropout3 = nn.Dropout(dropout) if dropout > 0 else nn.Identity()
-        self.norm4 = nn.LayerNorm(bins)
         self.omega3 = nn.Parameter(torch.ones(bins))
+        self.norm4 = nn.LayerNorm(bins)
 
         self.enc_attn2 = MultibandFrameAttention(num_bands, bins, cropsize)
         self.dropout4 = nn.Dropout(dropout) if dropout > 0 else nn.Identity()
-        self.norm5 = nn.LayerNorm(bins)
         self.omega4 = nn.Parameter(torch.ones(bins))
+        self.norm5 = nn.LayerNorm(bins)
 
         self.conv3 = nn.Linear(bins, feedforward_dim * 2, bias=bias)
         self.swish = nn.SiLU(inplace=True)
         self.conv4 = nn.Linear(feedforward_dim * 2, bins, bias=bias)
         self.dropout5 = nn.Dropout(dropout) if dropout > 0 else nn.Identity()
-        self.norm6 = nn.LayerNorm(bins)
         self.omega5 = nn.Parameter(torch.ones(bins))
+        self.norm6 = nn.LayerNorm(bins)
 
     def __call__(self, x, mem):
         x = self.in_project(x.transpose(1,3)).transpose(1,3)
