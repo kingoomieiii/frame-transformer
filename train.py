@@ -130,7 +130,7 @@ def validate_epoch(dataloader, model, device, grad_scaler):
                 sum_loss += loss.item() * len(X_batch)
 
     return sum_loss / len(dataloader.dataset)
-nn.Embedding
+
 def main():
     p = argparse.ArgumentParser()
     p.add_argument('--id', type=str, default='')
