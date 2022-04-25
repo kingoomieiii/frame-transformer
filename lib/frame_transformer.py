@@ -163,14 +163,14 @@ class FrameTransformerBlock(nn.Module):
         self.norm6 = nn.LayerNorm(bins)
 
     def __call__(self, x, mem):
+        initialized = self.omega1.min() != 1.0 and self.training
+        
         x = self.in_project(x.transpose(1,3)).transpose(1,3)
         mem = self.skip_project(mem.transpose(1,3)).transpose(1,3)
 
         b, _, h, w = x.shape
         x = x.transpose(2,3).reshape(b,w,h)
         mem = mem.transpose(2,3).reshape(b,w,h)
-
-        initialized = self.omega1.min() != 1.0 and self.training
 
         hs = self.self_attn1(x)
         hm = self.enc_attn1(x, mem=mem)
