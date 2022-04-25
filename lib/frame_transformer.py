@@ -120,8 +120,8 @@ class FrameTransformerBlock(nn.Module):
         self.cropsize = cropsize
         self.num_bands = num_bands   
 
-        self.in_project = nn.Linear(channels, 1, bias=bias)
-        self.skip_project = nn.Linear(mem_channels, 1, bias=bias)
+        self.in_embed = nn.Linear(channels, 1, bias=bias)
+        self.skip_embed = nn.Linear(mem_channels, 1, bias=bias)
 
         self.relu = nn.LeakyReLU(inplace=True)     
 
@@ -166,8 +166,8 @@ class FrameTransformerBlock(nn.Module):
         b, _, h, w = x.shape
         initialized = self.omega1.min() != 1.0 or not self.training
 
-        x = self.in_project(x.transpose(1,3)).transpose(1,3)
-        mem = self.skip_project(mem.transpose(1,3)).transpose(1,3)
+        x = self.in_embed(x.transpose(1,3)).transpose(1,3)
+        mem = self.skip_embed(mem.transpose(1,3)).transpose(1,3)
 
         x = x.transpose(2,3).reshape(b,w,h)
         mem = mem.transpose(2,3).reshape(b,w,h)
