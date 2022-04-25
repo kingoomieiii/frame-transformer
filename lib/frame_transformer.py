@@ -174,50 +174,41 @@ class FrameTransformerBlock(nn.Module):
 
         hs = self.self_attn1(x)
         hm = self.enc_attn1(x, mem=mem)
+
         if not initialized:
             self.omega1.data.fill_(FrameTransformerBlock.decoder_ratio)
-            istd = torch.var(x * self.omega1)
-            ostda = torch.var(hs)
-            ostdb = torch.var(hm)
-            FrameTransformerBlock.decoder_ratio = torch.sqrt(istd + ostda + ostdb)
+            FrameTransformerBlock.decoder_ratio = torch.sqrt(torch.var(x * self.omega1) + torch.var(hs) + torch.var(hm))
         x = self.norm1(x * self.omega1 + self.dropout1(hs + hm))
 
         hL = self.relu(self.conv1L(x.transpose(1,2)).transpose(1,2))
         hR = self.conv1R(x.transpose(1,2)).transpose(1,2)
         h = self.norm2(hL + F.pad(hR, (0, hL.shape[2]-hR.shape[2])))
         h = self.conv2(h.transpose(1,2)).transpose(1,2)
+
         if not initialized:
-            self.omega2.data.fill_(FrameTransformerBlock.decoder_ratio)            
-            istd = torch.var(x * self.omega2)
-            ostd = torch.var(h)
-            FrameTransformerBlock.decoder_ratio = torch.sqrt(istd + ostd)
+            self.omega2.data.fill_(FrameTransformerBlock.decoder_ratio)
+            FrameTransformerBlock.decoder_ratio = torch.sqrt(torch.var(x * self.omega2) + torch.var(h))
         x = self.norm3(x * self.omega2 + self.dropout2(h))
 
         h = self.self_attn2(x)
         if not initialized:
-            self.omega3.data.fill_(FrameTransformerBlock.decoder_ratio)            
-            istd = torch.var(x * self.omega3)
-            ostd = torch.var(h)
-            FrameTransformerBlock.decoder_ratio = torch.sqrt(istd + ostd)
+            self.omega3.data.fill_(FrameTransformerBlock.decoder_ratio)   
+            FrameTransformerBlock.decoder_ratio = torch.sqrt(torch.var(x * self.omega3) + torch.var(h))
         x = self.norm4(x * self.omega3 + self.dropout3(h))
 
         h = self.enc_attn2(x, mem=mem)
         if not initialized:
-            self.omega4.data.fill_(FrameTransformerBlock.decoder_ratio)            
-            istd = torch.var(x * self.omega4)
-            ostd = torch.var(h)
-            FrameTransformerBlock.decoder_ratio = torch.sqrt(istd + ostd)
+            self.omega4.data.fill_(FrameTransformerBlock.decoder_ratio)
+            FrameTransformerBlock.decoder_ratio = torch.sqrt(torch.var(x * self.omega4) + torch.var(h))
         x = self.norm5(x * self.omega4 + self.dropout4(h))
 
         h = self.conv3(x)
         h = self.swish(h)
-        h = self.dropout5(self.conv4(h))        
-        if not initialized:
-            self.omega5.data.fill_(FrameTransformerBlock.decoder_ratio)            
-            istd = torch.var(x * self.omega5)
-            ostd = torch.var(h)
-            FrameTransformerBlock.decoder_ratio = torch.sqrt(istd + ostd)
+        h = self.dropout5(self.conv4(h))   
 
+        if not initialized:
+            self.omega5.data.fill_(FrameTransformerBlock.decoder_ratio)  
+            FrameTransformerBlock.decoder_ratio = torch.sqrt(torch.var(x * self.omega5) + torch.var(h))
         x = self.norm6(x * self.omega5 + self.dropout5(h))
                 
         return x.transpose(1, 2).unsqueeze(1)
