@@ -164,7 +164,7 @@ class FrameTransformerBlock(nn.Module):
 
     def __call__(self, x, mem):
         b, _, h, w = x.shape
-        initialized = self.omega1.min() != 1.0 and self.training
+        initialized = self.omega1.min() != 1.0 or not self.training
 
         x = self.in_project(x.transpose(1,3)).transpose(1,3)
         mem = self.skip_project(mem.transpose(1,3)).transpose(1,3)
@@ -210,7 +210,7 @@ class FrameTransformerBlock(nn.Module):
         h = self.swish(h)
         h = self.conv4(h)
 
-        if not initialized:
+        if not initialized and self.training:
             self.omega5.data.fill_(FrameTransformerBlock.decoder_ratio)  
             FrameTransformerBlock.decoder_ratio = torch.sqrt(torch.var(x * self.omega5) + torch.var(h))
 

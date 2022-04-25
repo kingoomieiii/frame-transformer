@@ -249,7 +249,7 @@ def main():
     params = sum([np.prod(p.size()) for p in model_parameters])
     print(f'# num params: {params}')
     
-    optimizer = torch.optim.Adam(
+    optimizer = torch.optim.AdamW(
         filter(lambda p: p.requires_grad, model.parameters()),
         lr=args.learning_rate,
         amsgrad=args.amsgrad,
