@@ -208,7 +208,7 @@ def main():
         logger.info('{} {} {}'.format(i + 1, os.path.basename(X_fname), os.path.basename(y_fname)))
 
     device = torch.device('cpu')
-    model = FrameTransformer(channels=args.channels, n_fft=args.n_fft, num_encoders=args.num_encoders, num_decoders=args.num_decoders, num_bands=args.num_bands, feedforward_dim=args.feedforward_dim, bias=args.bias, cropsize=args.cropsize, initialized=args.pretrained_model is not None)
+    model = FrameTransformer(channels=args.channels, n_fft=args.n_fft, num_encoders=args.num_encoders, num_decoders=args.num_decoders, num_bands=args.num_bands, feedforward_dim=args.feedforward_dim, bias=args.bias, cropsize=args.cropsize)
 
     if args.pretrained_model is not None:
         model.load_state_dict(torch.load(args.pretrained_model, map_location=device))
@@ -249,11 +249,10 @@ def main():
     params = sum([np.prod(p.size()) for p in model_parameters])
     print(f'# num params: {params}')
     
-    optimizer = torch.optim.AdamW(
+    optimizer = torch.optim.Adam(
         filter(lambda p: p.requires_grad, model.parameters()),
         lr=args.learning_rate,
-        amsgrad=args.amsgrad,
-        weight_decay=args.weight_decay
+        amsgrad=args.amsgrad
     )
 
     lr_warmup = WarmupLR(optimizer, target_lr=args.learning_rate, num_steps=args.lr_warmup_steps, current_step=args.lr_warmup_current_step, verbose=True) if args.lr_warmup_steps > 0 else None
