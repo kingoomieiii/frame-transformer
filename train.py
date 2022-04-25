@@ -146,7 +146,6 @@ def main():
     p.add_argument('--vocal_noise_magnitude', type=float, default=0.5)
     p.add_argument('--vocal_pan_prob', type=float, default=0.5)
     p.add_argument('--batchsize', '-B', type=int, default=4)
-    p.add_argument('--weight_decay', type=float, default=0)
     p.add_argument('--amsgrad', type=str, default='false')
     p.add_argument('--accumulation_steps', '-A', type=int, default=2)
     p.add_argument('--gpu', '-g', type=int, default=-1)
@@ -283,10 +282,10 @@ def main():
             .format(train_loss, val_loss, val_loss_fake)
         )
 
-        if lr_warmup.current_step == lr_warmup.num_steps:
+        if lr_warmup is not None and lr_warmup.current_step == lr_warmup.num_steps:
             scheduler.step(val_loss)
 
-        if val_loss < best_loss or lr_warmup.current_step < lr_warmup.num_steps:
+        if val_loss < best_loss or (lr_warmup is not None and lr_warmup.current_step < lr_warmup.num_steps):
             if val_loss < best_loss:
                 best_loss = val_loss
                 logger.info('  * best validation loss')
