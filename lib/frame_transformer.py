@@ -106,9 +106,7 @@ class Decoder(nn.Module):
         return h
 
 class FrameTransformerBlock(nn.Module):
-    decoder_ratio = 1
-
-    def __init__(self, channels, mem_channels, num_bands=4, cropsize=256, n_fft=2048, feedforward_dim=2048, downsamples=0, bias=False, dropout=0.1, initialized=False):
+    def __init__(self, channels, mem_channels, num_bands=4, cropsize=256, n_fft=2048, feedforward_dim=2048, downsamples=0, bias=False, dropout=0.1):
         super(FrameTransformerBlock, self).__init__()
 
         bins = (n_fft // 2)
@@ -118,100 +116,79 @@ class FrameTransformerBlock(nn.Module):
 
         self.bins = bins
         self.cropsize = cropsize
-        self.num_bands = num_bands   
+        self.num_bands = num_bands
 
-        self.in_embed = nn.Linear(channels, 1, bias=bias)
-        self.skip_embed = nn.Linear(mem_channels, 1, bias=bias)
+        self.relu = nn.LeakyReLU(inplace=True)
+        
+        self.bottleneck_linear = nn.Linear(channels, 1, bias=bias)
+        self.mem_bottleneck_linear = nn.Linear(mem_channels, 1, bias=bias)
 
-        self.relu = nn.LeakyReLU(inplace=True)     
-
+        self.norm1 = nn.LayerNorm(bins)
         self.self_attn1 = MultibandFrameAttention(num_bands, bins, cropsize)
         self.enc_attn1 = MultibandFrameAttention(num_bands, bins, cropsize)
         self.dropout1 = nn.Dropout(dropout) if dropout > 0 else nn.Identity()
-        self.omega1 = nn.Parameter(torch.ones(bins))
-        self.norm1 = nn.LayerNorm(bins)
 
+        self.norm2 = nn.LayerNorm(bins)
         self.conv1L = nn.Sequential(
             nn.Conv1d(bins, bins, kernel_size=11, padding=5, groups=bins, bias=bias),
             nn.Conv1d(bins, feedforward_dim * 2, kernel_size=1, padding=0, bias=bias))
         self.conv1R = nn.Sequential(
             nn.Conv1d(bins, bins, kernel_size=7, padding=3, groups=bins, bias=bias),
             nn.Conv1d(bins, feedforward_dim // 2, kernel_size=1, padding=0, bias=bias))
-        self.norm2 = nn.LayerNorm(feedforward_dim * 2)
+        self.norm3 = nn.LayerNorm(feedforward_dim * 2)
         self.conv2 = nn.Sequential(
             nn.Conv1d(feedforward_dim * 2, feedforward_dim * 2, kernel_size=7, padding=3, groups=feedforward_dim*2, bias=bias),
             nn.Conv1d(feedforward_dim * 2, bins, kernel_size=1, padding=0, bias=bias))
         self.dropout2 = nn.Dropout(dropout) if dropout > 0 else nn.Identity()
-        self.omega2 = nn.Parameter(torch.ones(bins))
-        self.norm3 = nn.LayerNorm(bins)
 
+        self.norm4 = nn.LayerNorm(bins)
         self.self_attn2 = MultibandFrameAttention(num_bands, bins, cropsize)
         self.dropout3 = nn.Dropout(dropout) if dropout > 0 else nn.Identity()
-        self.omega3 = nn.Parameter(torch.ones(bins))
-        self.norm4 = nn.LayerNorm(bins)
 
+        self.norm5 = nn.LayerNorm(bins)
         self.enc_attn2 = MultibandFrameAttention(num_bands, bins, cropsize)
         self.dropout4 = nn.Dropout(dropout) if dropout > 0 else nn.Identity()
-        self.omega4 = nn.Parameter(torch.ones(bins))
-        self.norm5 = nn.LayerNorm(bins)
 
+        self.norm6 = nn.LayerNorm(bins)
         self.conv3 = nn.Linear(bins, feedforward_dim * 2, bias=bias)
         self.swish = nn.SiLU(inplace=True)
         self.conv4 = nn.Linear(feedforward_dim * 2, bins, bias=bias)
         self.dropout5 = nn.Dropout(dropout) if dropout > 0 else nn.Identity()
-        self.omega5 = nn.Parameter(torch.ones(bins))
-        self.norm6 = nn.LayerNorm(bins)
 
     def __call__(self, x, mem):
+        x = self.bottleneck_linear(x.transpose(1,3)).transpose(1,3)
+        mem = self.mem_bottleneck_linear(mem.transpose(1,3)).transpose(1,3)
+
         b, _, h, w = x.shape
-        initialized = self.omega1.min() != 1.0 or not self.training
+        x = x.transpose(2,3).reshape(b,w,h)
+        mem = mem.transpose(2,3).reshape(b,w,h)
 
-        x = self.in_embed(x.transpose(1,3)).reshape(b,w,h)
-        mem = self.skip_embed(mem.transpose(1,3)).reshape(b,w,h)
+        h = self.norm1(x)
+        hs = self.self_attn1(h)
+        hm = self.enc_attn1(h, mem=mem)
+        x = x + self.dropout1(hs + hm)
 
-        hs = self.self_attn1(x)
-        hm = self.enc_attn1(x, mem=mem)
+        h = self.norm2(x)
+        hL = self.relu(self.conv1L(h.transpose(1,2)).transpose(1,2))
+        hR = self.conv1R(h.transpose(1,2)).transpose(1,2)
+        h = self.norm3(hL + F.pad(hR, (0, hL.shape[2]-hR.shape[2])))
 
-        if not initialized:
-            self.omega1.data.fill_(FrameTransformerBlock.decoder_ratio)
-            FrameTransformerBlock.decoder_ratio = torch.sqrt(torch.var(x * self.omega1) + torch.var(hs) + torch.var(hm))
+        h = self.dropout2(self.conv2(h.transpose(1,2)).transpose(1,2))
+        x = x + h
 
-        x = self.norm1(x * self.omega1 + self.dropout1(hs + hm))
+        h = self.norm4(x)
+        h = self.dropout3(self.self_attn2(h))
+        x = x + h
 
-        hL = self.relu(self.conv1L(x.transpose(1,2)).transpose(1,2))
-        hR = self.conv1R(x.transpose(1,2)).transpose(1,2)
-        h = self.norm2(hL + F.pad(hR, (0, hL.shape[2]-hR.shape[2])))
-        h = self.conv2(h.transpose(1,2)).transpose(1,2)
+        h = self.norm5(x)
+        h = self.dropout4(self.enc_attn2(h, mem=mem))
+        x = x + h
 
-        if not initialized:
-            self.omega2.data.fill_(FrameTransformerBlock.decoder_ratio)
-            FrameTransformerBlock.decoder_ratio = torch.sqrt(torch.var(x * self.omega2) + torch.var(h))
-
-        x = self.norm3(x * self.omega2 + self.dropout2(h))
-
-        h = self.self_attn2(x)
-        if not initialized:
-            self.omega3.data.fill_(FrameTransformerBlock.decoder_ratio)   
-            FrameTransformerBlock.decoder_ratio = torch.sqrt(torch.var(x * self.omega3) + torch.var(h))
-
-        x = self.norm4(x * self.omega3 + self.dropout3(h))
-
-        h = self.enc_attn2(x, mem=mem)
-        if not initialized:
-            self.omega4.data.fill_(FrameTransformerBlock.decoder_ratio)
-            FrameTransformerBlock.decoder_ratio = torch.sqrt(torch.var(x * self.omega4) + torch.var(h))
-
-        x = self.norm5(x * self.omega4 + self.dropout4(h))
-
-        h = self.conv3(x)
+        h = self.norm6(x)
+        h = self.conv3(h)
         h = self.swish(h)
-        h = self.conv4(h)
-
-        if not initialized and self.training:
-            self.omega5.data.fill_(FrameTransformerBlock.decoder_ratio)  
-            FrameTransformerBlock.decoder_ratio = torch.sqrt(torch.var(x * self.omega5) + torch.var(h))
-
-        x = self.norm6(x * self.omega5 + self.dropout5(h))
+        h = self.dropout5(self.conv4(h))
+        x = x + h
                 
         return x.transpose(1, 2).unsqueeze(1)
 
@@ -244,25 +221,19 @@ class FrameConv(nn.Module):
     def __init__(self, in_channels, out_channels, kernel_size=3, stride=1, padding=1, dilation=1, groups=1, activate=nn.LeakyReLU, norm=True):
         super(FrameConv, self).__init__()
 
-        self.conv = nn.Conv2d(
+        self.body = nn.Sequential(
+            nn.Conv2d(
                 in_channels, out_channels,
                 kernel_size=(kernel_size, 1),
                 stride=(stride, 1),
                 padding=(padding, 0),
                 dilation=(dilation, 1),
                 groups=groups,
-                bias=False)
-
-        self.norm = nn.BatchNorm2d(out_channels) if norm else None
-        self.activate = activate(inplace=True) if activate is not None else None
+                bias=False),
+            nn.BatchNorm2d(out_channels),
+            activate(inplace=True))
 
     def __call__(self, x):
-        h = self.conv(x)
-        
-        if self.norm is not None:
-            h = self.norm(h)
-
-        if self.activate is not None:
-            h = self.activate(h)
+        h = self.body(x)
 
         return h
