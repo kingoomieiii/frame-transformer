@@ -108,21 +108,31 @@ def train_epoch(dataloader, model, device, optimizer, accumulation_steps, grad_s
 
     return sum_loss / len(dataloader.dataset)
 
-def validate_epoch(dataloader, model, device, grad_scaler):
+def validate_epoch(dataloader, model, device, grad_scaler, cropsize=256):
     model.eval()
     sum_loss = 0
     crit = nn.L1Loss()
 
     with torch.no_grad():
-        for src, tgt in dataloader:
+        for src, tgt in tqdm(dataloader):
             src = src.to(device)
-            tgt = tgt.to(device)            
-            curr = torch.zeros_like(src).to(src.device)
+            tgt = tgt.to(device)
+            curr = torch.zeros((src.shape[0], src.shape[1], src.shape[2], cropsize)).to(src.device)
+            out = torch.zeros_like(src)
 
-            with torch.cuda.amp.autocast_mode.autocast(enabled=grad_scaler is not None):
-                for i in tqdm(range(256)):
-                    h = model(src, tgt=F.pad(src*curr, (1,0))[:, :, :, :-1])
-                    curr[:, :, :, i] = h[:, :, :, i]
+            start = 0
+            for i in tqdm(range(src.shape[3])):
+                start = 0 if i < cropsize else start + 1
+                stop = start + cropsize
+                src_chunk = src[:, :, :, start:stop]
+                h = model(src_chunk, tgt=F.pad(src_chunk*curr, (1,0))[:, :, :, :-1])
+
+                f = i if i < cropsize else cropsize - 1
+                curr[:, :, :, f] = h[:, :, :, f]
+                out[:, :, :, i] = h[:, :, :, f]
+
+                if i >= cropsize:
+                    curr = F.pad(curr[:, :, :, 1:], (0,1))
 
             loss = crit(src*curr, tgt)
     
@@ -148,7 +158,7 @@ def main():
     p.add_argument('--vocal_noise_prob', type=float, default=0.5)
     p.add_argument('--vocal_noise_magnitude', type=float, default=0.5)
     p.add_argument('--vocal_pan_prob', type=float, default=0.5)
-    p.add_argument('--batchsize', '-B', type=int, default=4)
+    p.add_argument('--batchsize', '-B', type=int, default=5)
     p.add_argument('--amsgrad', type=str, default='false')
     p.add_argument('--accumulation_steps', '-A', type=int, default=2)
     p.add_argument('--gpu', '-g', type=int, default=-1)
@@ -166,7 +176,7 @@ def main():
     p.add_argument('--patches', '-p', type=int, default=16)
     p.add_argument('--val_rate', '-v', type=float, default=0.2)
     p.add_argument('--val_filelist', '-V', type=str, default=None)
-    p.add_argument('--val_batchsize', '-b', type=int, default=4)
+    p.add_argument('--val_batchsize', '-b', type=int, default=1)
     p.add_argument('--val_cropsize', '-c', type=int, default=256)
     p.add_argument('--num_workers', '-w', type=int, default=4)
     p.add_argument('--epoch', '-E', type=int, default=200)
@@ -234,7 +244,7 @@ def main():
     )
     
     val_dataset = dataset.VocalAugmentationDataset(
-        path="C://cs256_sr44100_hl1024_nf2048_of0_VALIDATION",
+        path="C://sr44100_hl1024_nf2048_of0_VALIDATION",
         is_validation=True
     )
 
@@ -276,13 +286,10 @@ def main():
         logger.info('# epoch {}'.format(epoch))
         train_loss = train_epoch(train_dataloader, model, device, optimizer, args.accumulation_steps, grad_scaler, args.progress_bar, args.mixup_rate, args.mixup_alpha, lr_warmup=lr_warmup)
         val_loss = validate_epoch(val_dataloader, model, device, grad_scaler)
-        val_dataset.apply_inst_on_validation = True
-        val_loss_fake = validate_epoch(val_dataloader, model, device, grad_scaler)        
-        val_dataset.apply_inst_on_validation = False
 
         logger.info(
-            '  * training loss = {:.6f}, validation loss = {:.6f}, stupid loss = {:6f}'
-            .format(train_loss, val_loss, val_loss_fake)
+            '  * training loss = {:.6f}, validation loss = {:.6f}'
+            .format(train_loss, val_loss)
         )
 
         if lr_warmup is not None and lr_warmup.current_step == lr_warmup.num_steps:

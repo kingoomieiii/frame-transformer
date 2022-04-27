@@ -488,6 +488,28 @@ def make_dataset(filelist, cropsize, sr, hop_length, n_fft, offset=0, is_validat
                         Y=Y_pad[:, :, start:start + cropsize],
                         c=coef.item())
 
+def make_validation_set(filelist, sr, hop_length, n_fft, offset=0, root=''):
+    patch_list = []    
+    patch_dir = f'{root}_sr{sr}_hl{hop_length}_nf{n_fft}_of{offset}_VALIDATION'
+    os.makedirs(patch_dir, exist_ok=True)
+
+    for X_path, Y_path in tqdm(filelist):
+        basename = os.path.splitext(os.path.basename(X_path))[0]
+
+        X, Y = spec_utils.load(X_path, Y_path, sr, hop_length, n_fft)
+
+        coef = np.max([np.abs(X).max(), np.abs(Y).max()])
+
+        outpath = os.path.join(patch_dir, '{}.npz'.format(basename))
+        patch_list.append(outpath)
+
+        if not os.path.exists(outpath):
+            np.savez(
+                outpath,
+                X=X,
+                Y=Y,
+                c=coef.item())
+
 if __name__ == "__main__":
     import sys
     import utils
