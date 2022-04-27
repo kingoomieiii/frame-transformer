@@ -131,10 +131,10 @@ def validate_epoch(dataloader, model, device, grad_scaler, cropsize=256):
                 curr[:, :, :, f] = h[:, :, :, f]
                 out[:, :, :, i] = h[:, :, :, f]
 
-                if i >= cropsize:
+                if i >= cropsize - 1:
                     curr = F.pad(curr[:, :, :, 1:], (0,1))
 
-            loss = crit(src*curr, tgt)
+            loss = crit(src*out, tgt)
     
             if torch.logical_or(loss.isnan(), loss.isinf()):
                 print('non-finite or nan validation loss; aborting')
