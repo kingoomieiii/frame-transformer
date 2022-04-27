@@ -131,7 +131,7 @@ def validate_epoch(dataloader, model, device, grad_scaler, cropsize=256):
                 curr[:, :, :, f] = h[:, :, :, f]
                 out[:, :, :, i] = h[:, :, :, f]
 
-                if i >= cropsize // 2 - 1:
+                if i >= cropsize // 2 - 1 and stop < src.shape[3] - 1:
                     curr = F.pad(curr[:, :, :, 1:], (0,1))
 
             loss = crit(src*out, tgt)
