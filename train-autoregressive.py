@@ -147,9 +147,9 @@ def validate_epoch(dataloader, model, device, grad_scaler, cropsize=256):
 def main():
     p = argparse.ArgumentParser()
     p.add_argument('--id', type=str, default='')
-    p.add_argument('--channels', type=int, default=24)
-    p.add_argument('--num_encoders', type=int, default=0)
-    p.add_argument('--num_decoders', type=int, default=3)
+    p.add_argument('--channels', type=int, default=8)
+    p.add_argument('--num_encoders', type=int, default=2)
+    p.add_argument('--num_decoders', type=int, default=2)
     p.add_argument('--num_bands', type=int, default=8)
     p.add_argument('--feedforward_dim', type=int, default=2048)
     p.add_argument('--bias', type=str, default='true')
