@@ -352,7 +352,7 @@ class FrameConv(nn.Module):
         return h
         
 class CausalConv1d(nn.Module):
-    def __init__(self, in_channels, out_channels, kernel_size=3, padding=1, stride=1, groups=1, dilation=1, bias=True):
+    def __init__(self, in_channels, out_channels, kernel_size=3, padding=1, stride=1, groups=1, bias=True):
         super(CausalConv1d, self).__init__()
 
         self.weight = nn.Parameter(torch.empty(out_channels, in_channels // groups, ((kernel_size-1)//2)+1))
@@ -361,7 +361,6 @@ class CausalConv1d(nn.Module):
         self.padding = padding
         self.groups = groups
         self.stride = stride
-        self.dilation = dilation
         
         nn.init.kaiming_uniform_(self.weight, a=math.sqrt(5))
         if self.bias is not None:
@@ -371,4 +370,4 @@ class CausalConv1d(nn.Module):
 
     def forward(self, x):
         weight = F.pad(self.weight, (0, self.kernel_size - self.weight.shape[2]))
-        return F.conv1d(x, weight=weight, bias=self.bias, stride=self.stride, padding=self.padding, dilation=self.dilation, groups=self.groups)
+        return F.conv1d(x, weight=weight, bias=self.bias, stride=self.stride, padding=self.padding, groups=self.groups)
