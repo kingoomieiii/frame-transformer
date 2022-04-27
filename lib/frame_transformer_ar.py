@@ -286,7 +286,7 @@ class FrameTransformerDecoder(nn.Module):
         x = x + h
 
         h = self.norm4(x)
-        h = self.dropout3(self.self_attn2(h))
+        h = self.dropout3(self.self_attn2(h, mask=mask))
         x = x + h
 
         h = self.norm5(x)
