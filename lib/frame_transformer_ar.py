@@ -230,7 +230,7 @@ class FrameTransformerDecoder(nn.Module):
         self.cropsize = cropsize
         self.num_bands = num_bands
 
-        self.relu = nn.LeakyReLU(inplace=True)
+        self.relu = nn.ReLU(inplace=True)
         
         self.bottleneck_linear = nn.Linear(channels, 1, bias=bias)
         self.mem_bottleneck_linear = nn.Linear(mem_channels, 1, bias=bias)
