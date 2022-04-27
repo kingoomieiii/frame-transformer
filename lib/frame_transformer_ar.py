@@ -242,15 +242,15 @@ class FrameTransformerDecoder(nn.Module):
 
         self.norm2 = nn.LayerNorm(bins)
         self.conv1L = nn.Sequential(
-            CausalConv1d(bins, bins, kernel_size=11, padding=5, groups=bins, bias=bias),
-            CausalConv1d(bins, feedforward_dim * 2, kernel_size=1, padding=0, bias=bias))
+            CausalConv1d(bins, bins, kernel_size=11, groups=bins, bias=bias),
+            CausalConv1d(bins, feedforward_dim * 2, kernel_size=1, bias=bias))
         self.conv1R = nn.Sequential(
-            CausalConv1d(bins, bins, kernel_size=7, padding=3, groups=bins, bias=bias),
-            CausalConv1d(bins, feedforward_dim // 2, kernel_size=1, padding=0, bias=bias))
+            CausalConv1d(bins, bins, kernel_size=7, groups=bins, bias=bias),
+            CausalConv1d(bins, feedforward_dim // 2, kernel_size=1, bias=bias))
         self.norm3 = nn.LayerNorm(feedforward_dim * 2)
         self.conv2 = nn.Sequential(
-            CausalConv1d(feedforward_dim * 2, feedforward_dim * 2, kernel_size=7, padding=3, groups=feedforward_dim*2, bias=bias),
-            CausalConv1d(feedforward_dim * 2, bins, kernel_size=1, padding=0, bias=bias))
+            CausalConv1d(feedforward_dim * 2, feedforward_dim * 2, kernel_size=7, groups=feedforward_dim*2, bias=bias),
+            CausalConv1d(feedforward_dim * 2, bins, kernel_size=1, bias=bias))
         self.dropout2 = nn.Dropout(dropout) if dropout > 0 else nn.Identity()
 
         self.norm4 = nn.LayerNorm(bins)
@@ -352,13 +352,12 @@ class FrameConv(nn.Module):
         return h
         
 class CausalConv1d(nn.Module):
-    def __init__(self, in_channels, out_channels, kernel_size=3, padding=1, stride=1, groups=1, bias=True):
+    def __init__(self, in_channels, out_channels, kernel_size=3, stride=1, groups=1, bias=True):
         super(CausalConv1d, self).__init__()
 
-        self.weight = nn.Parameter(torch.empty(out_channels, in_channels // groups, ((kernel_size-1)//2)+1))
+        self.weight = nn.Parameter(torch.empty(out_channels, in_channels // groups, kernel_size))
         self.bias = nn.Parameter(torch.empty(out_channels)) if bias else None
         self.kernel_size = kernel_size
-        self.padding = padding
         self.groups = groups
         self.stride = stride
         
@@ -369,5 +368,4 @@ class CausalConv1d(nn.Module):
             nn.init.uniform_(self.bias, -bound, bound)
 
     def forward(self, x):
-        weight = F.pad(self.weight, (0, self.kernel_size - self.weight.shape[2]))
-        return F.conv1d(x, weight=weight, bias=self.bias, stride=self.stride, padding=self.padding, groups=self.groups)
+        return F.conv1d(F.pad(x, (self.kernel_size - 1, 0)), weight=self.weight, bias=self.bias, stride=self.stride, groups=self.groups)
