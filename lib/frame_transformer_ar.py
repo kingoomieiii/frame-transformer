@@ -86,27 +86,27 @@ class FrameTransformer(nn.Module):
 
         h = te5
         for module in self.dec4_transformer:
-            t = module(h, mem=se5)
+            t = module(h, mem=se5, mask=self.tgt_mask)
             h = torch.cat((h, t), dim=1)
             
         h = self.dec4(h, te4)        
         for module in self.dec3_transformer:
-            t = module(h, mem=se4)
+            t = module(h, mem=se4, mask=self.tgt_mask)
             h = torch.cat((h, t), dim=1)
 
         h = self.dec3(h, te3)        
         for module in self.dec2_transformer:
-            t = module(h, mem=se3)
+            t = module(h, mem=se3, mask=self.tgt_mask)
             h = torch.cat((h, t), dim=1)
 
         h = self.dec2(h, te2)        
         for module in self.dec1_transformer:
-            t = module(h, mem=se2)
+            t = module(h, mem=se2, mask=self.tgt_mask)
             h = torch.cat((h, t), dim=1)
 
         h = self.dec1(h, te1)
         for module in self.out_transformer:
-            t = module(h, mem=se1)
+            t = module(h, mem=se1, mask=self.tgt_mask)
             h = torch.cat((h, t), dim=1)
 
         out = self.out(h.transpose(1,3)).transpose(1,3)
