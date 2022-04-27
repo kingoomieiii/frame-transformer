@@ -27,7 +27,6 @@ class FrameTransformer(nn.Module):
         self.src_enc5 = Encoder(channels * 6 + num_encoders, channels * 8, kernel_size=3, padding=1, stride=2)
         self.enc5_transformer = nn.ModuleList([FrameTransformerEncoder(channels * 8 + i, num_bands, cropsize, n_fft, downsamples=4, feedforward_dim=feedforward_dim, bias=bias) for i in range(num_encoders)])
 
-
         self.tgt_enc1 = FrameConv(2, channels, kernel_size=3, padding=1, stride=1)
         self.tgt_enc2 = Encoder(channels * 1, channels * 2, kernel_size=3, padding=1, stride=2)
         self.tgt_enc3 = Encoder(channels * 2, channels * 4, kernel_size=3, padding=1, stride=2)
