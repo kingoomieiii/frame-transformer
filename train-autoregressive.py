@@ -118,20 +118,31 @@ def validate_epoch(dataloader, model, device, grad_scaler, cropsize=256):
             src = src.to(device)
             tgt = tgt.to(device)
             curr = torch.zeros((src.shape[0], src.shape[1], src.shape[2], cropsize)).to(src.device)
-            out = torch.zeros_like(src)
+            out = None
 
             start = 0
-            for i in tqdm(range(src.shape[3])):
-                start = 0 if i < cropsize // 2 else (start + 1 if (start + 1 + cropsize < src.shape[3]) else start)
+            idx = 0
+            for i in range(src.shape[3]):
+                if i < cropsize // 2:
+                    start = 0
+                elif start + cropsize < src.shape[3]:
+                    start = start + 1
+
                 stop = start + cropsize
                 crop = src[:, :, :, start:stop]
                 h = model(crop, tgt=F.pad(crop*curr, (1,0))[:, :, :, :-1])
 
-                f = i if i < cropsize // 2 else cropsize // 2 - 1
-                curr[:, :, :, f] = h[:, :, :, f]
-                out[:, :, :, i] = h[:, :, :, f]
+                if i < cropsize // 2:
+                    idx = i
+                elif i < src.shape[3] - (cropsize // 2):
+                    idx = cropsize // 2 - 1
+                else:
+                    idx = cropsize - (src.shape[3] % i)
+                
+                curr[:, :, :, idx] = h[:, :, :, idx]
+                out = h[:, :, :, idx].unsqueeze(3) if out is None else torch.cat((out, h[:, :, :, idx].unsqueeze(3)), dim=3)
 
-                if i >= cropsize // 2 - 1 and stop < src.shape[3] - 1:
+                if i >= cropsize // 2 - 1 and src.shape[3] - i > cropsize // 2 + 1:
                     curr = F.pad(curr[:, :, :, 1:], (0,1))
 
             loss = crit(src*out, tgt)
