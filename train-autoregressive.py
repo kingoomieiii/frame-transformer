@@ -122,16 +122,16 @@ def validate_epoch(dataloader, model, device, grad_scaler, cropsize=256):
 
             start = 0
             for i in tqdm(range(src.shape[3])):
-                start = 0 if i < cropsize else start + 1
+                start = 0 if i < cropsize // 2 else (start + 1 if (start + 1 + cropsize < src.shape[3]) else start)
                 stop = start + cropsize
                 src_chunk = src[:, :, :, start:stop]
                 h = model(src_chunk, tgt=F.pad(src_chunk*curr, (1,0))[:, :, :, :-1])
 
-                f = i if i < cropsize else cropsize - 1
+                f = i if i < cropsize // 2 else cropsize // 2 - 1
                 curr[:, :, :, f] = h[:, :, :, f]
                 out[:, :, :, i] = h[:, :, :, f]
 
-                if i >= cropsize - 1:
+                if i >= cropsize // 2 - 1:
                     curr = F.pad(curr[:, :, :, 1:], (0,1))
 
             loss = crit(src*out, tgt)
