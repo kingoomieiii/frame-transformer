@@ -34,19 +34,19 @@ class FrameTransformer(nn.Module):
         self.tgt_enc4 = Encoder(channels * 4, channels * 6, kernel_size=3, padding=1, stride=2)
         self.tgt_enc5 = Encoder(channels * 6, channels * 8, kernel_size=3, padding=1, stride=2)
         
-        self.dec4_transformer = nn.ModuleList([FrameTransformerDecoder(channels * 8 + i, channels * 8, num_bands, cropsize, n_fft, downsamples=4, feedforward_dim=feedforward_dim, bias=bias) for i in range(num_decoders)])
+        self.dec4_transformer = nn.ModuleList([FrameTransformerDecoder(channels * 8 + i, channels * 8 + num_encoders, num_bands, cropsize, n_fft, downsamples=4, feedforward_dim=feedforward_dim, bias=bias) for i in range(num_decoders)])
         self.dec4 = Decoder(channels * (6 + 8) + num_decoders, channels * 6, kernel_size=3, padding=1)
 
-        self.dec3_transformer = nn.ModuleList([FrameTransformerDecoder(channels * 6 + i, channels * 6, num_bands, cropsize, n_fft, downsamples=3, feedforward_dim=feedforward_dim, bias=bias) for i in range(num_decoders)])
+        self.dec3_transformer = nn.ModuleList([FrameTransformerDecoder(channels * 6 + i, channels * 6 + num_encoders, num_bands, cropsize, n_fft, downsamples=3, feedforward_dim=feedforward_dim, bias=bias) for i in range(num_decoders)])
         self.dec3 = Decoder(channels * (4 + 6) + num_decoders, channels * 4, kernel_size=3, padding=1)
 
-        self.dec2_transformer = nn.ModuleList([FrameTransformerDecoder(channels * 4 + i, channels * 4, num_bands, cropsize, n_fft, downsamples=2, feedforward_dim=feedforward_dim, bias=bias) for i in range(num_decoders)])
+        self.dec2_transformer = nn.ModuleList([FrameTransformerDecoder(channels * 4 + i, channels * 4 + num_encoders, num_bands, cropsize, n_fft, downsamples=2, feedforward_dim=feedforward_dim, bias=bias) for i in range(num_decoders)])
         self.dec2 = Decoder(channels * (2 + 4) + num_decoders, channels * 2, kernel_size=3, padding=1)
 
-        self.dec1_transformer = nn.ModuleList([FrameTransformerDecoder(channels * 2 + i, channels * 2, num_bands, cropsize, n_fft, downsamples=1, feedforward_dim=feedforward_dim, bias=bias) for i in range(num_decoders)])
+        self.dec1_transformer = nn.ModuleList([FrameTransformerDecoder(channels * 2 + i, channels * 2 + num_encoders, num_bands, cropsize, n_fft, downsamples=1, feedforward_dim=feedforward_dim, bias=bias) for i in range(num_decoders)])
         self.dec1 = Decoder(channels * (1 + 2) + num_decoders, channels * 1, kernel_size=3, padding=1)
 
-        self.out_transformer = nn.ModuleList([FrameTransformerDecoder(channels + i, channels, num_bands, cropsize, n_fft, downsamples=0, feedforward_dim=feedforward_dim, bias=bias) for i in range(num_decoders)])
+        self.out_transformer = nn.ModuleList([FrameTransformerDecoder(channels + i, channels + num_encoders, num_bands, cropsize, n_fft, downsamples=0, feedforward_dim=feedforward_dim, bias=bias) for i in range(num_decoders)])
         self.out = nn.Linear(channels + num_decoders, 2, bias=bias)
 
     def __call__(self, src, tgt):
@@ -55,27 +55,27 @@ class FrameTransformer(nn.Module):
 
         se1 = self.src_enc1(src)
         for module in self.enc1_transformer:
-            t = module(h)
+            t = module(se1)
             se1 = torch.cat((se1, t), dim=1)
 
         se2 = self.src_enc2(se1)
         for module in self.enc2_transformer:
-            t = module(h)
-            se2 = torch.cat((se1, t), dim=1)
+            t = module(se2)
+            se2 = torch.cat((se2, t), dim=1)
 
         se3 = self.src_enc3(se2)
         for module in self.enc3_transformer:
-            t = module(h)
-            se3 = torch.cat((se1, t), dim=1)
+            t = module(se3)
+            se3 = torch.cat((se3, t), dim=1)
 
         se4 = self.src_enc4(se3)
         for module in self.enc4_transformer:
-            t = module(h)
-            se4 = torch.cat((se1, t), dim=1)
+            t = module(se4)
+            se4 = torch.cat((se4, t), dim=1)
 
         se5 = self.src_enc5(se4)
         for module in self.enc5_transformer:
-            t = module(h)
+            t = module(se5)
             se5 = torch.cat((se5, t), dim=1)
 
         te1 = self.tgt_enc1(tgt)
@@ -351,16 +351,25 @@ class FrameConv(nn.Module):
         h = self.body(x)
 
         return h
-    
-# adapted from paultsw's causal conv gist
-class CausalConv1d(nn.Module):
-    def __init__(self, in_channels, out_channels, kernel_size, dilation):
-        super(CausalConv1d, self).__init__(self)
         
+class CausalConv1d(nn.Module):
+    def __init__(self, in_channels, out_channels, kernel_size=3, padding=1, stride=1, groups=1, dilation=1, bias=True):
+        super(CausalConv1d, self).__init__()
+
+        self.weight = nn.Parameter(torch.empty(out_channels, in_channels // groups, ((kernel_size-1)//2)+1))
+        self.bias = nn.Parameter(torch.empty(out_channels)) if bias else None
         self.kernel_size = kernel_size
-        self.in_channels = in_channels
+        self.padding = padding
+        self.groups = groups
+        self.stride = stride
         self.dilation = dilation
-        self.conv = torch.nn.Conv1d(in_channels, out_channels, kernel_size, stride=1, padding=(kernel_size-1), dilation=dilation)
+        
+        nn.init.kaiming_uniform_(self.weight, a=math.sqrt(5))
+        if self.bias is not None:
+            fan_in, _ = nn.init._calculate_fan_in_and_fan_out(self.weight)
+            bound = 1 / math.sqrt(fan_in)
+            nn.init.uniform_(self.bias, -bound, bound)
 
     def forward(self, x):
-        return self.conv(x)[:, :, 0:-(self.kernel_size-1)]
+        weight = F.pad(self.weight, (0, self.kernel_size - self.weight.shape[2]))
+        return F.conv1d(x, weight=weight, bias=self.bias, stride=self.stride, padding=self.padding, dilation=self.dilation, groups=self.groups)
