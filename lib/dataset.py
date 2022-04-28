@@ -15,12 +15,11 @@ except ModuleNotFoundError:
     import spec_utils
 
 class VocalAugmentationDataset(torch.utils.data.Dataset):
-    def __init__(self, path, extra_path=None, pair_path=None, vocal_path="", is_validation=False, mul=1, downsamples=0, epoch_size=None, pair_mul=1, apply_inst_on_validation=False, slide=True, cropsize=256):
+    def __init__(self, path, extra_path=None, pair_path=None, vocal_path="", is_validation=False, mul=1, downsamples=0, epoch_size=None, pair_mul=1, slide=True, cropsize=256):
         self.epoch_size = epoch_size
         self.slide = slide
         self.mul = mul
         patch_list = [os.path.join(path, f) for f in os.listdir(path) if os.path.isfile(os.path.join(path, f))]
-        self.apply_inst_on_validation = apply_inst_on_validation
         self.cropsize = cropsize
 
         if pair_path is not None and pair_mul > 0:
@@ -156,11 +155,6 @@ class VocalAugmentationDataset(torch.utils.data.Dataset):
                 c = Xc
         else:
             c = Xc
-
-        if self.is_validation and self.apply_inst_on_validation:
-            if np.random.uniform() < 0.025:
-                X = Y
-                c = Xc
 
         return np.abs(X) / c, np.abs(Y) / c
 

@@ -273,13 +273,10 @@ def main():
         logger.info('# epoch {}'.format(epoch))
         train_loss = train_epoch(train_dataloader, model, device, optimizer, args.accumulation_steps, grad_scaler, args.progress_bar, args.mixup_rate, args.mixup_alpha, lr_warmup=lr_warmup)
         val_loss = validate_epoch(val_dataloader, model, device, grad_scaler)
-        val_dataset.apply_inst_on_validation = True
-        val_loss_fake = validate_epoch(val_dataloader, model, device, grad_scaler)        
-        val_dataset.apply_inst_on_validation = False
 
         logger.info(
-            '  * training loss = {:.6f}, validation loss = {:.6f}, stupid loss = {:6f}'
-            .format(train_loss, val_loss, val_loss_fake)
+            '  * training loss = {:.6f}, validation loss = {:.6f}'
+            .format(train_loss, val_loss)
         )
 
         if lr_warmup is not None and lr_warmup.current_step == lr_warmup.num_steps:
