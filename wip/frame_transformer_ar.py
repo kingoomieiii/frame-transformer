@@ -5,27 +5,27 @@ import math
 from lib import spec_utils
 
 class FrameTransformer(nn.Module):
-    def __init__(self, channels, n_fft=2048, feedforward_dim=512, num_bands=4, num_encoders=1, num_decoders=1, cropsize=256, bias=False):
+    def __init__(self, channels, n_fft=2048, feedforward_dim=512, num_bands=4, num_encoders=1, num_decoders=1, cropsize=256, bias=False, dropout=0.1):
         super(FrameTransformer, self).__init__()
         self.max_bin = n_fft // 2
         self.output_bin = n_fft // 2 + 1
 
-        self.register_buffer('tgt_mask', torch.triu(torch.ones(cropsize, cropsize) * float('-inf'), diagonal=1))
+        self.register_buffer('tgt_mask', torch.tril(torch.ones((cropsize, cropsize))).bool())
 
         self.src_enc1 = FrameConv(2, channels, kernel_size=3, padding=1, stride=1)
-        self.enc1_transformer = nn.ModuleList([FrameTransformerEncoder(channels * 1 + i, num_bands, cropsize, n_fft, downsamples=0, feedforward_dim=feedforward_dim, bias=bias) for i in range(num_encoders)])
+        self.enc1_transformer = nn.ModuleList([FrameTransformerEncoder(channels * 1 + i, num_bands, cropsize, n_fft, downsamples=0, feedforward_dim=feedforward_dim, bias=bias, dropout=dropout) for i in range(num_encoders)])
 
         self.src_enc2 = Encoder(channels * 1 + num_encoders, channels * 2, kernel_size=3, padding=1, stride=2)
-        self.enc2_transformer = nn.ModuleList([FrameTransformerEncoder(channels * 2 + i, num_bands, cropsize, n_fft, downsamples=1, feedforward_dim=feedforward_dim, bias=bias) for i in range(num_encoders)])
+        self.enc2_transformer = nn.ModuleList([FrameTransformerEncoder(channels * 2 + i, num_bands, cropsize, n_fft, downsamples=1, feedforward_dim=feedforward_dim, bias=bias, dropout=dropout) for i in range(num_encoders)])
 
         self.src_enc3 = Encoder(channels * 2 + num_encoders, channels * 4, kernel_size=3, padding=1, stride=2)
-        self.enc3_transformer = nn.ModuleList([FrameTransformerEncoder(channels * 4 + i, num_bands, cropsize, n_fft, downsamples=2, feedforward_dim=feedforward_dim, bias=bias) for i in range(num_encoders)])
+        self.enc3_transformer = nn.ModuleList([FrameTransformerEncoder(channels * 4 + i, num_bands, cropsize, n_fft, downsamples=2, feedforward_dim=feedforward_dim, bias=bias, dropout=dropout) for i in range(num_encoders)])
 
         self.src_enc4 = Encoder(channels * 4 + num_encoders, channels * 6, kernel_size=3, padding=1, stride=2)
-        self.enc4_transformer = nn.ModuleList([FrameTransformerEncoder(channels * 6 + i, num_bands, cropsize, n_fft, downsamples=3, feedforward_dim=feedforward_dim, bias=bias) for i in range(num_encoders)])
+        self.enc4_transformer = nn.ModuleList([FrameTransformerEncoder(channels * 6 + i, num_bands, cropsize, n_fft, downsamples=3, feedforward_dim=feedforward_dim, bias=bias, dropout=dropout) for i in range(num_encoders)])
 
         self.src_enc5 = Encoder(channels * 6 + num_encoders, channels * 8, kernel_size=3, padding=1, stride=2)
-        self.enc5_transformer = nn.ModuleList([FrameTransformerEncoder(channels * 8 + i, num_bands, cropsize, n_fft, downsamples=4, feedforward_dim=feedforward_dim, bias=bias) for i in range(num_encoders)])
+        self.enc5_transformer = nn.ModuleList([FrameTransformerEncoder(channels * 8 + i, num_bands, cropsize, n_fft, downsamples=4, feedforward_dim=feedforward_dim, bias=bias, dropout=dropout) for i in range(num_encoders)])
 
         self.tgt_enc1 = FrameConv(2, channels, kernel_size=3, padding=1, stride=1)
         self.tgt_enc2 = Encoder(channels * 1, channels * 2, kernel_size=3, padding=1, stride=2)
@@ -33,19 +33,19 @@ class FrameTransformer(nn.Module):
         self.tgt_enc4 = Encoder(channels * 4, channels * 6, kernel_size=3, padding=1, stride=2)
         self.tgt_enc5 = Encoder(channels * 6, channels * 8, kernel_size=3, padding=1, stride=2)
         
-        self.dec4_transformer = nn.ModuleList([FrameTransformerDecoder(channels * 8 + i, channels * 8 + num_encoders, num_bands, cropsize, n_fft, downsamples=4, feedforward_dim=feedforward_dim, bias=bias) for i in range(num_decoders)])
+        self.dec4_transformer = nn.ModuleList([FrameTransformerDecoder(channels * 8 + i, channels * 8 + num_encoders, num_bands, cropsize, n_fft, downsamples=4, feedforward_dim=feedforward_dim, bias=bias, dropout=dropout) for i in range(num_decoders)])
         self.dec4 = Decoder(channels * (6 + 8) + num_decoders, channels * 6, kernel_size=3, padding=1)
 
-        self.dec3_transformer = nn.ModuleList([FrameTransformerDecoder(channels * 6 + i, channels * 6 + num_encoders, num_bands, cropsize, n_fft, downsamples=3, feedforward_dim=feedforward_dim, bias=bias) for i in range(num_decoders)])
+        self.dec3_transformer = nn.ModuleList([FrameTransformerDecoder(channels * 6 + i, channels * 6 + num_encoders, num_bands, cropsize, n_fft, downsamples=3, feedforward_dim=feedforward_dim, bias=bias, dropout=dropout) for i in range(num_decoders)])
         self.dec3 = Decoder(channels * (4 + 6) + num_decoders, channels * 4, kernel_size=3, padding=1)
 
-        self.dec2_transformer = nn.ModuleList([FrameTransformerDecoder(channels * 4 + i, channels * 4 + num_encoders, num_bands, cropsize, n_fft, downsamples=2, feedforward_dim=feedforward_dim, bias=bias) for i in range(num_decoders)])
+        self.dec2_transformer = nn.ModuleList([FrameTransformerDecoder(channels * 4 + i, channels * 4 + num_encoders, num_bands, cropsize, n_fft, downsamples=2, feedforward_dim=feedforward_dim, bias=bias, dropout=dropout) for i in range(num_decoders)])
         self.dec2 = Decoder(channels * (2 + 4) + num_decoders, channels * 2, kernel_size=3, padding=1)
 
-        self.dec1_transformer = nn.ModuleList([FrameTransformerDecoder(channels * 2 + i, channels * 2 + num_encoders, num_bands, cropsize, n_fft, downsamples=1, feedforward_dim=feedforward_dim, bias=bias) for i in range(num_decoders)])
+        self.dec1_transformer = nn.ModuleList([FrameTransformerDecoder(channels * 2 + i, channels * 2 + num_encoders, num_bands, cropsize, n_fft, downsamples=1, feedforward_dim=feedforward_dim, bias=bias, dropout=dropout) for i in range(num_decoders)])
         self.dec1 = Decoder(channels * (1 + 2) + num_decoders, channels * 1, kernel_size=3, padding=1)
 
-        self.out_transformer = nn.ModuleList([FrameTransformerDecoder(channels + i, channels + num_encoders, num_bands, cropsize, n_fft, downsamples=0, feedforward_dim=feedforward_dim, bias=bias) for i in range(num_decoders)])
+        self.out_transformer = nn.ModuleList([FrameTransformerDecoder(channels + i, channels + num_encoders, num_bands, cropsize, n_fft, downsamples=0, feedforward_dim=feedforward_dim, bias=bias, dropout=dropout) for i in range(num_decoders)])
         self.out = nn.Linear(channels + num_decoders, 2, bias=bias)
 
     def __call__(self, src, tgt):
@@ -111,7 +111,7 @@ class FrameTransformer(nn.Module):
         out = self.out(h.transpose(1,3)).transpose(1,3)
 
         return F.pad(
-            input=torch.sigmoid(out),
+            input=torch.relu(out),
             pad=(0, 0, 0, self.output_bin - out.size()[2]),
             mode='replicate'
         )
@@ -135,7 +135,7 @@ class Decoder(nn.Module):
         self.dropout = nn.Dropout2d(0.1) if dropout else None
 
     def __call__(self, x, skip=None):
-        x = F.interpolate(x, size=(skip.shape[2],skip.shape[3]), mode='bilinear', align_corners=True)
+        x = F.interpolate(x, size=(skip.shape[2],skip.shape[3]), mode='nearest')
 
         if skip is not None:
             skip = spec_utils.crop_center(skip, x)
@@ -323,7 +323,7 @@ class MultibandFrameAttention(nn.Module):
         qk = (torch.matmul(q,k)+p) / math.sqrt(c)
         
         if mask is not None:
-            qk = qk + mask
+            qk = qk.masked_fill(mask == 0, float('-inf'))
 
         a = F.softmax(qk, dim=-1)
         a = torch.matmul(a,v).transpose(1,2).reshape(b,w,-1)

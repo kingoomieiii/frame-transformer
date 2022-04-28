@@ -17,7 +17,7 @@ from lib import dataset
 from lib import spec_utils
 from tqdm import tqdm
 
-from lib.frame_transformer_ar import FrameTransformer
+from wip.frame_transformer_ar import FrameTransformer
 from lib.warmup_lr import WarmupLR
 
 def setup_logger(name, logfile='LOGFILENAME.log', out_dir='logs'):
@@ -69,7 +69,7 @@ def train_epoch(dataloader, model, device, optimizer, accumulation_steps, grad_s
         with torch.cuda.amp.autocast_mode.autocast(enabled=grad_scaler is not None):
             pred = model(src, F.pad(tgt, (1,0))[:, :, :, :-1])
 
-        loss = crit(pred * src, tgt)
+        loss = crit(pred, tgt)
         accum_loss = loss / accumulation_steps
         batch_loss = batch_loss + accum_loss
 
@@ -117,20 +117,23 @@ def validate_epoch(dataloader, model, device, grad_scaler, cropsize=256):
         for src, tgt in tqdm(dataloader):
             src = src.to(device)
             tgt = tgt.to(device)
+
             curr = torch.zeros((src.shape[0], src.shape[1], src.shape[2], cropsize)).to(src.device)
+            last_crop = torch.zeros_like(curr)
             out = None
 
+            last_start = 0
             start = 0
             idx = 0
-            for i in range(src.shape[3]):
+            for i in tqdm(range(src.shape[3])):
                 if i < cropsize // 2:
                     start = 0
                 elif start + cropsize < src.shape[3]:
                     start = start + 1
 
-                stop = start + cropsize
-                crop = src[:, :, :, start:stop]
-                h = model(crop, tgt=F.pad(crop*curr, (1,0))[:, :, :, :-1])
+                crop = src[:, :, :, start:start + cropsize]
+                last_crop = src[:, :, :, last_start:last_start+cropsize]
+                h = model(crop, tgt=F.pad(last_crop*curr, (1,0))[:, :, :, :-1])
 
                 if i < cropsize // 2:
                     idx = i
@@ -155,12 +158,37 @@ def validate_epoch(dataloader, model, device, grad_scaler, cropsize=256):
 
     return sum_loss / len(dataloader.dataset)
 
+def validate_epoch2(dataloader, model, device, grad_scaler, cropsize=256):
+    model.eval()
+    sum_loss = 0
+    crit = nn.L1Loss()
+
+    with torch.no_grad():
+        for src, tgt in tqdm(dataloader):
+            src = src.to(device)
+            tgt = tgt.to(device)
+            curr = torch.zeros_like(src)
+
+            for i in tqdm(range(src.shape[3])):
+                h = model(src, F.pad(curr, (1,0))[:,:,:,:-1])                
+                curr[:, :, :, i] = h[:, :, :, i]
+
+            loss = crit(curr, tgt)
+    
+            if torch.logical_or(loss.isnan(), loss.isinf()):
+                print('non-finite or nan validation loss; aborting')
+                quit()
+            else:
+                sum_loss += loss.item() * len(src)
+
+    return sum_loss / len(dataloader.dataset)
+
 def main():
     p = argparse.ArgumentParser()
     p.add_argument('--id', type=str, default='')
-    p.add_argument('--channels', type=int, default=8)
+    p.add_argument('--channels', type=int, default=16)
     p.add_argument('--num_encoders', type=int, default=2)
-    p.add_argument('--num_decoders', type=int, default=2)
+    p.add_argument('--num_decoders', type=int, default=4)
     p.add_argument('--num_bands', type=int, default=8)
     p.add_argument('--feedforward_dim', type=int, default=2048)
     p.add_argument('--bias', type=str, default='true')
@@ -169,7 +197,7 @@ def main():
     p.add_argument('--vocal_noise_prob', type=float, default=0.5)
     p.add_argument('--vocal_noise_magnitude', type=float, default=0.5)
     p.add_argument('--vocal_pan_prob', type=float, default=0.5)
-    p.add_argument('--batchsize', '-B', type=int, default=5)
+    p.add_argument('--batchsize', '-B', type=int, default=4)
     p.add_argument('--amsgrad', type=str, default='false')
     p.add_argument('--accumulation_steps', '-A', type=int, default=2)
     p.add_argument('--gpu', '-g', type=int, default=-1)
@@ -187,7 +215,7 @@ def main():
     p.add_argument('--patches', '-p', type=int, default=16)
     p.add_argument('--val_rate', '-v', type=float, default=0.2)
     p.add_argument('--val_filelist', '-V', type=str, default=None)
-    p.add_argument('--val_batchsize', '-b', type=int, default=1)
+    p.add_argument('--val_batchsize', '-b', type=int, default=4)
     p.add_argument('--val_cropsize', '-c', type=int, default=256)
     p.add_argument('--num_workers', '-w', type=int, default=4)
     p.add_argument('--epoch', '-E', type=int, default=200)
@@ -203,6 +231,7 @@ def main():
     p.add_argument('--lr_warmup_current_step', type=int, default=0)
     p.add_argument('--mixed_precision', type=str, default='true')
     p.add_argument('--debug', action='store_true')
+    p.add_argument('--dropout', type=float, default=0.3)
     args = p.parse_args()
 
     args.amsgrad = str.lower(args.amsgrad) == 'true'
@@ -231,7 +260,7 @@ def main():
         logger.info('{} {} {}'.format(i + 1, os.path.basename(X_fname), os.path.basename(y_fname)))
 
     device = torch.device('cpu')
-    model = FrameTransformer(channels=args.channels, n_fft=args.n_fft, num_encoders=args.num_encoders, num_decoders=args.num_decoders, num_bands=args.num_bands, feedforward_dim=args.feedforward_dim, bias=args.bias, cropsize=args.cropsize)
+    model = FrameTransformer(channels=args.channels, n_fft=args.n_fft, num_encoders=args.num_encoders, num_decoders=args.num_decoders, num_bands=args.num_bands, feedforward_dim=args.feedforward_dim, bias=args.bias, cropsize=args.cropsize, dropout=args.dropout)
 
     if args.pretrained_model is not None:
         model.load_state_dict(torch.load(args.pretrained_model, map_location=device))
@@ -255,7 +284,7 @@ def main():
     )
     
     val_dataset = dataset.VocalAugmentationDataset(
-        path="C://sr44100_hl1024_nf2048_of0_VALIDATION",
+        path="C://cs256_sr44100_hl1024_nf2048_of0_VALIDATION",
         is_validation=True
     )
 
@@ -296,7 +325,7 @@ def main():
 
         logger.info('# epoch {}'.format(epoch))
         train_loss = train_epoch(train_dataloader, model, device, optimizer, args.accumulation_steps, grad_scaler, args.progress_bar, args.mixup_rate, args.mixup_alpha, lr_warmup=lr_warmup)
-        val_loss = validate_epoch(val_dataloader, model, device, grad_scaler)
+        val_loss = validate_epoch2(val_dataloader, model, device, grad_scaler)
 
         logger.info(
             '  * training loss = {:.6f}, validation loss = {:.6f}'
