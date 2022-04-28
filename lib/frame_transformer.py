@@ -123,36 +123,36 @@ class FrameTransformerBlock(nn.Module):
         self.bottleneck_linear = nn.Linear(channels, 1, bias=bias)
         self.mem_bottleneck_linear = nn.Linear(mem_channels, 1, bias=bias)
 
-        self.norm1 = nn.LayerNorm(bins)
         self.self_attn1 = MultibandFrameAttention(num_bands, bins, cropsize)
         self.enc_attn1 = MultibandFrameAttention(num_bands, bins, cropsize)
+        self.norm1 = nn.LayerNorm(bins)
         self.dropout1 = nn.Dropout(dropout) if dropout > 0 else nn.Identity()
 
-        self.norm2 = nn.LayerNorm(bins)
         self.conv1L = nn.Sequential(
             nn.Conv1d(bins, bins, kernel_size=11, padding=5, groups=bins, bias=bias),
             nn.Conv1d(bins, feedforward_dim * 2, kernel_size=1, padding=0, bias=bias))
         self.conv1R = nn.Sequential(
             nn.Conv1d(bins, bins, kernel_size=7, padding=3, groups=bins, bias=bias),
             nn.Conv1d(bins, feedforward_dim // 2, kernel_size=1, padding=0, bias=bias))
-        self.norm3 = nn.LayerNorm(feedforward_dim * 2)
+        self.norm2 = nn.LayerNorm(feedforward_dim * 2)
         self.conv2 = nn.Sequential(
             nn.Conv1d(feedforward_dim * 2, feedforward_dim * 2, kernel_size=7, padding=3, groups=feedforward_dim*2, bias=bias),
             nn.Conv1d(feedforward_dim * 2, bins, kernel_size=1, padding=0, bias=bias))
+        self.norm3 = nn.LayerNorm(bins)
         self.dropout2 = nn.Dropout(dropout) if dropout > 0 else nn.Identity()
 
-        self.norm4 = nn.LayerNorm(bins)
         self.self_attn2 = MultibandFrameAttention(num_bands, bins, cropsize)
+        self.norm4 = nn.LayerNorm(bins)
         self.dropout3 = nn.Dropout(dropout) if dropout > 0 else nn.Identity()
 
-        self.norm5 = nn.LayerNorm(bins)
         self.enc_attn2 = MultibandFrameAttention(num_bands, bins, cropsize)
+        self.norm5 = nn.LayerNorm(bins)
         self.dropout4 = nn.Dropout(dropout) if dropout > 0 else nn.Identity()
 
-        self.norm6 = nn.LayerNorm(bins)
         self.conv3 = nn.Linear(bins, feedforward_dim * 2, bias=bias)
         self.swish = nn.SiLU(inplace=True)
         self.conv4 = nn.Linear(feedforward_dim * 2, bins, bias=bias)
+        self.norm6 = nn.LayerNorm(bins)
         self.dropout5 = nn.Dropout(dropout) if dropout > 0 else nn.Identity()
 
     def __call__(self, x, mem):
@@ -163,32 +163,27 @@ class FrameTransformerBlock(nn.Module):
         x = x.transpose(2,3).reshape(b,w,h)
         mem = mem.transpose(2,3).reshape(b,w,h)
 
-        h = self.norm1(x)
-        hs = self.self_attn1(h)
-        hm = self.enc_attn1(h, mem=mem)
-        x = x + self.dropout1(hs + hm)
+        hs = self.self_attn1(x)
+        hm = self.enc_attn1(x, mem=mem)
+        x = self.norm1(x + self.dropout1(hs + hm))
 
-        h = self.norm2(x)
-        hL = self.relu(self.conv1L(h.transpose(1,2)).transpose(1,2))
-        hR = self.conv1R(h.transpose(1,2)).transpose(1,2)
-        h = self.norm3(hL + F.pad(hR, (0, hL.shape[2]-hR.shape[2])))
+        hL = torch.square(self.relu(self.conv1L(x.transpose(1,2)).transpose(1,2)))
+        hR = self.conv1R(x.transpose(1,2)).transpose(1,2)
+        h = self.norm2(hL + F.pad(hR, (0, hL.shape[2]-hR.shape[2])))
 
         h = self.dropout2(self.conv2(h.transpose(1,2)).transpose(1,2))
-        x = x + h
+        x = self.norm3(x + h)
 
-        h = self.norm4(x)
-        h = self.dropout3(self.self_attn2(h))
-        x = x + h
+        h = self.dropout3(self.self_attn2(x))
+        x = self.norm4(x + h)
 
-        h = self.norm5(x)
-        h = self.dropout4(self.enc_attn2(h, mem=mem))
-        x = x + h
+        h = self.dropout4(self.enc_attn2(x, mem=mem))
+        x = self.norm5(x + h)
 
-        h = self.norm6(x)
-        h = self.conv3(h)
-        h = self.swish(h)
+        h = self.conv3(x)
+        h = torch.square(self.relu(h))
         h = self.dropout5(self.conv4(h))
-        x = x + h
+        x = self.norm6(x + h)
                 
         return x.transpose(1, 2).unsqueeze(1)
 
@@ -198,8 +193,14 @@ class MultibandFrameAttention(nn.Module):
 
         self.num_bands = num_bands
         self.q_proj = nn.Linear(bins, bins)
+        self.q_conv = nn.Conv1d(bins, bins, kernel_size=3, padding=1, groups=bins)
+
         self.k_proj = nn.Linear(bins, bins)
+        self.k_conv = nn.Conv1d(bins, bins, kernel_size=3, padding=1, groups=bins)
+
         self.v_proj = nn.Linear(bins, bins)
+        self.v_conv = nn.Conv1d(bins, bins, kernel_size=3, padding=1, groups=bins)
+
         self.o_proj = nn.Linear(bins, bins)
 
         self.er = nn.Parameter(torch.empty(bins // num_bands, cropsize))
@@ -207,9 +208,9 @@ class MultibandFrameAttention(nn.Module):
 
     def forward(self, x, mem=None):
         b,w,c = x.shape
-        q = self.q_proj(x).reshape(b, w, self.num_bands, -1).permute(0,2,1,3)
-        k = self.k_proj(x if mem is None else mem).reshape(b, w, self.num_bands, -1).permute(0,2,3,1)
-        v = self.v_proj(x if mem is None else mem).reshape(b, w, self.num_bands, -1).permute(0,2,1,3)
+        q = self.q_conv(self.q_proj(x).transpose(1,2)).transpose(1,2).reshape(b, w, self.num_bands, -1).permute(0,2,1,3)
+        k = self.k_conv(self.k_proj(x if mem is None else mem).transpose(1,2)).transpose(1,2).reshape(b, w, self.num_bands, -1).permute(0,2,3,1)
+        v = self.v_conv(self.v_proj(x if mem is None else mem).transpose(1,2)).transpose(1,2).reshape(b, w, self.num_bands, -1).permute(0,2,1,3)
         p = F.pad(torch.matmul(q,self.er), (1,0)).transpose(2,3)[:,:,1:,:]
         qk = (torch.matmul(q,k)+p) / math.sqrt(c)
         a = F.softmax(qk, dim=-1)
