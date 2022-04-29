@@ -29,7 +29,7 @@ class FrameTransformer(nn.Module):
         self.dec1 = FrameDecoder(channels * (1 + 2) + num_decoders, channels * 1, kernel_size=3, padding=1)
 
         self.out_transformer = nn.ModuleList([FramePrimerDecoder(channels + i, channels, num_bands, cropsize, n_fft, downsamples=0, feedforward_dim=feedforward_dim, bias=bias) for i in range(num_decoders)])
-        self.out = nn.Linear(channels + num_decoders, 2, bias=bias)
+        self.out = FrameDecoder(channels + num_decoders, 2, kernel_size=3, padding=1)
 
     def __call__(self, x):
         x = x[:, :, :self.max_bin]
@@ -65,7 +65,7 @@ class FrameTransformer(nn.Module):
             t = module(h, skip=e1)
             h = torch.cat((h, t), dim=1)
 
-        out = self.out(h.transpose(1,3)).transpose(1,3)
+        out = self.out(h)
 
         return F.pad(
             input=torch.sigmoid(out),
@@ -92,9 +92,8 @@ class FrameDecoder(nn.Module):
         self.dropout = nn.Dropout2d(0.1) if dropout else None
 
     def __call__(self, x, skip=None):
-        x = F.interpolate(x, size=(skip.shape[2],skip.shape[3]), mode='bilinear', align_corners=True)
-
         if skip is not None:
+            x = F.interpolate(x, size=(skip.shape[2],skip.shape[3]), mode='bilinear', align_corners=True)
             skip = spec_utils.crop_center(skip, x)
             x = torch.cat([x, skip], dim=1)
 
@@ -133,9 +132,8 @@ class FramePrimerDecoder(nn.Module):
         self.norm3 = nn.LayerNorm(bins)
 
     def __call__(self, x, skip):
-        b, _, h, w = x.shape
-        x = self.in_project(x.transpose(1,3)).reshape(b,w,h)
-        skip = self.skip_project(skip.transpose(1,3)).reshape(b,w,h)
+        x = self.in_project(x.transpose(1,3)).squeeze(3)
+        skip = self.skip_project(skip.transpose(1,3)).squeeze(3)
 
         h = self.norm1(x)
         h = self.self_attention(h)
@@ -204,13 +202,11 @@ class FrameTransformerBlock(nn.Module):
         self.dropout5 = nn.Dropout(dropout) if dropout > 0 else nn.Identity()
 
     def __call__(self, x, mem):
-        b, _, h, w = x.shape
+        x = self.in_project(x.transpose(1,3)).squeeze(3)
+        mem = self.mem_project(mem.transpose(1,3)).squeeze(3)
 
-        x = self.in_project(x.transpose(1,3)).transpose(1,3)
-        mem = self.mem_project(mem.transpose(1,3)).transpose(1,3)
-
-        x = torch.square(self.relu(self.in_norm(x.transpose(2,3).reshape(b,w,h))))
-        mem = torch.square(self.relu(self.mem_norm(mem.transpose(2,3).reshape(b,w,h))))
+        x = torch.square(self.relu(self.in_norm(x)))
+        mem = torch.square(self.relu(self.mem_norm(mem)))
 
         hs = self.self_attn1(x)
         hm = self.enc_attn1(x, mem=mem)
