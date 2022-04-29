@@ -125,7 +125,7 @@ class FramePrimerBlock(nn.Module):
         self.self_attention = MultibandFrameAttention(num_bands, bins, cropsize)
         self.norm1 = nn.LayerNorm(bins)
 
-        self.encoder_attention = MultibandFrameAttention(num_bands, bins, cropsize)
+        self.skip_attention = MultibandFrameAttention(num_bands, bins, cropsize)
         self.norm2 = nn.LayerNorm(bins)
 
         self.linear1 = nn.Linear(bins, feedforward_dim)
@@ -142,7 +142,7 @@ class FramePrimerBlock(nn.Module):
         x = x + h
 
         h = self.norm2(x)
-        h = self.encoder_attention(h, mem=skip)
+        h = self.skip_attention(h, mem=skip)
         x = x + h
 
         h = self.linear2(torch.square(self.relu(self.linear1(x))))
