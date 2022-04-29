@@ -118,10 +118,10 @@ class FrameTransformerBlock(nn.Module):
         self.cropsize = cropsize
         self.num_bands = num_bands
 
-        self.relu = nn.LeakyReLU(inplace=True)
+        self.relu = nn.ReLU(inplace=True)
         
-        self.bottleneck_linear = nn.Linear(channels, 1, bias=bias)
-        self.mem_bottleneck_linear = nn.Linear(mem_channels, 1, bias=bias)
+        self.in_project = nn.Linear(channels, 1, bias=bias)
+        self.mem_project = nn.Linear(mem_channels, 1, bias=bias)
 
         self.self_attn1 = MultibandFrameAttention(num_bands, bins, cropsize)
         self.enc_attn1 = MultibandFrameAttention(num_bands, bins, cropsize)
@@ -156,8 +156,8 @@ class FrameTransformerBlock(nn.Module):
         self.dropout5 = nn.Dropout(dropout) if dropout > 0 else nn.Identity()
 
     def __call__(self, x, mem):
-        x = self.bottleneck_linear(x.transpose(1,3)).transpose(1,3)
-        mem = self.mem_bottleneck_linear(mem.transpose(1,3)).transpose(1,3)
+        x = self.in_project(x.transpose(1,3)).transpose(1,3)
+        mem = self.mem_project(mem.transpose(1,3)).transpose(1,3)
 
         b, _, h, w = x.shape
         x = x.transpose(2,3).reshape(b,w,h)
@@ -181,7 +181,7 @@ class FrameTransformerBlock(nn.Module):
         x = self.norm5(x + h)
 
         h = self.conv3(x)
-        h = torch.square(self.relu(h))
+        h = self.swish(h)
         h = self.dropout5(self.conv4(h))
         x = self.norm6(x + h)
                 
