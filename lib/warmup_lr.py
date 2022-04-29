@@ -1,7 +1,7 @@
 from torch.optim import Optimizer
 
 class WarmupLR(object):
-    def __init__(self, optimizer, target_lr=1e-3, num_steps=16000, current_step=0, verbose=False, verbose_skip_steps=1):
+    def __init__(self, optimizer, target_lr=1e-3, num_steps=16000, current_step=0, verbose=False, verbose_skip_steps=1000):
         self.target_lr = target_lr
         self.num_steps = num_steps
         self.starting_step = current_step
