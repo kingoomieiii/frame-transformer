@@ -126,8 +126,8 @@ class FrameTransformerBlock(nn.Module):
         self.mem_project = nn.Linear(mem_channels, 1, bias=bias)
         self.mem_norm = nn.LayerNorm(bins)
 
-        self.self_attn1 = gMLP(bins, cropsize, feedforward_dim)
-        self.enc_attn1 = gMLP(bins, cropsize, feedforward_dim)
+        self.self_attn1 = MultibandFrameAttention(num_bands, bins, cropsize)
+        self.enc_attn1 = MultibandFrameAttention(num_bands, bins, cropsize)
         self.norm1 = nn.LayerNorm(bins)
         self.dropout1 = nn.Dropout(dropout) if dropout > 0 else nn.Identity()
 
@@ -168,7 +168,7 @@ class FrameTransformerBlock(nn.Module):
         mem = torch.square(self.relu(self.mem_norm(mem.transpose(2,3).reshape(b,w,h))))
 
         hs = self.self_attn1(x)
-        hm = self.enc_attn1(mem)
+        hm = self.enc_attn1(x, mem=mem)
         x = self.norm1(x + self.dropout1(hs + hm))
 
         hL = torch.square(self.relu(self.conv1L(x.transpose(1,2)).transpose(1,2)))
@@ -192,7 +192,7 @@ class FrameTransformerBlock(nn.Module):
         return x.transpose(1, 2).unsqueeze(1)
 
 class MultibandFrameAttention(nn.Module):
-    def __init__(self, num_bands, bins, cropsize, out_project = None):
+    def __init__(self, num_bands, bins, cropsize):
         super().__init__()
 
         self.num_bands = num_bands
@@ -205,7 +205,7 @@ class MultibandFrameAttention(nn.Module):
         self.v_proj = nn.Linear(bins, bins)
         self.v_conv = nn.Conv1d(bins, bins, kernel_size=3, padding=1, groups=bins)
 
-        self.o_proj = nn.Linear(bins, bins if out_project is None else out_project)
+        self.o_proj = nn.Linear(bins, bins)
 
         self.er = nn.Parameter(torch.empty(bins // num_bands, cropsize))
         nn.init.normal_(self.er)
@@ -241,33 +241,4 @@ class FrameConv(nn.Module):
     def __call__(self, x):
         h = self.body(x)
 
-        return h
-
-class SGU(nn.Module):
-    def __init__(self, bins, cropsize):
-        super(SGU, self).__init__()
-
-        self.bins = bins
-        self.norm = nn.LayerNorm(bins // 2)
-        self.project = nn.Linear(cropsize, cropsize)
-
-    def __call__(self, x):
-        uv = torch.split(x, split_size_or_sections=self.bins // 2, dim=2)
-        v = self.norm(self.project(uv[1].transpose(1,2)).transpose(1,2))
-        return uv[0] * v
-
-class gMLP(nn.Module):
-    def __init__(self, bins, cropsize, feedforward_dim):
-        super(gMLP, self).__init__()
-
-        self.in_proj = nn.Linear(bins, feedforward_dim)
-        self.gelu = nn.GELU()
-        self.sgu = SGU(feedforward_dim, cropsize)
-        self.out_proj = nn.Linear(feedforward_dim // 2, bins)
-
-    def __call__(self, x):
-        h = self.in_proj(x)
-        h = self.gelu(h)
-        h = self.sgu(h)
-        h = self.out_proj(h)
         return h
