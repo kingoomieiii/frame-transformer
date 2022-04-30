@@ -5,7 +5,7 @@ import math
 from lib import spec_utils
 
 class FrameTransformer(nn.Module):
-    def __init__(self, channels, n_fft=2048, feedforward_dim=512, num_bands=4, num_encoders=1, num_decoders=1, cropsize=256, bias=False):
+    def __init__(self, channels, n_fft=2048, feedforward_dim=512, num_bands=4, num_encoders=1, num_decoders=1, cropsize=1024, bias=False):
         super(FrameTransformer, self).__init__()
         self.max_bin = n_fft // 2
         self.output_bin = n_fft // 2 + 1
@@ -29,7 +29,7 @@ class FrameTransformer(nn.Module):
         self.dec1 = FrameDecoder(channels * (1 + 2) + num_decoders, channels * 1, kernel_size=3, padding=1)
 
         self.out_transformer = nn.ModuleList([FrameTransformerDecoder(channels + i, channels, num_bands, cropsize, n_fft, downsamples=0, feedforward_dim=feedforward_dim, bias=bias) for i in range(num_decoders)])
-        self.out = FrameDecoder(channels + num_decoders, 2, kernel_size=1, padding=0, activ=None, norm=False)
+        self.out = nn.Linear(channels + num_decoders, 2)
 
     def __call__(self, x):
         x = x[:, :, :self.max_bin]
@@ -65,7 +65,7 @@ class FrameTransformer(nn.Module):
             t = module(h, skip=e1)
             h = torch.cat((h, t), dim=1)
 
-        out = self.out(h)
+        out = self.out(h.transpose(1,3)).transpose(1,3)
 
         return F.pad(
             input=torch.sigmoid(out),
@@ -105,7 +105,7 @@ class FrameDecoder(nn.Module):
         return h
 
 class FrameTransformerDecoder(nn.Module):
-    def __init__(self, channels, skip_channels, num_bands=4, cropsize=256, n_fft=2048, feedforward_dim=2048, downsamples=0, bias=False, dropout=0.1):
+    def __init__(self, channels, skip_channels, num_bands=4, cropsize=1024, n_fft=2048, feedforward_dim=2048, downsamples=0, bias=False, dropout=0.1):
         super(FrameTransformerDecoder, self).__init__()
 
         bins = (n_fft // 2)
@@ -116,7 +116,8 @@ class FrameTransformerDecoder(nn.Module):
         self.bins = bins
         self.cropsize = cropsize
         self.num_bands = num_bands
-        self.in_project = nn.Linear(channels, 1, bias=bias)
+
+        self.in_project = nn.Linear(channels, 1, bias=bias)        
         self.skip_project = nn.Linear(skip_channels, 1, bias=bias)
 
         self.relu = nn.ReLU(inplace=True)        
@@ -128,14 +129,14 @@ class FrameTransformerDecoder(nn.Module):
 
         self.conv1L = nn.Sequential(
             nn.Conv1d(bins, bins, kernel_size=11, padding=5, groups=bins, bias=bias),
-            nn.Conv1d(bins, feedforward_dim * 2, kernel_size=1, padding=0, bias=bias))
+            nn.Conv1d(bins, bins * 4, kernel_size=1, padding=0, bias=bias))
         self.conv1R = nn.Sequential(
             nn.Conv1d(bins, bins, kernel_size=7, padding=3, groups=bins, bias=bias),
-            nn.Conv1d(bins, feedforward_dim // 2, kernel_size=1, padding=0, bias=bias))
-        self.norm2 = nn.LayerNorm(feedforward_dim * 2)
+            nn.Conv1d(bins, bins * 4, kernel_size=1, padding=0, bias=bias))
+        self.norm2 = nn.LayerNorm(bins * 4)
         self.conv2 = nn.Sequential(
-            nn.Conv1d(feedforward_dim * 2, feedforward_dim * 2, kernel_size=7, padding=3, groups=feedforward_dim*2, bias=bias),
-            nn.Conv1d(feedforward_dim * 2, bins, kernel_size=1, padding=0, bias=bias))
+            nn.Conv1d(bins * 4, bins * 4, kernel_size=7, padding=3, groups=bins*4, bias=bias),
+            nn.Conv1d(bins * 4, bins, kernel_size=1, padding=0, bias=bias))
         self.norm3 = nn.LayerNorm(bins)
         self.dropout2 = nn.Dropout(dropout) if dropout > 0 else nn.Identity()
 
@@ -147,8 +148,9 @@ class FrameTransformerDecoder(nn.Module):
         self.norm5 = nn.LayerNorm(bins)
         self.dropout4 = nn.Dropout(dropout) if dropout > 0 else nn.Identity()
 
-        self.conv3 = nn.Linear(bins, feedforward_dim * 2, bias=bias)
-        self.conv4 = nn.Linear(feedforward_dim * 2, bins, bias=bias)
+        self.conv3 = nn.Linear(bins, bins * 4, bias=bias)
+        self.silu = nn.SiLU(inplace=True)
+        self.conv4 = nn.Linear(bins * 4, bins, bias=bias)
         self.norm6 = nn.LayerNorm(bins)
         self.dropout5 = nn.Dropout(dropout) if dropout > 0 else nn.Identity()
 
@@ -173,11 +175,11 @@ class FrameTransformerDecoder(nn.Module):
         h = self.dropout4(self.enc_attn2(x, mem=skip))
         x = self.norm5(x + h)
 
-        h = torch.square(self.relu(self.conv3(x)))
+        h = self.silu(self.conv3(x))
         h = self.dropout5(self.conv4(h))
         x = self.norm6(x + h)
 
-        return x.transpose(1, 2).unsqueeze(1)
+        return x.transpose(1,2).unsqueeze(1)
 
 class MultibandFrameAttention(nn.Module):
     def __init__(self, num_bands, bins, cropsize):
@@ -237,3 +239,21 @@ class FrameConv(nn.Module):
         h = self.body(x)
 
         return h
+        
+class ChannelGate(nn.Module):
+    def __init__(self, channels, reduction_ratio=4):
+        super(ChannelGate, self).__init__()
+
+        self.avg_pool = nn.AdaptiveAvgPool2d(output_size=(1,1))
+        self.max_pool = nn.AdaptiveMaxPool2d(output_size=(1,1))
+
+        self.linear1 = nn.Linear(channels, channels // reduction_ratio)
+        self.relu = nn.ReLU(inplace=True)
+        self.linear2 = nn.Linear(channels // reduction_ratio, channels)
+
+    def __call__(self, x):
+        att1 = self.linear2(self.relu(self.linear1(self.avg_pool(x).transpose(1,3)))).transpose(1,3)
+        att2 = self.linear2(self.relu(self.linear1(self.max_pool(x).transpose(1,3)))).transpose(1,3)
+        att = torch.sigmoid(att1 + att2)
+        return x * att
+

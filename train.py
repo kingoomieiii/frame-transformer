@@ -145,9 +145,9 @@ def main():
     p.add_argument('--vocal_noise_prob', type=float, default=0.5)
     p.add_argument('--vocal_noise_magnitude', type=float, default=0.5)
     p.add_argument('--vocal_pan_prob', type=float, default=0.5)
-    p.add_argument('--batchsize', '-B', type=int, default=4)
+    p.add_argument('--batchsize', '-B', type=int, default=1)
     p.add_argument('--amsgrad', type=str, default='false')
-    p.add_argument('--accumulation_steps', '-A', type=int, default=2)
+    p.add_argument('--accumulation_steps', '-A', type=int, default=4)
     p.add_argument('--gpu', '-g', type=int, default=-1)
     p.add_argument('--seed', '-s', type=int, default=51)
     p.add_argument('--sr', '-r', type=int, default=44100)
@@ -159,12 +159,12 @@ def main():
     p.add_argument('--lr_min', type=float, default=0.0001)
     p.add_argument('--lr_decay_factor', type=float, default=0.9)
     p.add_argument('--lr_decay_patience', type=int, default=6)
-    p.add_argument('--cropsize', '-C', type=int, default=256)
+    p.add_argument('--cropsize', '-C', type=int, default=1024)
     p.add_argument('--patches', '-p', type=int, default=16)
     p.add_argument('--val_rate', '-v', type=float, default=0.2)
     p.add_argument('--val_filelist', '-V', type=str, default=None)
     p.add_argument('--val_batchsize', '-b', type=int, default=4)
-    p.add_argument('--val_cropsize', '-c', type=int, default=256)
+    p.add_argument('--val_cropsize', '-c', type=int, default=1024)
     p.add_argument('--num_workers', '-w', type=int, default=4)
     p.add_argument('--epoch', '-E', type=int, default=200)
     p.add_argument('--epoch_size', type=int, default=None)
@@ -216,11 +216,12 @@ def main():
         model.to(device)
 
     train_dataset = dataset.VocalAugmentationDataset(
-        path="C://cs512_sr44100_hl1024_nf2048_of0",
-        extra_path="G://cs512_sr44100_hl1024_nf2048_of0",
-        vocal_path="G://cs512_sr44100_hl1024_nf2048_of0_VOCALS",
+        path="C://cs2048_sr44100_hl1024_nf2048_of0",
+        extra_path="G://cs2048_sr44100_hl1024_nf2048_of0",
+        vocal_path="G://cs2048_sr44100_hl1024_nf2048_of0_VOCALS",
         is_validation=False,
-        epoch_size=args.epoch_size
+        epoch_size=args.epoch_size,
+        cropsize=args.cropsize
     )
 
     train_dataloader = torch.utils.data.DataLoader(
@@ -231,8 +232,9 @@ def main():
     )
     
     val_dataset = dataset.VocalAugmentationDataset(
-        path="C://cs256_sr44100_hl1024_nf2048_of0_VALIDATION",
-        is_validation=True
+        path="C://cs1024_sr44100_hl1024_nf2048_of0_VALIDATION",
+        is_validation=True,
+        cropsize=args.cropsize
     )
 
     val_dataloader = torch.utils.data.DataLoader(
