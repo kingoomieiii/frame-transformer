@@ -200,7 +200,7 @@ class MultibandFrameAttention(nn.Module):
         self.er = nn.Parameter(torch.empty(bins // num_bands, cropsize))
         nn.init.normal_(self.er)
 
-    def forward(self, x, mem=None):
+    def __call__(self, x, mem=None):
         b,w,c = x.shape
         q = self.q_conv(self.q_proj(x).transpose(1,2)).transpose(1,2).reshape(b, w, self.num_bands, -1).permute(0,2,1,3)
         k = self.k_conv(self.k_proj(x if mem is None else mem).transpose(1,2)).transpose(1,2).reshape(b, w, self.num_bands, -1).permute(0,2,3,1)
