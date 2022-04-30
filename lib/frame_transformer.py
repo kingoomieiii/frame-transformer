@@ -239,21 +239,3 @@ class FrameConv(nn.Module):
         h = self.body(x)
 
         return h
-        
-class ChannelGate(nn.Module):
-    def __init__(self, channels, reduction_ratio=4):
-        super(ChannelGate, self).__init__()
-
-        self.avg_pool = nn.AdaptiveAvgPool2d(output_size=(1,1))
-        self.max_pool = nn.AdaptiveMaxPool2d(output_size=(1,1))
-
-        self.linear1 = nn.Linear(channels, channels // reduction_ratio)
-        self.relu = nn.ReLU(inplace=True)
-        self.linear2 = nn.Linear(channels // reduction_ratio, channels)
-
-    def __call__(self, x):
-        att1 = self.linear2(self.relu(self.linear1(self.avg_pool(x).transpose(1,3)))).transpose(1,3)
-        att2 = self.linear2(self.relu(self.linear1(self.max_pool(x).transpose(1,3)))).transpose(1,3)
-        att = torch.sigmoid(att1 + att2)
-        return x * att
-
