@@ -16,20 +16,20 @@ class FrameTransformer(nn.Module):
         self.enc4 = FrameEncoder(channels * 4, channels * 6, kernel_size=3, stride=2, padding=1)
         self.enc5 = FrameEncoder(channels * 6, channels * 8, kernel_size=3, stride=2, padding=1)
         
-        self.dec4_transformer = nn.ModuleList([FrameTransformerBlock(channels * 8 + i, channels * 8, num_bands, cropsize, n_fft, downsamples=4, feedforward_dim=feedforward_dim, bias=bias) for i in range(num_decoders)])
+        self.dec4_transformer = nn.ModuleList([FrameTransformerDecoder(channels * 8 + i, channels * 8, num_bands, cropsize, n_fft, downsamples=4, feedforward_dim=feedforward_dim, bias=bias) for i in range(num_decoders)])
         self.dec4 = FrameDecoder(channels * (6 + 8) + num_decoders, channels * 6, kernel_size=3, padding=1)
 
-        self.dec3_transformer = nn.ModuleList([FrameTransformerBlock(channels * 6 + i, channels * 6, num_bands, cropsize, n_fft, downsamples=3, feedforward_dim=feedforward_dim, bias=bias) for i in range(num_decoders)])
+        self.dec3_transformer = nn.ModuleList([FrameTransformerDecoder(channels * 6 + i, channels * 6, num_bands, cropsize, n_fft, downsamples=3, feedforward_dim=feedforward_dim, bias=bias) for i in range(num_decoders)])
         self.dec3 = FrameDecoder(channels * (4 + 6) + num_decoders, channels * 4, kernel_size=3, padding=1)
 
-        self.dec2_transformer = nn.ModuleList([FrameTransformerBlock(channels * 4 + i, channels * 4, num_bands, cropsize, n_fft, downsamples=2, feedforward_dim=feedforward_dim, bias=bias) for i in range(num_decoders)])
+        self.dec2_transformer = nn.ModuleList([FrameTransformerDecoder(channels * 4 + i, channels * 4, num_bands, cropsize, n_fft, downsamples=2, feedforward_dim=feedforward_dim, bias=bias) for i in range(num_decoders)])
         self.dec2 = FrameDecoder(channels * (2 + 4) + num_decoders, channels * 2, kernel_size=3, padding=1)
 
-        self.dec1_transformer = nn.ModuleList([FrameTransformerBlock(channels * 2 + i, channels * 2, num_bands, cropsize, n_fft, downsamples=1, feedforward_dim=feedforward_dim, bias=bias) for i in range(num_decoders)])
+        self.dec1_transformer = nn.ModuleList([FrameTransformerDecoder(channels * 2 + i, channels * 2, num_bands, cropsize, n_fft, downsamples=1, feedforward_dim=feedforward_dim, bias=bias) for i in range(num_decoders)])
         self.dec1 = FrameDecoder(channels * (1 + 2) + num_decoders, channels * 1, kernel_size=3, padding=1)
 
-        self.out_transformer = nn.ModuleList([FrameTransformerBlock(channels + i, channels, num_bands, cropsize, n_fft, downsamples=0, feedforward_dim=feedforward_dim, bias=bias) for i in range(num_decoders)])
-        self.out = FrameDecoder(channels + num_decoders, 2, kernel_size=3, padding=1, activ=None, norm=False)
+        self.out_transformer = nn.ModuleList([FrameTransformerDecoder(channels + i, channels, num_bands, cropsize, n_fft, downsamples=0, feedforward_dim=feedforward_dim, bias=bias) for i in range(num_decoders)])
+        self.out = FrameDecoder(channels + num_decoders, 2, kernel_size=1, padding=0, activ=None, norm=False)
 
     def __call__(self, x):
         x = x[:, :, :self.max_bin]
@@ -65,7 +65,7 @@ class FrameTransformer(nn.Module):
             t = module(h, skip=e1)
             h = torch.cat((h, t), dim=1)
 
-        out = self.out(h)#.transpose(1,3)).transpose(1,3)
+        out = self.out(h)
 
         return F.pad(
             input=torch.sigmoid(out),
@@ -104,9 +104,9 @@ class FrameDecoder(nn.Module):
 
         return h
 
-class FrameTransformerBlock(nn.Module):
-    def __init__(self, channels, mem_channels, num_bands=4, cropsize=256, n_fft=2048, feedforward_dim=2048, downsamples=0, bias=False, dropout=0.1):
-        super(FrameTransformerBlock, self).__init__()
+class FrameTransformerDecoder(nn.Module):
+    def __init__(self, channels, skip_channels, num_bands=4, cropsize=256, n_fft=2048, feedforward_dim=2048, downsamples=0, bias=False, dropout=0.1):
+        super(FrameTransformerDecoder, self).__init__()
 
         bins = (n_fft // 2)
         if downsamples > 0:
@@ -116,14 +116,13 @@ class FrameTransformerBlock(nn.Module):
         self.bins = bins
         self.cropsize = cropsize
         self.num_bands = num_bands
-
         self.in_project = nn.Linear(channels, 1, bias=bias)
-        self.skip_project = nn.Linear(mem_channels, 1, bias=bias)
+        self.skip_project = nn.Linear(skip_channels, 1, bias=bias)
 
         self.relu = nn.ReLU(inplace=True)        
 
         self.self_attn1 = MultibandFrameAttention(num_bands, bins, cropsize)
-        self.skip_attn1 = MultibandFrameAttention(num_bands, bins, cropsize)
+        self.enc_attn1 = MultibandFrameAttention(num_bands, bins, cropsize)
         self.norm1 = nn.LayerNorm(bins)
         self.dropout1 = nn.Dropout(dropout) if dropout > 0 else nn.Identity()
 
@@ -144,7 +143,7 @@ class FrameTransformerBlock(nn.Module):
         self.norm4 = nn.LayerNorm(bins)
         self.dropout3 = nn.Dropout(dropout) if dropout > 0 else nn.Identity()
 
-        self.skip_attn2 = MultibandFrameAttention(num_bands, bins, cropsize)
+        self.enc_attn2 = MultibandFrameAttention(num_bands, bins, cropsize)
         self.norm5 = nn.LayerNorm(bins)
         self.dropout4 = nn.Dropout(dropout) if dropout > 0 else nn.Identity()
 
@@ -158,7 +157,7 @@ class FrameTransformerBlock(nn.Module):
         skip = self.skip_project(skip.transpose(1,3)).squeeze(3)
 
         hs = self.self_attn1(x)
-        hm = self.skip_attn1(x, mem=skip)
+        hm = self.enc_attn1(x, mem=skip)
         x = self.norm1(x + self.dropout1(hs + hm))
 
         hL = torch.square(self.relu(self.conv1L(x.transpose(1,2)).transpose(1,2)))
@@ -171,11 +170,10 @@ class FrameTransformerBlock(nn.Module):
         h = self.dropout3(self.self_attn2(x))
         x = self.norm4(x + h)
 
-        h = self.dropout4(self.skip_attn2(x, mem=skip))
+        h = self.dropout4(self.enc_attn2(x, mem=skip))
         x = self.norm5(x + h)
 
-        h = self.conv3(x)
-        h = torch.square(self.relu(h))
+        h = torch.square(self.relu(self.conv3(x)))
         h = self.dropout5(self.conv4(h))
         x = self.norm6(x + h)
 
