@@ -2,7 +2,7 @@ import argparse
 import os
 
 import shutil
-
+import math
 import librosa
 import numpy as np
 import soundfile as sf
@@ -13,6 +13,8 @@ from lib import dataset
 from lib import nets
 from lib import spec_utils
 from lib import utils
+
+import torch.nn.functional as F
 
 import json
 
@@ -38,15 +40,47 @@ class Separator(object):
 
         X_dataset = np.asarray(X_dataset)
 
+        print(X_dataset.shape)
+
         self.model.eval()
         with torch.no_grad():
             mask = []
             # To reduce the overhead, dataloader is not used.
             for i in tqdm(range(0, patches, self.batchsize)):
-                X_batch = X_dataset[i: i + self.batchsize]
-                X_batch = torch.from_numpy(X_batch).to(self.device)
+                if i == 0:
+                    X_batch_curr = X_dataset[i: i + self.batchsize]
+                    X_batch_curr = torch.from_numpy(X_batch_curr).to(self.device)
+                    X_batch_prev = F.pad(X_batch_curr, (0,0,0,0,0,0,1,0))[0:-1]
+                    X_batch_next = X_dataset[i+1: i + self.batchsize + 1]
+                    X_batch_next = torch.from_numpy(X_batch_next).to(self.device)
+                elif i//self.batchsize < math.ceil(patches / self.batchsize) - 1:
+                    X_batch_prev = X_dataset[i-1: i + self.batchsize - 1]
+                    X_batch_prev = torch.from_numpy(X_batch_prev).to(self.device)
+                    X_batch_curr = X_dataset[i: i + self.batchsize]
+                    X_batch_curr = torch.from_numpy(X_batch_curr).to(self.device)
+                    X_batch_next = X_dataset[i+1: i + self.batchsize + 1]
+                    X_batch_next = torch.from_numpy(X_batch_next).to(self.device)
+                else:
+                    pad = len(X_dataset) % self.batchsize
+                    X_pad_dataset = np.pad(X_dataset, ((0,pad), (0,0), (0,0), (0,0)))
+                    X_batch_prev = X_pad_dataset[i-1: i + self.batchsize - 1]
+                    X_batch_prev = torch.from_numpy(X_batch_prev).to(self.device)
+                    X_batch_curr = X_pad_dataset[i: i + self.batchsize]
+                    X_batch_curr = torch.from_numpy(X_batch_curr).to(self.device)
+                    X_batch_next = np.pad(X_batch_curr.cpu().numpy(), ((0,1),(0,0),(0,0),(0,0)))[1:] #F.pad(X_batch_curr, (0,0,0,0,0,0,0,1))[1:]
+                    X_batch_next = torch.from_numpy(X_batch_next).to(self.device)
 
-                pred = self.model(X_batch)
+                prev_pred = self.model(X_batch_prev)[:, :, :, (X_batch_next.shape[3]//2):]
+                next_pred = self.model(X_batch_next)[:, :, :, :(X_batch_next.shape[3]//2)]
+
+                curr_pred = self.model(X_batch_curr)
+                curr_pred_a = curr_pred[:, :, :, :(X_batch_curr.shape[3] // 2)]
+                curr_pred_b = curr_pred[:, :, :, (X_batch_curr.shape[3] // 2):]
+
+                pred_a = (prev_pred + curr_pred_a) * 0.5
+                pred_b = (next_pred + curr_pred_b) * 0.5
+
+                pred = torch.cat((pred_a, pred_b), dim=3)
 
                 pred = pred.detach().cpu().numpy()
                 pred = np.concatenate(pred, axis=2)
@@ -113,17 +147,17 @@ class Separator(object):
 def main():
     p = argparse.ArgumentParser()
     p.add_argument('--gpu', '-g', type=int, default=-1)
-    p.add_argument('--pretrained_model', '-P', type=str, default='models/model_iter2.pth')
+    p.add_argument('--pretrained_model', '-P', type=str, default='models/model_iter3.pth')
     p.add_argument('--input', '-i', required=True)
     p.add_argument('--output', '-o', type=str, default="")
     p.add_argument('--sr', '-r', type=int, default=44100)
     p.add_argument('--n_fft', '-f', type=int, default=2048)
     p.add_argument('--hop_length', '-H', type=int, default=1024)
     p.add_argument('--batchsize', '-B', type=int, default=8)
-    p.add_argument('--cropsize', '-c', type=int, default=256)
+    p.add_argument('--cropsize', '-c', type=int, default=1024)
     p.add_argument('--output_image', '-I', action='store_true')
     p.add_argument('--postprocess', '-p', action='store_true')
-    p.add_argument('--channels', type=int, default=24)
+    p.add_argument('--channels', type=int, default=8)
     p.add_argument('--num_encoders', type=int, default=0)
     p.add_argument('--num_decoders', type=int, default=3)
     p.add_argument('--num_bands', type=int, default=8)
