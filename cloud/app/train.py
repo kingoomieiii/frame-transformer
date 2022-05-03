@@ -148,18 +148,6 @@ def node_main(idx, args):
         drop_last=True
     )
 
-    train_dataset = VocalRemoverCloudDataset(dataset=args.train_dataset, vocal_dataset=args.vocal_dataset, num_training_items=args.num_training_items)
-    train_sampler = DistributedSampler(train_dataset, shuffle=True)
-
-    train_dataloader = DataLoader(
-        train_dataset,
-        sampler=train_sampler,
-        batch_size=args.batch_size,
-        num_workers=args.num_workers,
-        shuffle=False,
-        drop_last=True
-    )
-
     val_dataset = VocalRemoverCloudDataset(dataset=args.validation_dataset, vocal_dataset=args.vocal_dataset, num_training_items=args.num_training_items)
     val_sampler = DistributedSampler(val_dataset, shuffle=False)
 
