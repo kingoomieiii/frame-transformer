@@ -32,61 +32,76 @@ class Separator(object):
 
     def _separate(self, X_mag_pad, roi_size):
         X_dataset = []
+        X_dataset_prev = []
+        X_dataset_next = []
+
         patches = (X_mag_pad.shape[2] - 2 * self.offset) // roi_size
+
+        X_mag_prev = np.pad(X_mag_pad, ((0,0), (0,0), (self.cropsize//2,0)))[:,:,:-(self.cropsize //2)]
+        X_mag_next = np.pad(X_mag_pad, ((0,0), (0,0), (0,self.cropsize//2)))[:,:,(self.cropsize // 2):]
+
         for i in range(patches):
             start = i * roi_size
             X_mag_crop = X_mag_pad[:, :, start:start + self.cropsize]
+            X_prev_crop = X_mag_prev[:, :, start:start + self.cropsize]
+            X_next_crop = X_mag_next[:, :, start:start + self.cropsize]
             X_dataset.append(X_mag_crop)
+            X_dataset_prev.append(X_prev_crop)
+            X_dataset_next.append(X_next_crop)
 
         X_dataset = np.asarray(X_dataset)
-
-        print(X_dataset.shape)
+        X_dataset_prev = np.asarray(X_dataset_prev)
+        X_dataset_next = np.asarray(X_dataset_next)
 
         self.model.eval()
         with torch.no_grad():
             mask = []
+            mask_prev = []
+            mask_next = []
             # To reduce the overhead, dataloader is not used.
             for i in tqdm(range(0, patches, self.batchsize)):
-                if i == 0:
-                    X_batch_curr = X_dataset[i: i + self.batchsize]
-                    X_batch_curr = torch.from_numpy(X_batch_curr).to(self.device)
-                    X_batch_prev = F.pad(X_batch_curr, (0,0,0,0,0,0,1,0))[0:-1]
-                    X_batch_next = X_dataset[i+1: i + self.batchsize + 1]
-                    X_batch_next = torch.from_numpy(X_batch_next).to(self.device)
-                elif i//self.batchsize < math.ceil(patches / self.batchsize) - 1:
-                    X_batch_prev = X_dataset[i-1: i + self.batchsize - 1]
-                    X_batch_prev = torch.from_numpy(X_batch_prev).to(self.device)
-                    X_batch_curr = X_dataset[i: i + self.batchsize]
-                    X_batch_curr = torch.from_numpy(X_batch_curr).to(self.device)
-                    X_batch_next = X_dataset[i+1: i + self.batchsize + 1]
-                    X_batch_next = torch.from_numpy(X_batch_next).to(self.device)
-                else:
-                    pad = len(X_dataset) % self.batchsize
-                    X_pad_dataset = np.pad(X_dataset, ((0,pad), (0,0), (0,0), (0,0)))
-                    X_batch_prev = X_pad_dataset[i-1: i + self.batchsize - 1]
-                    X_batch_prev = torch.from_numpy(X_batch_prev).to(self.device)
-                    X_batch_curr = X_pad_dataset[i: i + self.batchsize]
-                    X_batch_curr = torch.from_numpy(X_batch_curr).to(self.device)
-                    X_batch_next = np.pad(X_batch_curr.cpu().numpy(), ((0,1),(0,0),(0,0),(0,0)))[1:] #F.pad(X_batch_curr, (0,0,0,0,0,0,0,1))[1:]
-                    X_batch_next = torch.from_numpy(X_batch_next).to(self.device)
+                X_batch_prev = X_dataset_prev[i: i + self.batchsize]
+                X_batch_next = X_dataset_next[i: i + self.batchsize]
+                X_batch = X_dataset[i: i + self.batchsize]
+                X_batch = torch.from_numpy(X_batch).to(self.device)
+                X_batch_prev = torch.from_numpy(X_batch_prev).to(self.device)
+                X_batch_next = torch.from_numpy(X_batch_next).to(self.device)
 
-                prev_pred = self.model(X_batch_prev)[:, :, :, (X_batch_next.shape[3]//2):]
-                next_pred = self.model(X_batch_next)[:, :, :, :(X_batch_next.shape[3]//2)]
-
-                curr_pred = self.model(X_batch_curr)
-                curr_pred_a = curr_pred[:, :, :, :(X_batch_curr.shape[3] // 2)]
-                curr_pred_b = curr_pred[:, :, :, (X_batch_curr.shape[3] // 2):]
-
-                pred_a = (prev_pred + curr_pred_a) * 0.5
-                pred_b = (next_pred + curr_pred_b) * 0.5
-
-                pred = torch.cat((pred_a, pred_b), dim=3)
-
+                pred = self.model(X_batch)
                 pred = pred.detach().cpu().numpy()
                 pred = np.concatenate(pred, axis=2)
                 mask.append(pred)
 
+                pred_prev = self.model(X_batch_prev)
+                pred_prev = pred_prev.detach().cpu().numpy()
+                pred_prev = np.concatenate(pred_prev, axis=2)
+                mask_prev.append(pred_prev)
+
+                pred_next = self.model(X_batch_next)
+                pred_next = pred_next.detach().cpu().numpy()
+                pred_next = np.concatenate(pred_next, axis=2)
+                mask_next.append(pred_next)
+
             mask = np.concatenate(mask, axis=2)
+            mask_prev = np.concatenate(mask_prev, axis=2)
+            mask_next = np.concatenate(mask_next, axis=2)
+
+        mask_prev = np.pad(mask_prev[:, :, (self.cropsize // 2):], ((0,0), (0,0), (0,self.cropsize // 2)))
+        mask_next = np.pad(mask_next[:, :, :-(self.cropsize // 2)], ((0,0), (0,0), ((self.cropsize // 2), 0)))
+        
+        mask_slice = mask[:, :, self.cropsize//2:-self.cropsize//2]
+        prev_slice = mask_prev[:, :, self.cropsize//2:-self.cropsize//2]
+        next_slice = mask_next[:, :, self.cropsize//2:-self.cropsize//2]
+
+        avg_slice = (mask_slice + prev_slice + next_slice) / 3.0
+
+        mask_prev[:, :, -(self.cropsize // 2):] = mask[:, :, -(self.cropsize // 2):]
+        end = (mask[:, :, -(self.cropsize // 2):] + mask_next[:, :, -(self.cropsize // 2):]) / 2
+
+        mask_next[:, :, :self.cropsize // 2] = mask[:, :, :self.cropsize // 2]
+        beg = (mask[:, :, :self.cropsize // 2] + mask_prev[:, :, :self.cropsize // 2]) / 2
+
+        mask = np.concatenate((beg, avg_slice, end), axis=2)
 
         return mask
 
