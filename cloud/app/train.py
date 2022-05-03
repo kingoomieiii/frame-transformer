@@ -9,9 +9,9 @@ import torch.nn as nn
 from torch.utils.data import DataLoader
 from torch.nn.utils import clip_grad_norm_
 from torch.utils.data.dataloader import DataLoader
-from cloud.app.lib.frame_transformer import FrameTransformer
-from cloud.app.lib.dataset import VocalRemoverCloudDataset
-from cloud.app.lib.warmup_lr import WarmupLR
+from lib.frame_transformer import FrameTransformer
+from lib.dataset import VocalRemoverCloudDataset
+from lib.warmup_lr import WarmupLR
 import multiprocessing
 from google.cloud import storage
 from tqdm import tqdm

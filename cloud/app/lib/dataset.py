@@ -7,7 +7,7 @@ from io import BytesIO
 from google.cloud import storage
 
 client = storage.Client()
-bucket = client.bucket('bc-vocal-remover')
+bucket = client.bucket('your-bucket-name')
 
 class VocalRemoverCloudDataset(torch.utils.data.Dataset):
     def __init__(self, dataset, vocal_dataset, num_training_items=None, force_voxaug=True, is_validation=False):
