@@ -30,7 +30,7 @@ class Separator(object):
         self.cropsize = cropsize
         self.postprocess = postprocess
 
-    def _separate(self, X_mag_pad, roi_size):
+    def _separate_sliding(self, X_mag_pad, roi_size):
         X_dataset = []
         X_dataset_prev = []
         X_dataset_next = []
@@ -105,6 +105,34 @@ class Separator(object):
 
         return mask
 
+    def _separate(self, X_mag_pad, roi_size):
+        X_dataset = []
+        patches = (X_mag_pad.shape[2] - 2 * self.offset) // roi_size
+        for i in range(patches):
+            start = i * roi_size
+            X_mag_crop = X_mag_pad[:, :, start:start + self.cropsize]
+            X_dataset.append(X_mag_crop)
+
+        X_dataset = np.asarray(X_dataset)
+
+        self.model.eval()
+        with torch.no_grad():
+            mask = []
+            # To reduce the overhead, dataloader is not used.
+            for i in tqdm(range(0, patches, self.batchsize)):
+                X_batch = X_dataset[i: i + self.batchsize]
+                X_batch = torch.from_numpy(X_batch).to(self.device)
+
+                pred = self.model(X_batch)
+
+                pred = pred.detach().cpu().numpy()
+                pred = np.concatenate(pred, axis=2)
+                mask.append(pred)
+
+            mask = np.concatenate(mask, axis=2)
+
+        return mask
+
     def _preprocess(self, X_spec):
         X_mag = np.abs(X_spec)
         X_phase = np.angle(X_spec)
@@ -120,7 +148,7 @@ class Separator(object):
 
         return y_spec, v_spec
 
-    def separate(self, X_spec):
+    def separate(self, X_spec, sliding=False):
         X_mag, X_phase = self._preprocess(X_spec)
 
         n_frame = X_mag.shape[2]
@@ -128,9 +156,12 @@ class Separator(object):
         X_mag_pad = np.pad(X_mag, ((0, 0), (0, 0), (pad_l, pad_r)), mode='constant')
         X_mag_pad /= X_mag_pad.max()
 
-        mask = self._separate(X_mag_pad, roi_size)
-        mask = mask[:, :, :n_frame]
+        if not sliding:
+            mask = self._separate(X_mag_pad, roi_size)
+        else:
+            mask = self._separate_sliding(X_mag_pad, roi_size)
 
+        mask = mask[:, :, :n_frame]
         y_spec, v_spec = self._postprocess(mask, X_mag, X_phase)
 
         return y_spec, v_spec
@@ -179,6 +210,7 @@ def main():
     p.add_argument('--feedforward_dim', type=int, default=2048)
     p.add_argument('--bias', type=str, default='true')
     p.add_argument('--tta', '-t', action='store_true')
+    p.add_argument('--sliding_tta', '-t', action='store_true')
     args = p.parse_args()
 
     print('loading model...', end=' ')
@@ -234,7 +266,7 @@ def main():
             if args.tta:
                 y_spec, v_spec = sp.separate_tta(X_spec)
             else:
-                y_spec, v_spec = sp.separate(X_spec)
+                y_spec, v_spec = sp.separate(X_spec, args.sliding_tta)
 
             print('inverse stft of instruments...', end=' ')
             wave = spec_utils.spectrogram_to_wave(y_spec, hop_length=args.hop_length)
