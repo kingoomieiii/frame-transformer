@@ -212,14 +212,8 @@ def node_main(idx, args):
     lr_warmup = WarmupLR(optimizer, target_lr=args.learning_rate, num_steps=args.lr_warmup_steps, current_step=args.lr_warmup_current_step, verbose=True) if args.lr_warmup_steps > 0 else None
 
     for epoch in range(args.epochs):
-        model.train()                
-
-        pb = tqdm(train_dataloader) if args.progress_bar and rank == 0 else train_dataloader
-        for X, Y in pb:
-            X = X.to(device)
-            Y = Y.to(device)            
-            train_loss = train_epoch(train_dataloader, model, device, optimizer, args.accumulation_steps, grad_scaler, args.progress_bar, args.mixup_rate, args.mixup_alpha, lr_warmup=lr_warmup)
-            val_loss = validate_epoch(val_dataloader, model, device, grad_scaler)
+        train_loss = train_epoch(train_dataloader, model, device, optimizer, args.accumulation_steps, grad_scaler, args.progress_bar, args.mixup_rate, args.mixup_alpha, lr_warmup=lr_warmup)
+        val_loss = validate_epoch(val_dataloader, model, device, grad_scaler)
 
         scheduler.step(val_loss)
 
