@@ -1,0 +1,39 @@
+FROM nvidia/cuda:11.3.1-cudnn8-runtime
+
+RUN apt-get -y update \
+    && apt-get install -y --no-install-recommends \
+        wget \
+        curl \
+        python3 \
+        python3-pip \
+        libsndfile1
+
+RUN wget -nv \
+    https://dl.google.com/dl/cloudsdk/release/google-cloud-sdk.tar.gz && \
+    mkdir /root/tools && \
+    tar xvzf google-cloud-sdk.tar.gz -C /root/tools && \
+    rm google-cloud-sdk.tar.gz && \
+    /root/tools/google-cloud-sdk/install.sh --usage-reporting=false \
+        --path-update=false --bash-completion=false \
+        --disable-installation-options && \
+    rm -rf /root/.config/* && \
+    ln -s /root/.config /config && \
+    # Remove the backup directory that gcloud creates
+    rm -rf /root/tools/google-cloud-sdk/.install/.backup
+
+# Path configuration
+ENV PATH $PATH:/root/tools/google-cloud-sdk/bin
+# Make sure gsutil will use the default service account
+RUN echo '[GoogleCompute]\nservice_account = default' > /etc/boto.cfg
+
+RUN pip3 install torch==1.10.0+cu113 torchvision==0.11.1+cu113 torchaudio==0.10.0+cu113 -f https://download.pytorch.org/whl/cu113/torch_stable.html
+RUN pip3 install --upgrade pip
+RUN pip3 install tqdm opencv_python
+RUN pip3 install google-cloud-storage
+
+WORKDIR /root
+COPY app /root/app
+COPY launcher /root/launcher
+
+# Sets up the entry point to invoke the trainer.
+ENTRYPOINT ["python3", "app/train.py"]

@@ -1,0 +1,15 @@
+trainingInput:
+  scaleTier: CUSTOM
+  masterType: n1-highmem-8
+  masterConfig:
+    imageUri: gcr.io/radiant-octane-316221/bc_vocal_remover_custom_container:pytorch_gpu
+    acceleratorConfig:
+      count: 1
+      type: NVIDIA_TESLA_V100
+  workerType: n1-highmem-8
+  workerCount: 3
+  workerConfig:
+    imageUri: gcr.io/radiant-octane-316221/bc_vocal_remover_custom_container:pytorch_gpu
+    acceleratorConfig:
+      count: 1
+      type: NVIDIA_TESLA_V100

@@ -1,0 +1,15 @@
+trainingInput:
+  scaleTier: CUSTOM
+  masterType: a2-highgpu-1g
+  masterConfig:
+    imageUri: gcr.io/your-projectid-123456/your_image:your_tag
+    acceleratorConfig:
+      count: 1
+      type: NVIDIA_TESLA_A100
+  workerType: a2-highgpu-1g
+  workerCount: 11
+  workerConfig:
+    imageUri: gcr.io/your-projectid-123456/your_image:your_tag
+    acceleratorConfig:
+      count: 1
+      type: NVIDIA_TESLA_A100
