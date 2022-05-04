@@ -1,0 +1,7 @@
+{
+    "output": "Zenith Passage",
+    "convert": [
+        "E://Projects/vocal-remover-data/input/zp/The Zenith Passage - Algorithmic Salvation.wav",
+        "E://Projects/vocal-remover-data/input/zp/The Zenith Passage - Synaptic Depravation.wav"
+    ]
+}

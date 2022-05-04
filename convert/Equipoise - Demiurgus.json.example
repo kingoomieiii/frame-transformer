@@ -1,0 +1,22 @@
+{
+    "output": "output/Equipoise - Demiurgus/",
+    "convert": [
+        "E://Projects/vocal-remover-data/input/Demiurgus/02-Sovereign-Sacrifices.wav",
+        "E://Projects/vocal-remover-data/input/Demiurgus/03-Alchemic-Web-of-Deceit.wav",
+        "E://Projects/vocal-remover-data/input/Demiurgus/04-A-Suit-of-My-Flesh.wav",
+        "E://Projects/vocal-remover-data/input/Demiurgus/06-Sigil-Insidious.wav",
+        "E://Projects/vocal-remover-data/input/Demiurgus/08-Dualis-Flamel.wav",
+        "E://Projects/vocal-remover-data/input/Demiurgus/10-Waking-Divinity.wav",
+        "E://Projects/vocal-remover-data/input/Demiurgus/12-Squall-of-Souls.wav",
+        "E://Projects/vocal-remover-data/input/Demiurgus/13-Cast-Into-Exile.wav"
+    ],
+
+    "copy": [
+        "E://Projects/vocal-remover-data/input/Demiurgus/01-Illborn-Augury.wav",
+        "E://Projects/vocal-remover-data/input/Demiurgus/05-Shrouded.wav",
+        "E://Projects/vocal-remover-data/input/Demiurgus/07-Reincarnated.wav",
+        "E://Projects/vocal-remover-data/input/Demiurgus/09-Eve-of-the-Promised-Day.wav",
+        "E://Projects/vocal-remover-data/input/Demiurgus/11-Ecliptic.wav",
+        "E://Projects/vocal-remover-data/input/Demiurgus/14-Ouroboric.wav"
+    ]
+}

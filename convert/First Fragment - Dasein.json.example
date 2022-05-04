@@ -1,0 +1,19 @@
+{
+    "output": "First Fragment - Dasein",
+    "convert": [
+        "E://Projects/vocal-remover-data/input/Dasein/01-Le-Serment-De-Tsion.wav",
+        "E://Projects/vocal-remover-data/input/Dasein/02-Dasein.wav",
+        "E://Projects/vocal-remover-data/input/Dasein/04-Emergence.wav",
+        "E://Projects/vocal-remover-data/input/Dasein/05-Mordetre-Et-Denaissance.wav",
+        "E://Projects/vocal-remover-data/input/Dasein/07-Archetype.wav",
+        "E://Projects/vocal-remover-data/input/Dasein/08-Gula.wav",
+        "E://Projects/vocal-remover-data/input/Dasein/09-Voracite-Apotheose-Part-1.wav",
+        "E://Projects/vocal-remover-data/input/Dasein/10-Psychan-Apotheose-Part-2.wav",
+        "E://Projects/vocal-remover-data/input/Dasein/11-Evhron.wav"
+    ],
+
+    "copy": [
+        "E://Projects/vocal-remover-data/input/Dasein/03-Lentite.wav",
+        "E://Projects/vocal-remover-data/input/Dasein/06-Prelude-En-Sol-Diese-Mineur.wav"
+    ]
+}

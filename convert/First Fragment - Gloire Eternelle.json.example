@@ -1,0 +1,20 @@
+{
+    "output": "First Fragment - Gloire Éternelle",
+    "convert": [
+        "E://Projects/vocal-remover-data/input/Gloire Eternelle/First Fragment - Gloire Éternelle - 01 Gloire Éternelle.wav",
+        "E://Projects/vocal-remover-data/input/Gloire Eternelle/First Fragment - Gloire Éternelle - 02 Solus.wav",
+        "E://Projects/vocal-remover-data/input/Gloire Eternelle/First Fragment - Gloire Éternelle - 03 La Veuve et Le Martyr.wav",
+        "E://Projects/vocal-remover-data/input/Gloire Eternelle/First Fragment - Gloire Éternelle - 04 Pantheum.wav",
+        "E://Projects/vocal-remover-data/input/Gloire Eternelle/First Fragment - Gloire Éternelle - 05 De Chair et de Haine.wav",
+        "E://Projects/vocal-remover-data/input/Gloire Eternelle/First Fragment - Gloire Éternelle - 07 Ataraxie.wav",
+        "E://Projects/vocal-remover-data/input/Gloire Eternelle/First Fragment - Gloire Éternelle - 08 Soif Brûlante.wav",
+        "E://Projects/vocal-remover-data/input/Gloire Eternelle/First Fragment - Gloire Éternelle - 01 Gloire Éternelle.wav",
+        "E://Projects/vocal-remover-data/input/Gloire Eternelle/First Fragment - Gloire Éternelle - 09 In'el.wav",
+        "E://Projects/vocal-remover-data/input/Gloire Eternelle/First Fragment - Gloire Éternelle - 01 Gloire Éternelle.wav"
+    ],
+
+    "copy": [
+        "E://Projects/vocal-remover-data/input/Gloire Eternelle/First Fragment - Gloire Éternelle - 06 Sonata en Mi mineur.wav",
+        "E://Projects/vocal-remover-data/input/Gloire Eternelle/First Fragment - Gloire Éternelle - 10 Mort éphémère.wav"
+    ]
+}

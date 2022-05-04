@@ -62,9 +62,6 @@ def train_epoch(dataloader, model, device, optimizer, accumulation_steps, grad_s
         X_batch = X_batch.to(device)
         y_batch = y_batch.to(device)
 
-        if np.random.uniform() < mixup_rate:
-            X_batch, y_batch = mixup(X_batch, y_batch, mixup_alpha)
-
         with torch.cuda.amp.autocast_mode.autocast(enabled=grad_scaler is not None):
             pred = model(X_batch)
 
@@ -221,7 +218,9 @@ def main():
         vocal_path="G://cs2048_sr44100_hl1024_nf2048_of0_VOCALS",
         is_validation=False,
         epoch_size=args.epoch_size,
-        cropsize=args.cropsize
+        cropsize=args.cropsize,
+        mixup_rate=args.mixup_rate,
+        mixup_alpha=args.mixup_alpha
     )
 
     train_dataloader = torch.utils.data.DataLoader(
@@ -234,7 +233,8 @@ def main():
     val_dataset = dataset.VocalAugmentationDataset(
         path="C://cs1024_sr44100_hl1024_nf2048_of0_VALIDATION",
         is_validation=True,
-        cropsize=args.cropsize
+        cropsize=args.cropsize,
+        mixup_rate=0
     )
 
     val_dataloader = torch.utils.data.DataLoader(

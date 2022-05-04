@@ -15,12 +15,14 @@ except ModuleNotFoundError:
     import spec_utils
 
 class VocalAugmentationDataset(torch.utils.data.Dataset):
-    def __init__(self, path, extra_path=None, pair_path=None, vocal_path="", is_validation=False, mul=1, downsamples=0, epoch_size=None, pair_mul=1, slide=True, cropsize=256):
+    def __init__(self, path, extra_path=None, pair_path=None, vocal_path="", is_validation=False, mul=1, downsamples=0, epoch_size=None, pair_mul=1, slide=True, cropsize=256, mixup_rate=0, mixup_alpha=1):
         self.epoch_size = epoch_size
         self.slide = slide
         self.mul = mul
         patch_list = [os.path.join(path, f) for f in os.listdir(path) if os.path.isfile(os.path.join(path, f))]
         self.cropsize = cropsize
+        self.mixup_rate = mixup_rate
+        self.mixup_alpha = mixup_alpha
 
         if pair_path is not None and pair_mul > 0:
             pairs = [os.path.join(pair_path, f) for f in os.listdir(pair_path) if os.path.isfile(os.path.join(pair_path, f))]
@@ -156,7 +158,16 @@ class VocalAugmentationDataset(torch.utils.data.Dataset):
         else:
             c = Xc
 
-        return np.abs(X) / c, np.abs(Y) / c
+        X = np.abs(X) / c
+        Y = np.abs(Y) / c
+
+        if np.random.uniform() < self.mixup_rate:
+            MX, MY = self.__getitem__(np.random.randint(len(self.patch_list)))
+            a = np.random.beta(self.mixup_alpha, self.mixup_alpha)
+            X = X * a + (1 - a) * MX
+            Y = Y * a + (1 - a) * MY
+
+        return X, Y
 
 class VocalRemoverTrainingSet(torch.utils.data.Dataset):
 
