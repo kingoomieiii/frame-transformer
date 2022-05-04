@@ -10,10 +10,12 @@ client = storage.Client()
 bucket = client.bucket('your-bucket-name')
 
 class VocalRemoverCloudDataset(torch.utils.data.Dataset):
-    def __init__(self, dataset, vocal_dataset, num_training_items=None, force_voxaug=True, is_validation=False):
+    def __init__(self, dataset, vocal_dataset, num_training_items=None, force_voxaug=True, is_validation=False, mixup_alpha=1, mixup_rate=0.5):
         self.num_training_items = num_training_items
         self.force_voxaug = force_voxaug
         self.is_validation = is_validation
+        self.mixup_alpha = mixup_alpha
+        self.mixup_rate = mixup_rate
 
         blobs = list(client.list_blobs(bucket, prefix=dataset))
 
@@ -78,10 +80,20 @@ class VocalRemoverCloudDataset(torch.utils.data.Dataset):
             if np.random.uniform() < 0.025:
                 X = Y
                 c = Xc
+
         else:
             c = Xc
 
-        return np.abs(X) / c, np.abs(Y) / c
+        X = np.abs(X) / c
+        Y = np.abs(Y) / c
+
+        if np.random.uniform() < self.mixup_rate:
+            MX, MY = self.__getitem__(np.random.randint(len(self.patch_list)))
+            a = np.random.beta(self.mixup_alpha, self.mixup_alpha)
+            X = X * a + (1 - a) * MX
+            Y = Y * a + (1 - a) * MY
+
+        return X, Y
 
     def _get_vocals(self):
         vidx = np.random.randint(len(self.vocal_list))            

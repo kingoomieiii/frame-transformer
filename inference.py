@@ -193,7 +193,7 @@ class Separator(object):
 def main():
     p = argparse.ArgumentParser()
     p.add_argument('--gpu', '-g', type=int, default=-1)
-    p.add_argument('--pretrained_model', '-P', type=str, default='models/model_iter3.pth')
+    p.add_argument('--pretrained_model', '-P', type=str, default='models/model_iter0.pth')
     p.add_argument('--input', '-i', required=True)
     p.add_argument('--output', '-o', type=str, default="")
     p.add_argument('--sr', '-r', type=int, default=44100)
@@ -204,13 +204,13 @@ def main():
     p.add_argument('--output_image', '-I', action='store_true')
     p.add_argument('--postprocess', '-p', action='store_true')
     p.add_argument('--channels', type=int, default=8)
-    p.add_argument('--num_encoders', type=int, default=0)
-    p.add_argument('--num_decoders', type=int, default=3)
+    p.add_argument('--num_encoders', type=int, default=2)
+    p.add_argument('--num_decoders', type=int, default=2)
     p.add_argument('--num_bands', type=int, default=8)
-    p.add_argument('--feedforward_dim', type=int, default=2048)
+    p.add_argument('--feedforward_dim', type=int, default=3072)
     p.add_argument('--bias', type=str, default='true')
     p.add_argument('--tta', '-t', action='store_true')
-    p.add_argument('--sliding_tta', '-t', action='store_true')
+    p.add_argument('--sliding_tta', '-st', action='store_true')
     args = p.parse_args()
 
     print('loading model...', end=' ')
@@ -263,10 +263,10 @@ def main():
 
             sp = Separator(model, device, args.batchsize, args.cropsize, args.postprocess)
 
-            if args.tta:
+            if args.tta and not args.sliding_tta:
                 y_spec, v_spec = sp.separate_tta(X_spec)
             else:
-                y_spec, v_spec = sp.separate(X_spec, args.sliding_tta)
+                y_spec, v_spec = sp.separate(X_spec, False)
 
             print('inverse stft of instruments...', end=' ')
             wave = spec_utils.spectrogram_to_wave(y_spec, hop_length=args.hop_length)
