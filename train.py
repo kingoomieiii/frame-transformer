@@ -64,13 +64,11 @@ def train_epoch(dataloader, model, device, optimizer, accumulation_steps, grad_s
     mi = torch.tensor(float('inf'))
 
     pbar = tqdm(dataloader) if progress_bar else dataloader
-    for itr, (X_batch, y_batch, p) in enumerate(pbar):
+    for itr, (X_batch, y_batch) in enumerate(pbar):
         mx = torch.max(mx, torch.max(torch.max(X_batch), torch.max(y_batch)))
         mi = torch.min(mi, torch.min(torch.min(X_batch), torch.min(y_batch)))
         rmx = torch.max(mx, rmx)
         rmi = torch.min(rmi, mi)
-
-        stuff = f'mi={mi} mx={mx} rmi={rmi} rmx={rmx}'
 
         X_batch = X_batch.to(device)
         y_batch = y_batch.to(device)
@@ -153,11 +151,11 @@ def validate_epoch(dataloader, model, device, grad_scaler):
 def main():
     p = argparse.ArgumentParser()
     p.add_argument('--id', type=str, default='')
-    p.add_argument('--channels', type=int, default=24)
-    p.add_argument('--num_encoders', type=int, default=0)
-    p.add_argument('--num_decoders', type=int, default=3)
+    p.add_argument('--channels', type=int, default=8)
+    p.add_argument('--num_encoders', type=int, default=2)
+    p.add_argument('--num_decoders', type=int, default=2)
     p.add_argument('--num_bands', type=int, default=8)
-    p.add_argument('--feedforward_dim', type=int, default=2048)
+    p.add_argument('--feedforward_dim', type=int, default=3072)
     p.add_argument('--bias', type=str, default='true')
     p.add_argument('--amsgrad', type=str, default='false')
     p.add_argument('--vocal_recurse_prob', type=float, default=0.5)
@@ -177,9 +175,9 @@ def main():
     p.add_argument('--learning_rate', '-l', type=float, default=1e-3)
     p.add_argument('--weight_decay', type=float, default=0)
     p.add_argument('--optimizer', type=str.lower, choices=['adam', 'adamw'], default='adam')
-    p.add_argument('--lr_scheduler_decay_target', type=int, default=1e-8)
-    p.add_argument('--lr_scheduler_warmup_steps', '-LW', type=int, default=16000)
-    p.add_argument('--lr_scheduler_decay_steps', type=int, default=96000)
+    p.add_argument('--lr_scheduler_decay_target', type=int, default=1e-7)
+    p.add_argument('--lr_scheduler_warmup_steps', '-LW', type=int, default=32000)
+    p.add_argument('--lr_scheduler_decay_steps', type=int, default=128000)
     p.add_argument('--lr_scheduler_decay_power', type=float, default=1.0)
     p.add_argument('--lr_scheduler_current_step', type=int, default=0)
     p.add_argument('--cropsize', '-C', type=int, default=1024)
@@ -318,7 +316,9 @@ def main():
                 logger.info('  * best validation loss')
 
             model_path = 'models/model_iter{}.pth'.format(epoch)
+            scheduler_path = 'models/scheduler_iter{}.pth'.format(epoch)
             torch.save(model.state_dict(), model_path)
+            torch.save(scheduler.state_dict(), scheduler_path)
 
         log.append([1, val_loss])
         with open('loss_{}.json'.format(timestamp), 'w', encoding='utf8') as f:
