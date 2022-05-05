@@ -2,7 +2,7 @@ from torch.optim import Optimizer
 from torch.optim.lr_scheduler import _LRScheduler
 
 class LinearWarmupScheduler(_LRScheduler):
-    def __init__(self, optimizer, target_lr=1e-3, num_steps=16000, current_step=0, verbose=False, verbose_skip_steps=1000, num_decay_steps=120000, lr_decay_target=1e-8, power=1.0):
+    def __init__(self, optimizer, target_lr=1e-3, num_steps=16000, current_step=0, verbose=False, verbose_skip_steps=1000):
         
         self.target_lr = target_lr
         self.num_steps = num_steps
@@ -10,9 +10,6 @@ class LinearWarmupScheduler(_LRScheduler):
         self.current_step = current_step
         self.verbose = verbose
         self.verbose_skip_steps = verbose_skip_steps
-        self.num_decay_steps = num_decay_steps
-        self.lr_decay_target = lr_decay_target
-        self.power = power
 
         if not isinstance(optimizer, Optimizer):
             raise TypeError('{} is not an Optimizer'.format(
