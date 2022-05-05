@@ -29,9 +29,9 @@ class PolynomialDecayScheduler(_LRScheduler):
 
             for i, param_group in enumerate(self.optimizer.param_groups):
                 param_group['lr'] = self.current_lr
-                #if self.verbose and self.current_step % self.verbose_skip_steps == 0:
-                print(' Step {:5d} of {:5d}: set learning rate'
-                        ' of group {} to {:.4e}.'.format(self.current_step, self.start_step + self.num_decay_steps, i, self.current_lr))
+                if self.verbose and self.current_step % self.verbose_skip_steps == 0:
+                    print(' Step {:5d} of {:5d}: set learning rate'
+                            ' of group {} to {:.4e}.'.format(self.current_step, self.start_step + self.num_decay_steps, i, self.current_lr))
 
         if self.current_step < self.start_step + self.num_decay_steps + 1:
             self.current_step = self.current_step + 1
@@ -42,9 +42,9 @@ class PolynomialDecayScheduler(_LRScheduler):
 
             for i, param_group in enumerate(self.optimizer.param_groups):
                 param_group['lr'] = self.current_lr
-                #if self.verbose and self.current_step % self.verbose_skip_steps == 0:
-                print(' Step {:5d} of {:5d}: decreased learning rate'
-                        ' of group {} to {:.4e}.'.format(self.current_step, self.start_step + self.num_decay_steps, i, self.current_lr))
+                if self.verbose and self.current_step % self.verbose_skip_steps == 0:
+                    print(' Step {:5d} of {:5d}: decreased learning rate'
+                            ' of group {} to {:.4e}.'.format(self.current_step, self.start_step + self.num_decay_steps, i, self.current_lr))
 
         if self.current_step < self.start_step + self.num_decay_steps + 1:
             self.current_step = self.current_step + 1
