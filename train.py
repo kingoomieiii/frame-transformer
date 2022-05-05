@@ -58,18 +58,8 @@ def train_epoch(dataloader, model, device, optimizer, accumulation_steps, grad_s
     batch_loss = 0
     crit = nn.L1Loss()
 
-    rmx = torch.tensor(float('-inf'))
-    rmi = torch.tensor(float('inf'))
-    mx = torch.tensor(float('-inf'))
-    mi = torch.tensor(float('inf'))
-
     pbar = tqdm(dataloader) if progress_bar else dataloader
     for itr, (X_batch, y_batch) in enumerate(pbar):
-        mx = torch.max(mx, torch.max(torch.max(X_batch), torch.max(y_batch)))
-        mi = torch.min(mi, torch.min(torch.min(X_batch), torch.min(y_batch)))
-        rmx = torch.max(mx, rmx)
-        rmi = torch.min(rmi, mi)
-
         X_batch = X_batch.to(device)
         y_batch = y_batch.to(device)
 
@@ -80,12 +70,6 @@ def train_epoch(dataloader, model, device, optimizer, accumulation_steps, grad_s
         accum_loss = loss / accumulation_steps
         batch_loss = batch_loss + accum_loss
 
-        if torch.logical_or(torch.isnan(batch_loss), torch.isinf(batch_loss)):
-            print(" ")
-            print(p)    
-            print('nan; aborting')
-            quit()
-
         if grad_scaler is not None:
             grad_scaler.scale(accum_loss).backward()
         else:
@@ -94,9 +78,6 @@ def train_epoch(dataloader, model, device, optimizer, accumulation_steps, grad_s
         if (itr + 1) % accumulation_steps == 0:
             if progress_bar:
                 pbar.set_description(str(batch_loss.item()))
-
-            mx = torch.tensor(float('-inf'))
-            mi = torch.tensor(float('inf'))
 
             if grad_scaler is not None:
                 grad_scaler.unscale_(optimizer)
