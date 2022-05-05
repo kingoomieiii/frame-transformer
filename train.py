@@ -283,7 +283,7 @@ def main():
     scheduler = torch.optim.lr_scheduler.ChainedScheduler([
         LinearWarmupScheduler(optimizer, target_lr=args.learning_rate, num_steps=args.lr_scheduler_warmup_steps, current_step=args.lr_scheduler_current_step),
         PolynomialDecayScheduler(optimizer, base_lr=args.learning_rate, target=args.lr_scheduler_decay_target, power=args.lr_scheduler_decay_power, num_decay_steps=args.lr_scheduler_decay_steps, start_step=args.lr_scheduler_warmup_steps, current_step=args.lr_scheduler_current_step)
-    ]) if args.lr_scheduler_warmup_steps > 0 and args.lr_scheduler_decay_steps > 0 else None
+    ]) if args.lr_scheduler_warmup_steps > 0 or args.lr_scheduler_decay_steps > 0 else None
 
     if args.pretrained_model_scheduler is not None:
         scheduler.load_state_dict(torch.load(args.pretrained_model_scheduler))
