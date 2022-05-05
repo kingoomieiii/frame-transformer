@@ -213,7 +213,7 @@ class FrameTransformerDecoder(nn.Module):
 
         self.norm1 = nn.LayerNorm(bins)
         self.self_attn1 = MultibandFrameAttention(num_bands, bins, cropsize)
-        self.enc_attn1 = MultibandFrameAttention(num_bands, bins, cropsize)
+        self.skip_attn1 = MultibandFrameAttention(num_bands, bins, cropsize)
         self.dropout1 = nn.Dropout(dropout) if dropout > 0 else nn.Identity()
 
         self.norm2 = nn.LayerNorm(bins)
@@ -235,7 +235,7 @@ class FrameTransformerDecoder(nn.Module):
         self.dropout3 = nn.Dropout(dropout) if dropout > 0 else nn.Identity()
 
         self.norm5 = nn.LayerNorm(bins)
-        self.enc_attn2 = MultibandFrameAttention(num_bands, bins, cropsize)
+        self.skip_attn2 = MultibandFrameAttention(num_bands, bins, cropsize)
         self.dropout4 = nn.Dropout(dropout) if dropout > 0 else nn.Identity()
 
         self.norm6 = nn.LayerNorm(bins)
@@ -250,7 +250,7 @@ class FrameTransformerDecoder(nn.Module):
 
         h = self.norm1(x)
         hs = self.self_attn1(h)
-        hm = self.enc_attn1(h, mem=skip)
+        hm = self.skip_attn1(h, mem=skip)
         x = x + self.dropout1(hs + hm)
 
         h = self.norm2(x)
@@ -266,7 +266,7 @@ class FrameTransformerDecoder(nn.Module):
         x = x + h
 
         h = self.norm5(x)
-        h = self.dropout4(self.enc_attn2(h, mem=skip))
+        h = self.dropout4(self.skip_attn2(h, mem=skip))
         x = x + h
 
         h = self.norm6(x)
