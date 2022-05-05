@@ -174,7 +174,7 @@ def main():
     p.add_argument('--n_fft', '-f', type=int, default=2048)
     p.add_argument('--dataset', '-d', required=False)
     p.add_argument('--split_mode', '-S', type=str, choices=['random', 'subdirs'], default='random')
-    p.add_argument('--learning_rate', '-l', type=float, default=1e-4)
+    p.add_argument('--learning_rate', '-l', type=float, default=1e-3)
     p.add_argument('--lr_scheduler_decay_target', type=int, default=1e-8)
     p.add_argument('--lr_scheduler_warmup_steps', '-LW', type=int, default=16000)
     p.add_argument('--lr_scheduler_decay_steps', type=int, default=80000)
@@ -273,7 +273,7 @@ def main():
     params = sum([np.prod(p.size()) for p in model_parameters])
     print(f'# num params: {params}')
     
-    optimizer = torch.optim.AdamW(
+    optimizer = torch.optim.Adam(
         filter(lambda p: p.requires_grad, model.parameters()),
         lr=args.learning_rate,
         amsgrad=args.amsgrad,
