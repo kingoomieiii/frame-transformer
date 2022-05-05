@@ -17,7 +17,8 @@ from lib import spec_utils
 from tqdm import tqdm
 
 from lib.frame_transformer import FrameTransformer
-from lib.warmup_lr import WarmupLR
+from lib.lr_scheduler_linear_warmup import LinearWarmupScheduler
+from lib.lr_scheduler_polynomial_decay import PolynomialDecayScheduler
 
 def setup_logger(name, logfile='LOGFILENAME.log', out_dir='logs'):
     logger = logging.getLogger(name)
@@ -57,8 +58,20 @@ def train_epoch(dataloader, model, device, optimizer, accumulation_steps, grad_s
     batch_loss = 0
     crit = nn.L1Loss()
 
+    rmx = torch.tensor(float('-inf'))
+    rmi = torch.tensor(float('inf'))
+    mx = torch.tensor(float('-inf'))
+    mi = torch.tensor(float('inf'))
+
     pbar = tqdm(dataloader) if progress_bar else dataloader
-    for itr, (X_batch, y_batch) in enumerate(pbar):
+    for itr, (X_batch, y_batch, p) in enumerate(pbar):
+        mx = torch.max(mx, torch.max(torch.max(X_batch), torch.max(y_batch)))
+        mi = torch.min(mi, torch.min(torch.min(X_batch), torch.min(y_batch)))
+        rmx = torch.max(mx, rmx)
+        rmi = torch.min(rmi, mi)
+
+        stuff = f'mi={mi} mx={mx} rmi={rmi} rmx={rmx}'
+
         X_batch = X_batch.to(device)
         y_batch = y_batch.to(device)
 
@@ -69,6 +82,12 @@ def train_epoch(dataloader, model, device, optimizer, accumulation_steps, grad_s
         accum_loss = loss / accumulation_steps
         batch_loss = batch_loss + accum_loss
 
+        if torch.logical_or(torch.isnan(batch_loss), torch.isinf(batch_loss)):
+            print(" ")
+            print(p)    
+            print('nan; aborting')
+            quit()
+
         if grad_scaler is not None:
             grad_scaler.scale(accum_loss).backward()
         else:
@@ -77,6 +96,9 @@ def train_epoch(dataloader, model, device, optimizer, accumulation_steps, grad_s
         if (itr + 1) % accumulation_steps == 0:
             if progress_bar:
                 pbar.set_description(str(batch_loss.item()))
+
+            mx = torch.tensor(float('-inf'))
+            mi = torch.tensor(float('inf'))
 
             if grad_scaler is not None:
                 grad_scaler.unscale_(optimizer)
@@ -153,9 +175,11 @@ def main():
     p.add_argument('--dataset', '-d', required=False)
     p.add_argument('--split_mode', '-S', type=str, choices=['random', 'subdirs'], default='random')
     p.add_argument('--learning_rate', '-l', type=float, default=1e-4)
-    p.add_argument('--lr_min', type=float, default=0.0001)
-    p.add_argument('--lr_decay_factor', type=float, default=0.9)
-    p.add_argument('--lr_decay_patience', type=int, default=6)
+    p.add_argument('--lr_scheduler_decay_target', type=int, default=1e-8)
+    p.add_argument('--lr_scheduler_warmup_steps', '-LW', type=int, default=16000)
+    p.add_argument('--lr_scheduler_decay_steps', type=int, default=80000)
+    p.add_argument('--lr_scheduler_decay_power', type=float, default=1.0)
+    p.add_argument('--lr_scheduler_current_step', type=int, default=0)
     p.add_argument('--cropsize', '-C', type=int, default=1024)
     p.add_argument('--patches', '-p', type=int, default=16)
     p.add_argument('--val_rate', '-v', type=float, default=0.2)
@@ -171,9 +195,8 @@ def main():
     p.add_argument('--mixup_rate', '-M', type=float, default=0.0)
     p.add_argument('--mixup_alpha', '-a', type=float, default=1.0)
     p.add_argument('--pretrained_model', '-P', type=str, default=None)
+    p.add_argument('--pretrained_model_scheduler', type=str, default=None)
     p.add_argument('--progress_bar', '-pb', type=str, default='true')
-    p.add_argument('--lr_warmup_steps', '-LW', type=int, default=10000)
-    p.add_argument('--lr_warmup_current_step', type=int, default=0)
     p.add_argument('--mixed_precision', type=str, default='true')
     p.add_argument('--debug', action='store_true')
     args = p.parse_args()
@@ -250,22 +273,20 @@ def main():
     params = sum([np.prod(p.size()) for p in model_parameters])
     print(f'# num params: {params}')
     
-    optimizer = torch.optim.Adam(
+    optimizer = torch.optim.AdamW(
         filter(lambda p: p.requires_grad, model.parameters()),
         lr=args.learning_rate,
-        amsgrad=args.amsgrad
-    )
+        amsgrad=args.amsgrad,
+        weight_decay=1e-2
+    )    
 
-    lr_warmup = WarmupLR(optimizer, target_lr=args.learning_rate, num_steps=args.lr_warmup_steps, current_step=args.lr_warmup_current_step, verbose=True) if args.lr_warmup_steps > 0 else None
+    scheduler = torch.optim.lr_scheduler.ChainedScheduler([
+        LinearWarmupScheduler(optimizer, target_lr=args.learning_rate, num_steps=args.lr_scheduler_warmup_steps, current_step=args.lr_scheduler_current_step),
+        PolynomialDecayScheduler(optimizer, base_lr=args.learning_rate, target=args.lr_scheduler_decay_target, power=args.lr_scheduler_decay_power, num_decay_steps=args.lr_scheduler_decay_steps, start_step=args.lr_scheduler_warmup_steps, current_step=args.lr_scheduler_current_step)
+    ]) if args.lr_scheduler_warmup_steps > 0 and args.lr_scheduler_decay_steps > 0 else None
 
-    scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
-        optimizer,
-        factor=args.lr_decay_factor,
-        patience=args.lr_decay_patience,
-        threshold=1e-6,
-        min_lr=args.lr_min,
-        verbose=True
-    )
+    if args.pretrained_model_scheduler is not None:
+        scheduler.load_state_dict(torch.load(args.pretrained_model_scheduler))
 
     log = []
     best_loss = np.inf
@@ -273,7 +294,7 @@ def main():
         train_dataset.rebuild()
 
         logger.info('# epoch {}'.format(epoch))
-        train_loss = train_epoch(train_dataloader, model, device, optimizer, args.accumulation_steps, grad_scaler, args.progress_bar, args.mixup_rate, args.mixup_alpha, lr_warmup=lr_warmup)
+        train_loss = train_epoch(train_dataloader, model, device, optimizer, args.accumulation_steps, grad_scaler, args.progress_bar, args.mixup_rate, args.mixup_alpha, lr_warmup=scheduler)
         val_loss = validate_epoch(val_dataloader, model, device, grad_scaler)
 
         logger.info(
@@ -281,10 +302,7 @@ def main():
             .format(train_loss, val_loss)
         )
 
-        if lr_warmup is not None and lr_warmup.current_step == lr_warmup.num_steps:
-            scheduler.step(val_loss)
-
-        if val_loss < best_loss or (lr_warmup is not None and lr_warmup.current_step < lr_warmup.num_steps):
+        if val_loss < best_loss or (scheduler is not None and scheduler.current_step < scheduler.num_steps):
             if val_loss < best_loss:
                 best_loss = val_loss
                 logger.info('  * best validation loss')
