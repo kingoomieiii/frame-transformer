@@ -175,6 +175,7 @@ def main():
     p.add_argument('--dataset', '-d', required=False)
     p.add_argument('--split_mode', '-S', type=str, choices=['random', 'subdirs'], default='random')
     p.add_argument('--learning_rate', '-l', type=float, default=1e-3)
+    p.add_argument('--weight_decay', type=float, default=0)
     p.add_argument('--lr_scheduler_decay_target', type=int, default=1e-8)
     p.add_argument('--lr_scheduler_warmup_steps', '-LW', type=int, default=16000)
     p.add_argument('--lr_scheduler_decay_steps', type=int, default=80000)
@@ -192,8 +193,8 @@ def main():
     p.add_argument('--reduction_rate', '-R', type=float, default=0.0)
     p.add_argument('--reduction_level', '-L', type=float, default=0.2)
     p.add_argument('--fake_data_prob', type=float, default=math.nan)
-    p.add_argument('--mixup_rate', '-M', type=float, default=0.0)
-    p.add_argument('--mixup_alpha', '-a', type=float, default=1.0)
+    p.add_argument('--mixup_rate', '-M', type=float, default=0.5)
+    p.add_argument('--mixup_alpha', '-a', type=float, default=0.4)
     p.add_argument('--pretrained_model', '-P', type=str, default=None)
     p.add_argument('--pretrained_model_scheduler', type=str, default=None)
     p.add_argument('--progress_bar', '-pb', type=str, default='true')
@@ -277,8 +278,8 @@ def main():
         filter(lambda p: p.requires_grad, model.parameters()),
         lr=args.learning_rate,
         amsgrad=args.amsgrad,
-        weight_decay=1e-2
-    )    
+        weight_decay=args.weight_decay
+    )
 
     scheduler = torch.optim.lr_scheduler.ChainedScheduler([
         LinearWarmupScheduler(optimizer, target_lr=args.learning_rate, num_steps=args.lr_scheduler_warmup_steps, current_step=args.lr_scheduler_current_step),
