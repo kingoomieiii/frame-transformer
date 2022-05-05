@@ -122,7 +122,7 @@ class VocalAugmentationDataset(torch.utils.data.Dataset):
 
         return V, Vc
 
-    def __getitem__(self, idx):
+    def __getitem__(self, idx, root=True):
         path = self.curr_list[idx % len(self.curr_list)]
         data = np.load(str(path))
         aug = 'Y' not in data.files
@@ -161,8 +161,8 @@ class VocalAugmentationDataset(torch.utils.data.Dataset):
         X = np.abs(X) / c
         Y = np.abs(Y) / c
 
-        if np.random.uniform() < self.mixup_rate:
-            MX, MY = self.__getitem__(np.random.randint(len(self.patch_list)))
+        if np.random.uniform() < self.mixup_rate and root:
+            MX, MY = self.__getitem__(np.random.randint(len(self)), root=False)
             a = np.random.beta(self.mixup_alpha, self.mixup_alpha)
             X = X * a + (1 - a) * MX
             Y = Y * a + (1 - a) * MY
