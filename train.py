@@ -176,9 +176,10 @@ def main():
     p.add_argument('--split_mode', '-S', type=str, choices=['random', 'subdirs'], default='random')
     p.add_argument('--learning_rate', '-l', type=float, default=1e-3)
     p.add_argument('--weight_decay', type=float, default=0)
+    p.add_argument('--optimizer', type=str.lower, choices=['adam', 'adamw'], default='adam')
     p.add_argument('--lr_scheduler_decay_target', type=int, default=1e-8)
     p.add_argument('--lr_scheduler_warmup_steps', '-LW', type=int, default=16000)
-    p.add_argument('--lr_scheduler_decay_steps', type=int, default=80000)
+    p.add_argument('--lr_scheduler_decay_steps', type=int, default=96000)
     p.add_argument('--lr_scheduler_decay_power', type=float, default=1.0)
     p.add_argument('--lr_scheduler_current_step', type=int, default=0)
     p.add_argument('--cropsize', '-C', type=int, default=1024)
@@ -274,12 +275,20 @@ def main():
     params = sum([np.prod(p.size()) for p in model_parameters])
     print(f'# num params: {params}')
     
-    optimizer = torch.optim.Adam(
-        filter(lambda p: p.requires_grad, model.parameters()),
-        lr=args.learning_rate,
-        amsgrad=args.amsgrad,
-        weight_decay=args.weight_decay
-    )
+    if args.optimizer == 'adam':
+        optimizer = torch.optim.Adam(
+            filter(lambda p: p.requires_grad, model.parameters()),
+            lr=args.learning_rate,
+            amsgrad=args.amsgrad,
+            weight_decay=args.weight_decay
+        )
+    else:
+        optimizer = torch.optim.AdamW(
+            filter(lambda p: p.requires_grad, model.parameters()),
+            lr=args.learning_rate,
+            amsgrad=args.amsgrad,
+            weight_decay=args.weight_decay
+        )
 
     scheduler = torch.optim.lr_scheduler.ChainedScheduler([
         LinearWarmupScheduler(optimizer, target_lr=args.learning_rate, num_steps=args.lr_scheduler_warmup_steps, current_step=args.lr_scheduler_current_step),
