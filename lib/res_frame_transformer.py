@@ -10,7 +10,7 @@ class FrameTransformer(nn.Module):
         self.max_bin = n_fft // 2
         self.output_bin = n_fft // 2 + 1
 
-        self.enc1 = FrameConvEncoder(2, channels, kernel_size=3, padding=1, stride=1)
+        self.enc1 = FrameConv(2, channels, kernel_size=3, padding=1, stride=1)
         self.enc1_transformer = nn.ModuleList([FrameTransformerEncoder(channels * 1 + i, num_bands, cropsize, n_fft, downsamples=0, feedforward_dim=feedforward_dim, bias=bias) for i in range(num_encoders)])
 
         self.enc2 = FrameConvEncoder(channels * 1 + num_encoders, channels * 2, kernel_size=3, stride=2, padding=1)
@@ -320,7 +320,15 @@ class FrameConv(nn.Module):
     def __init__(self, in_channels, out_channels, kernel_size=3, stride=1, padding=1, dilation=1, groups=1, activate=nn.LeakyReLU, norm=True):
         super(FrameConv, self).__init__()
 
-        body = [
+        body = []
+            
+        if norm:
+            body.append(nn.BatchNorm2d(in_channels))
+        
+        if activate:
+            body.append(activate(inplace=True))
+            
+        body.append(
             nn.Conv2d(
                 in_channels, out_channels,
                 kernel_size=(kernel_size, 1),
@@ -329,13 +337,7 @@ class FrameConv(nn.Module):
                 dilation=(dilation, 1),
                 groups=groups,
                 bias=False)
-        ]
-            
-        if norm:
-            body.append(nn.BatchNorm2d(out_channels))
-
-        if activate is not None:
-            body.append(activate(inplace=True))
+        )
 
         self.body = nn.Sequential(*body)
 
