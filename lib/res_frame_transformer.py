@@ -10,7 +10,7 @@ class FrameTransformer(nn.Module):
         self.max_bin = n_fft // 2
         self.output_bin = n_fft // 2 + 1
 
-        self.enc1 = FrameConv(2, channels, kernel_size=3, padding=1, stride=1)
+        self.enc1 = FrameConvEncoder(2, channels, kernel_size=3, padding=1, stride=1)
         self.enc1_transformer = nn.ModuleList([FrameTransformerEncoder(channels * 1 + i, num_bands, cropsize, n_fft, downsamples=0, feedforward_dim=feedforward_dim, bias=bias) for i in range(num_encoders)])
 
         self.enc2 = FrameConvEncoder(channels * 1 + num_encoders, channels * 2, kernel_size=3, stride=2, padding=1)
