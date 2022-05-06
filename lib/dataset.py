@@ -139,14 +139,9 @@ class VocalAugmentationDataset(torch.utils.data.Dataset):
             if aug and np.random.uniform() > 0.02:
                 V, Vc = self._get_vocals()
                 X = Y + V
-                c = np.max([Xc, Vc, np.abs(X).max()])
+                c = np.max([Xc, Vc])
             else:
-                if np.random.uniform() < 0.25:
-                    V, Vc = self._get_vocals()
-                    a = np.random.beta(1, 1)
-                    X = X + (V * a)
-                
-                c = np.max([Xc, np.abs(X).max()])
+                c = Xc
 
             if np.random.uniform() < 0.5:
                 X = X[::-1]
@@ -158,8 +153,8 @@ class VocalAugmentationDataset(torch.utils.data.Dataset):
         else:
             c = Xc
 
-        X = np.abs(X) / c
-        Y = np.abs(Y) / c
+        X = np.clip(np.abs(X) / c, 0, 1)
+        Y = np.clip(np.abs(Y) / c, 0, 1)
 
         if np.random.uniform() < self.mixup_rate and root:
             MX, MY = self.__getitem__(np.random.randint(len(self)), root=False)
