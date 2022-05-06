@@ -2,7 +2,6 @@ import torch
 from torch import nn
 import torch.nn.functional as F
 import math
-from lib import spec_utils
 
 class FrameTransformer(nn.Module):
     def __init__(self, channels, n_fft=2048, feedforward_dim=512, num_bands=4, num_encoders=1, num_decoders=1, cropsize=1024, bias=False):
@@ -127,7 +126,6 @@ class FrameConvDecoder(nn.Module):
     def __call__(self, x, skip=None):
         if skip is not None:
             x = F.interpolate(x, size=(skip.shape[2],skip.shape[3]), mode='bilinear', align_corners=True)
-            skip = spec_utils.crop_center(skip, x)
             x = torch.cat([x, skip], dim=1)
 
         identity = self.identity(x)
