@@ -92,31 +92,31 @@ class VocalAutoregressiveDataset(torch.utils.data.Dataset):
         stop = start + self.cropsize + 1
         V = V[:,:,start:stop]
 
-        if np.random.uniform() < 0.5:
-            vidx2 = np.random.randint(len(self.vocal_list))
+        # if np.random.uniform() < 0.5:
+        #     vidx2 = np.random.randint(len(self.vocal_list))
             
-            vpath2 = self.vocal_list[vidx2]
-            vdata2 = np.load(str(vpath2))
-            V2, Vc2 = vdata2['X'], vdata2['c']
+        #     vpath2 = self.vocal_list[vidx2]
+        #     vdata2 = np.load(str(vpath2))
+        #     V2, Vc2 = vdata2['X'], vdata2['c']
 
-            if np.random.uniform() < 0.5:
-                V2 = V2[::-1]
+        #     if np.random.uniform() < 0.5:
+        #         V2 = V2[::-1]
 
-            if np.random.uniform() < 0.5:
-                if np.random.uniform() < 0.5:
-                    V2[0] = V2[0] * 0
-                else:
-                    V2[1] = V2[1] * 0
+        #     if np.random.uniform() < 0.5:
+        #         if np.random.uniform() < 0.5:
+        #             V2[0] = V2[0] * 0
+        #         else:
+        #             V2[1] = V2[1] * 0
 
-            a = np.random.beta(1, 1)
-            inv = 1 - a
+        #     a = np.random.beta(1, 1)
+        #     inv = 1 - a
 
-            start = np.random.randint(0, V2.shape[2] - self.cropsize - 1)
-            stop = start + self.cropsize + 1
-            V2 = V2[:,:,start:stop]
+        #     start = np.random.randint(0, V2.shape[2] - self.cropsize - 1)
+        #     stop = start + self.cropsize + 1
+        #     V2 = V2[:,:,start:stop]
 
-            Vc = (Vc * a) + (Vc2 * inv)
-            V = (V * a) + (V2 * inv)
+        #     Vc = (Vc * a) + (Vc2 * inv)
+        #     V = (V * a) + (V2 * inv)
 
         return V, Vc
 
@@ -130,10 +130,11 @@ class VocalAutoregressiveDataset(torch.utils.data.Dataset):
         if not self.is_validation:
             start = np.random.randint(0, X.shape[2] - self.cropsize)
             stop = start + self.cropsize
-            X = X[:,:,start:stop]
-            Y = Y[:,:,start+1:stop+1]
 
-            if aug and np.random.uniform() > 0.02:
+            Y = X[:,:,start+1:stop+1]
+            X = X[:,:,start:stop]
+
+            if aug and np.random.uniform() > 0.5:
                 V, Vc = self._get_vocals()
                 X = X + V[:,:,:-1]
                 Y = Y + V[:,:,1:]
@@ -151,8 +152,13 @@ class VocalAutoregressiveDataset(torch.utils.data.Dataset):
         else:
             start = np.random.randint(0, X.shape[2] - self.cropsize - 1)
             stop = start + self.cropsize
-            X = X[:,:,start:stop]
-            X = X[:,:,start+1:stop+1]
+
+            if np.random.uniform() < 0.5:
+                Y = X[:,:,start+1:stop+1]
+                X = X[:,:,start:stop]
+            else:
+                X = Y[:,:,start:stop]
+                Y = Y[:,:,start+1:stop+1]
 
         X = np.clip(np.abs(X) / c, 0, 1)
         Y = np.clip(np.abs(Y) / c, 0, 1)
