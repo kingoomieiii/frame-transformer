@@ -14,6 +14,157 @@ try:
 except ModuleNotFoundError:
     import spec_utils
 
+class VocalAutoregressiveDataset(torch.utils.data.Dataset):
+    def __init__(self, path, extra_path=None, pair_path=None, vocal_path="", is_validation=False, mul=1, downsamples=0, epoch_size=None, pair_mul=1, slide=True, cropsize=256, mixup_rate=0, mixup_alpha=1):
+        self.epoch_size = epoch_size
+        self.slide = slide
+        self.mul = mul
+        patch_list = [os.path.join(path, f) for f in os.listdir(path) if os.path.isfile(os.path.join(path, f))]
+        self.cropsize = cropsize
+        self.mixup_rate = mixup_rate
+        self.mixup_alpha = mixup_alpha
+
+        if pair_path is not None and pair_mul > 0:
+            pairs = [os.path.join(pair_path, f) for f in os.listdir(pair_path) if os.path.isfile(os.path.join(pair_path, f))]
+            pair_list = []
+
+            for p in pairs:
+                if pair_mul > 1:
+                    for _ in range(pair_mul):
+                        pair_list.append(p)
+                else:
+                    if np.random.uniform() < pair_mul:
+                        pair_list.append(p)
+
+        if extra_path is not None:
+            extra_list = [os.path.join(extra_path, f) for f in os.listdir(extra_path) if os.path.isfile(os.path.join(extra_path, f))]
+
+            for f in extra_list:
+                patch_list.append(f) 
+        
+        if not is_validation and vocal_path != "":
+            self.vocal_list = [os.path.join(vocal_path, f) for f in os.listdir(vocal_path) if os.path.isfile(os.path.join(vocal_path, f))]
+
+        self.is_validation = is_validation
+
+        self.curr_list = []
+        for p in patch_list:
+            self.curr_list.append(p)
+
+        if pair_path is not None:
+            for p in pair_list:
+                self.curr_list.append(p)
+
+        self.downsamples = downsamples
+        self.full_list = self.curr_list
+
+        if not is_validation and self.epoch_size is not None:
+            self.curr_list = self.full_list[:self.epoch_size]            
+            self.rebuild()
+
+    def rebuild(self):
+        self.vidx = 0
+        random.shuffle(self.vocal_list)
+
+        if self.epoch_size is not None:
+            random.shuffle(self.full_list)
+            self.curr_list = self.full_list[:self.epoch_size]
+
+    def __len__(self):
+        return len(self.curr_list) * self.mul
+
+    def _get_vocals(self):
+        vidx = np.random.randint(len(self.vocal_list))                
+        vpath = self.vocal_list[vidx]
+        vdata = np.load(str(vpath))
+        V, Vc = vdata['X'], vdata['c']
+
+        if np.random.uniform() < 0.5:
+            V = V[::-1]
+
+        if np.random.uniform() < 0.025:
+            if np.random.uniform() < 0.5:
+                V[0] = V[0] * 0
+            else:
+                V[1] = V[1] * 0
+
+        start = np.random.randint(0, V.shape[2] - self.cropsize - 1)
+        stop = start + self.cropsize + 1
+        V = V[:,:,start:stop]
+
+        if np.random.uniform() < 0.5:
+            vidx2 = np.random.randint(len(self.vocal_list))
+            
+            vpath2 = self.vocal_list[vidx2]
+            vdata2 = np.load(str(vpath2))
+            V2, Vc2 = vdata2['X'], vdata2['c']
+
+            if np.random.uniform() < 0.5:
+                V2 = V2[::-1]
+
+            if np.random.uniform() < 0.5:
+                if np.random.uniform() < 0.5:
+                    V2[0] = V2[0] * 0
+                else:
+                    V2[1] = V2[1] * 0
+
+            a = np.random.beta(1, 1)
+            inv = 1 - a
+
+            start = np.random.randint(0, V2.shape[2] - self.cropsize - 1)
+            stop = start + self.cropsize + 1
+            V2 = V2[:,:,start:stop]
+
+            Vc = (Vc * a) + (Vc2 * inv)
+            V = (V * a) + (V2 * inv)
+
+        return V, Vc
+
+    def __getitem__(self, idx, root=True):
+        path = self.curr_list[idx % len(self.curr_list)]
+        data = np.load(str(path))
+        aug = 'Y' not in data.files
+        X, Xc = data['X'], data['c']
+        Y = X if aug else data['Y']
+
+        if not self.is_validation:
+            start = np.random.randint(0, X.shape[2] - self.cropsize)
+            stop = start + self.cropsize
+            X = X[:,:,start:stop]
+            Y = Y[:,:,start+1:stop+1]
+
+            if aug and np.random.uniform() > 0.02:
+                V, Vc = self._get_vocals()
+                X = X + V[:,:,:-1]
+                Y = Y + V[:,:,1:]
+                c = np.max([Xc, Vc])
+            else:
+                c = Xc
+
+            if np.random.uniform() < 0.5:
+                X = X[::-1]
+                Y = Y[::-1]
+
+            if np.random.uniform() < 0.025:
+                X = Y
+                c = Xc
+        else:
+            start = np.random.randint(0, X.shape[2] - self.cropsize - 1)
+            stop = start + self.cropsize
+            X = X[:,:,start:stop]
+            X = X[:,:,start+1:stop+1]
+
+        X = np.clip(np.abs(X) / c, 0, 1)
+        Y = np.clip(np.abs(Y) / c, 0, 1)
+
+        if np.random.uniform() < self.mixup_rate and root and not self.is_validation:
+            MX, MY = self.__getitem__(np.random.randint(len(self)), root=False)
+            a = np.random.beta(self.mixup_alpha, self.mixup_alpha)
+            X = X * a + (1 - a) * MX
+            Y = Y * a + (1 - a) * MY
+
+        return X, Y
+
 class VocalAugmentationDataset(torch.utils.data.Dataset):
     def __init__(self, path, extra_path=None, pair_path=None, vocal_path="", is_validation=False, mul=1, downsamples=0, epoch_size=None, pair_mul=1, slide=True, cropsize=256, mixup_rate=0, mixup_alpha=1):
         self.epoch_size = epoch_size

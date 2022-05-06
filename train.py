@@ -66,7 +66,7 @@ def train_epoch(dataloader, model, device, optimizer, accumulation_steps, grad_s
         with torch.cuda.amp.autocast_mode.autocast(enabled=grad_scaler is not None):
             pred = model(X_batch)
 
-        loss = crit(pred * X_batch, y_batch)
+        loss = crit(pred, y_batch)
         accum_loss = loss / accumulation_steps
         batch_loss = batch_loss + accum_loss
 
@@ -119,7 +119,7 @@ def validate_epoch(dataloader, model, device, grad_scaler):
                 pred = model(X_batch)
 
             y_batch = spec_utils.crop_center(y_batch, pred)
-            loss = crit(X_batch * pred, y_batch)
+            loss = crit(pred, y_batch)
     
             if torch.logical_or(loss.isnan(), loss.isinf()):
                 print('non-finite or nan validation loss; aborting')
@@ -208,7 +208,7 @@ def main():
         logger.info('{} {} {}'.format(i + 1, os.path.basename(X_fname), os.path.basename(y_fname)))
 
     device = torch.device('cpu')
-    model = FrameTransformer(channels=args.channels, n_fft=args.n_fft, num_encoders=args.num_encoders, num_decoders=args.num_decoders, num_bands=args.num_bands, feedforward_dim=args.feedforward_dim, bias=args.bias, cropsize=args.cropsize)
+    model = FrameTransformer(channels=args.channels, n_fft=args.n_fft, num_encoders=args.num_encoders, num_decoders=args.num_decoders, num_bands=args.num_bands, feedforward_dim=args.feedforward_dim, bias=args.bias, cropsize=args.cropsize, autoregressive=True, out_activate=nn.ReLU)
 
     if args.pretrained_model is not None:
         model.load_state_dict(torch.load(args.pretrained_model, map_location=device))
@@ -216,7 +216,7 @@ def main():
         device = torch.device('cuda:{}'.format(args.gpu))
         model.to(device)
 
-    train_dataset = dataset.VocalAugmentationDataset(
+    train_dataset = dataset.VocalAutoregressiveDataset(
         path="C://cs2048_sr44100_hl1024_nf2048_of0",
         extra_path="G://cs2048_sr44100_hl1024_nf2048_of0",
         vocal_path="G://cs2048_sr44100_hl1024_nf2048_of0_VOCALS",
@@ -234,11 +234,15 @@ def main():
         num_workers=args.num_workers
     )
     
-    val_dataset = dataset.VocalAugmentationDataset(
-        path="C://cs1024_sr44100_hl1024_nf2048_of0_VALIDATION",
+    val_dataset = dataset.VocalAutoregressiveDataset(
+        path="G://cs2048_sr44100_hl1024_nf2048_of0_VALIDATION",
+        extra_path=None,#"G://cs2048_sr44100_hl1024_nf2048_of0",
+        vocal_path=None,#"G://cs2048_sr44100_hl1024_nf2048_of0_VOCALS",
         is_validation=True,
+        epoch_size=args.epoch_size,
         cropsize=args.cropsize,
-        mixup_rate=0
+        mixup_rate=args.mixup_rate,
+        mixup_alpha=args.mixup_alpha
     )
 
     val_dataloader = torch.utils.data.DataLoader(
