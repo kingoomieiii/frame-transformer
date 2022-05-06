@@ -4,12 +4,16 @@ import torch.nn.functional as F
 import math
 
 class FrameTransformer(nn.Module):
-    def __init__(self, channels, n_fft=2048, feedforward_dim=512, num_bands=4, num_encoders=1, num_decoders=1, cropsize=1024, bias=False):
+    def __init__(self, channels, n_fft=2048, feedforward_dim=512, num_bands=4, num_encoders=1, num_decoders=1, cropsize=1024, bias=False, autoregressive=True, out_activate=nn.Sigmoid):
         super(FrameTransformer, self).__init__()
         self.max_bin = n_fft // 2
         self.output_bin = n_fft // 2 + 1
+        
+        self.register_buffer('mask', torch.triu(torch.ones(cropsize, cropsize) * float('-inf'), diagonal=1))
+        self.autoregressive = autoregressive
+        self.out_activate = out_activate()
 
-        self.enc1 = FrameConvEncoder(2, channels, kernel_size=3, padding=1, stride=1)
+        self.enc1 = FrameConv(2, channels, kernel_size=3, padding=1, stride=1)
         self.enc1_transformer = nn.ModuleList([FrameTransformerEncoder(channels * 1 + i, num_bands, cropsize, n_fft, downsamples=0, feedforward_dim=feedforward_dim, bias=bias) for i in range(num_encoders)])
 
         self.enc2 = FrameConvEncoder(channels * 1 + num_encoders, channels * 2, kernel_size=3, stride=2, padding=1)
@@ -44,57 +48,57 @@ class FrameTransformer(nn.Module):
 
         e1 = self.enc1(x)
         for module in self.enc1_transformer:
-            t = module(e1)
+            t = module(e1, mask=self.mask)
             e1 = torch.cat((e1, t), dim=1)
 
         e2 = self.enc2(e1)
         for module in self.enc2_transformer:
-            t = module(e2)
+            t = module(e2, mask=self.mask)
             e2 = torch.cat((e2, t), dim=1)
 
         e3 = self.enc3(e2)
         for module in self.enc3_transformer:
-            t = module(e3)
+            t = module(e3, mask=self.mask)
             e3 = torch.cat((e3, t), dim=1)
 
         e4 = self.enc4(e3)
         for module in self.enc4_transformer:
-            t = module(e4)
+            t = module(e4, mask=self.mask)
             e4 = torch.cat((e4, t), dim=1)
 
         e5 = self.enc5(e4)
         h = e5
         for module in self.enc5_transformer:
-            t = module(e5)
+            t = module(e5, mask=self.mask)
             e5 = torch.cat((e5, t), dim=1)
         for module in self.dec4_transformer:
-            t = module(h, skip=e5)
+            t = module(h, skip=e5, mask=self.mask)
             h = torch.cat((h, t), dim=1)
             
         h = self.dec4(h, e4)
         for module in self.dec3_transformer:
-            t = module(h, skip=e4)
+            t = module(h, skip=e4, mask=self.mask)
             h = torch.cat((h, t), dim=1)
 
         h = self.dec3(h, e3)        
         for module in self.dec2_transformer:
-            t = module(h, skip=e3)
+            t = module(h, skip=e3, mask=self.mask)
             h = torch.cat((h, t), dim=1)
 
         h = self.dec2(h, e2)        
         for module in self.dec1_transformer:
-            t = module(h, skip=e2)
+            t = module(h, skip=e2, mask=self.mask)
             h = torch.cat((h, t), dim=1)
 
         h = self.dec1(h, e1)
         for module in self.out_transformer:
-            t = module(h, skip=e1)
+            t = module(h, skip=e1, mask=self.mask)
             h = torch.cat((h, t), dim=1)
 
         out = self.out(h.transpose(1,3)).transpose(1,3)
 
         return F.pad(
-            input=torch.sigmoid(out),
+            input=self.out_activate(out),
             pad=(0, 0, 0, self.output_bin - out.size()[2]),
             mode='replicate'
         )
@@ -137,6 +141,25 @@ class FrameConvDecoder(nn.Module):
         h = h + identity
 
         return h
+        
+class CausalConv1d(nn.Module):
+    def __init__(self, in_channels, out_channels, kernel_size=3, stride=1, groups=1, bias=True):
+        super(CausalConv1d, self).__init__()
+
+        self.weight = nn.Parameter(torch.empty(out_channels, in_channels // groups, kernel_size))
+        self.bias = nn.Parameter(torch.empty(out_channels)) if bias else None
+        self.kernel_size = kernel_size
+        self.groups = groups
+        self.stride = stride
+        
+        nn.init.kaiming_uniform_(self.weight, a=math.sqrt(5))
+        if self.bias is not None:
+            fan_in, _ = nn.init._calculate_fan_in_and_fan_out(self.weight)
+            bound = 1 / math.sqrt(fan_in)
+            nn.init.uniform_(self.bias, -bound, bound)
+
+    def forward(self, x):
+        return F.conv1d(F.pad(x, (self.kernel_size - 1, 0)), weight=self.weight, bias=self.bias, stride=self.stride, groups=self.groups)
 
 class FrameTransformerEncoder(nn.Module):
     def __init__(self, channels, num_bands=4, cropsize=1024, n_fft=2048, feedforward_dim=2048, downsamples=0, bias=False, dropout=0.1):
@@ -162,10 +185,10 @@ class FrameTransformerEncoder(nn.Module):
 
         self.norm2 = nn.LayerNorm(bins)
         self.conv1L = nn.Linear(bins, feedforward_dim, bias=bias)
-        self.conv1R = nn.Conv1d(bins, feedforward_dim//4, kernel_size=3, padding=1, bias=bias)
+        self.conv1R = CausalConv1d(bins, feedforward_dim//4, kernel_size=3, bias=bias)
         self.norm3 = nn.LayerNorm(feedforward_dim)
         self.conv1M = nn.Sequential(
-            nn.Conv1d(feedforward_dim, feedforward_dim, kernel_size=9, padding=4, groups=feedforward_dim, bias=bias),
+            CausalConv1d(feedforward_dim, feedforward_dim, kernel_size=9, groups=feedforward_dim, bias=bias),
             nn.Conv1d(feedforward_dim, bins, kernel_size=1, padding=0, bias=bias))
 
         self.norm4 = nn.LayerNorm(bins)
@@ -175,7 +198,7 @@ class FrameTransformerEncoder(nn.Module):
         self.conv2 = nn.Linear(bins, feedforward_dim, bias=bias)
         self.conv3 = nn.Linear(feedforward_dim, bins, bias=bias)
 
-    def __call__(self, x):
+    def __call__(self, x, mask=None):
         x = self.in_project(x.transpose(1,3)).squeeze(3)
 
         h = self.norm1(x)
@@ -191,7 +214,7 @@ class FrameTransformerEncoder(nn.Module):
         x = x + h
 
         h = self.norm4(x)
-        h = self.attn(h)
+        h = self.attn(h, mask=mask)
         x = x + h
 
         h = self.norm5(x)
@@ -225,14 +248,14 @@ class FrameTransformerDecoder(nn.Module):
 
         self.norm2 = nn.LayerNorm(bins)
         self.conv1L = nn.Sequential(
-            nn.Conv1d(bins, bins, kernel_size=11, padding=5, groups=bins, bias=bias),
+            CausalConv1d(bins, bins, kernel_size=11, groups=bins, bias=bias),
             nn.Conv1d(bins, feedforward_dim // 2, kernel_size=1, padding=0, bias=bias))
         self.conv1R = nn.Sequential(
-            nn.Conv1d(bins, bins, kernel_size=7, padding=3, groups=bins, bias=bias),
+            CausalConv1d(bins, bins, kernel_size=7, groups=bins, bias=bias),
             nn.Conv1d(bins, feedforward_dim // 4, kernel_size=1, padding=0, bias=bias))
         self.norm3 = nn.LayerNorm(feedforward_dim // 2)
         self.conv2 = nn.Sequential(
-            nn.Conv1d(feedforward_dim // 2, feedforward_dim // 2, kernel_size=7, padding=3, groups=feedforward_dim // 2, bias=bias),
+            CausalConv1d(feedforward_dim // 2, feedforward_dim // 2, kernel_size=7, groups=feedforward_dim // 2, bias=bias),
             nn.Conv1d(feedforward_dim // 2, bins, kernel_size=1, padding=0, bias=bias))
         self.dropout2 = nn.Dropout(dropout) if dropout > 0 else nn.Identity()
 
@@ -251,13 +274,13 @@ class FrameTransformerDecoder(nn.Module):
         self.conv4 = nn.Linear(feedforward_dim, bins, bias=bias)
         self.dropout5 = nn.Dropout(dropout) if dropout > 0 else nn.Identity()
 
-    def __call__(self, x, skip):
+    def __call__(self, x, skip, mask=None):
         x = self.in_project(x.transpose(1,3)).squeeze(3)
         skip = self.skip_project(skip.transpose(1,3)).squeeze(3)
 
         h = self.norm1(x)
-        hs = self.self_attn1(h)
-        hm = self.skip_attn1(h, mem=skip)
+        hs = self.self_attn1(h, mask=mask)
+        hm = self.skip_attn1(h, mem=skip, mask=mask)
         x = x + self.dropout1(hs + hm)
 
         h = self.norm2(x)
@@ -269,11 +292,11 @@ class FrameTransformerDecoder(nn.Module):
         x = x + h
 
         h = self.norm4(x)
-        h = self.dropout3(self.self_attn2(h))
+        h = self.dropout3(self.self_attn2(h, mask=mask))
         x = x + h
 
         h = self.norm5(x)
-        h = self.dropout4(self.skip_attn2(h, mem=skip))
+        h = self.dropout4(self.skip_attn2(h, mem=skip, mask=mask))
         x = x + h
 
         h = self.norm6(x)
@@ -289,26 +312,30 @@ class MultibandFrameAttention(nn.Module):
 
         self.num_bands = num_bands
         self.q_proj = nn.Linear(bins, bins)
-        self.q_conv = nn.Conv1d(bins, bins, kernel_size=3, padding=1, groups=bins)
+        self.q_conv = CausalConv1d(bins, bins, kernel_size=3, groups=bins)
 
         self.k_proj = nn.Linear(bins, bins)
-        self.k_conv = nn.Conv1d(bins, bins, kernel_size=3, padding=1, groups=bins)
+        self.k_conv = CausalConv1d(bins, bins, kernel_size=3, groups=bins)
 
         self.v_proj = nn.Linear(bins, bins)
-        self.v_conv = nn.Conv1d(bins, bins, kernel_size=3, padding=1, groups=bins)
+        self.v_conv = CausalConv1d(bins, bins, kernel_size=3, groups=bins)
 
         self.o_proj = nn.Linear(bins, bins)
 
         self.er = nn.Parameter(torch.empty(bins // num_bands, cropsize))
         nn.init.normal_(self.er)
 
-    def forward(self, x, mem=None):
+    def forward(self, x, mem=None, mask=None):
         b,w,c = x.shape
         q = self.q_conv(self.q_proj(x).transpose(1,2)).transpose(1,2).reshape(b, w, self.num_bands, -1).permute(0,2,1,3)
         k = self.k_conv(self.k_proj(x if mem is None else mem).transpose(1,2)).transpose(1,2).reshape(b, w, self.num_bands, -1).permute(0,2,3,1)
         v = self.v_conv(self.v_proj(x if mem is None else mem).transpose(1,2)).transpose(1,2).reshape(b, w, self.num_bands, -1).permute(0,2,1,3)
         p = F.pad(torch.matmul(q,self.er), (1,0)).transpose(2,3)[:,:,1:,:]
         qk = (torch.matmul(q,k)+p) / math.sqrt(c)
+
+        if mask is not None:
+            qk = qk + mask
+
         a = F.softmax(qk, dim=-1)
         a = torch.matmul(a,v).transpose(1,2).reshape(b,w,-1)
         o = self.o_proj(a)
