@@ -16,7 +16,7 @@ from lib import dataset
 from lib import spec_utils
 from tqdm import tqdm
 
-from lib.frame_transformer import FrameTransformer
+from lib.res_frame_transformer import FrameTransformer
 from lib.lr_scheduler_linear_warmup import LinearWarmupScheduler
 from lib.lr_scheduler_polynomial_decay import PolynomialDecayScheduler
 
