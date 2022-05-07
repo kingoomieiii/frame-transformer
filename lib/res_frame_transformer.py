@@ -104,12 +104,12 @@ class FrameTransformer(nn.Module):
         )
         
 class FrameConvEncoder(nn.Module):
-    def __init__(self, nin, nout, kernel_size=3, stride=1, padding=1, activ=nn.LeakyReLU):
+    def __init__(self, nin, nout, kernel_size=3, stride=1, padding=1, activ=nn.LeakyReLU, cropsize=1024):
         super(FrameConvEncoder, self).__init__()
 
-        self.identity = FrameConv(nin, nout, kernel_size=1, padding=0, stride=stride, activate=None, norm=False)
-        self.conv1 = FrameConv(nin, nout, kernel_size, 1, padding, activate=activ)
-        self.conv2 = FrameConv(nout, nout, kernel_size, stride, padding, activate=activ)
+        self.identity = FrameConv(nin, nout, kernel_size=1, padding=0, stride=stride, activate=None, norm=False, cropsize=cropsize)
+        self.conv1 = FrameConv(nin, nout, kernel_size, 1, padding, activate=activ, cropsize=cropsize)
+        self.conv2 = FrameConv(nout, nout, kernel_size, stride, padding, activate=activ, cropsize=cropsize)
 
     def __call__(self, x):
         identity = self.identity(x)
@@ -120,11 +120,11 @@ class FrameConvEncoder(nn.Module):
         return h
 
 class FrameConvDecoder(nn.Module):
-    def __init__(self, nin, nout, kernel_size=3, padding=1, activ=nn.LeakyReLU, norm=True, dropout=False):
+    def __init__(self, nin, nout, kernel_size=3, padding=1, activ=nn.LeakyReLU, norm=True, dropout=False, cropsize=1024):
         super(FrameConvDecoder, self).__init__()
 
         self.identity = FrameConv(nin, nout, kernel_size=1, padding=0, activate=None, norm=False) 
-        self.conv = FrameConv(nin, nout, kernel_size, 1, padding, activate=activ, norm=norm)
+        self.conv = FrameConv(nin, nout, kernel_size, 1, padding, activate=activ, norm=norm, cropsize=cropsize)
         self.dropout = nn.Dropout2d(0.1) if dropout else None
 
     def __call__(self, x, skip=None):
@@ -345,7 +345,7 @@ class FrameNorm(nn.Module):
     def __init__(self, cropsize=1024):
         super(FrameNorm, self).__init__()
 
-        self.norm = nn.InstanceNorm2d(cropsize)
+        self.norm = nn.BatchNorm2d(cropsize)
 
     def __call__(self, x):
         return self.norm(x.transpose(1,3)).transpose(1,3)
