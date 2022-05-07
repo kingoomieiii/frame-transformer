@@ -347,7 +347,7 @@ class FrameNorm(nn.Module):
 
         self.norm = nn.InstanceNorm2d(cropsize)
 
-    def forward(self, x):
+    def __call__(self, x):
         return self.norm(x.transpose(1,3)).transpose(1,3)
 
 class FrameConv(nn.Module):
