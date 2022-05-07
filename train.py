@@ -179,6 +179,8 @@ def main():
     p.add_argument('--pretrained_model_scheduler', type=str, default=None)
     p.add_argument('--progress_bar', '-pb', type=str, default='true')
     p.add_argument('--mixed_precision', type=str, default='true')
+    p.add_argument('--save_all', type=str, default='false')
+    p.add_argument('--model_dir', type=str, default='E://')
     p.add_argument('--debug', action='store_true')
     args = p.parse_args()
 
@@ -186,6 +188,7 @@ def main():
     args.progress_bar = str.lower(args.progress_bar) == 'true'
     args.bias = str.lower(args.bias) == 'true'
     args.mixed_precision = str.lower(args.mixed_precision) == 'true'
+    args.save_all = str.lower(args.save_all) == 'true'
 
     logger.info(args)
 
@@ -208,7 +211,7 @@ def main():
         logger.info('{} {} {}'.format(i + 1, os.path.basename(X_fname), os.path.basename(y_fname)))
 
     device = torch.device('cpu')
-    model = FrameTransformer(channels=args.channels, n_fft=args.n_fft, num_encoders=args.num_encoders, num_decoders=args.num_decoders, num_bands=args.num_bands, feedforward_dim=args.feedforward_dim, bias=args.bias, cropsize=args.cropsize, autoregressive=True, out_activate=nn.ReLU)
+    model = FrameTransformer(channels=args.channels, n_fft=args.n_fft, num_encoders=args.num_encoders, num_decoders=args.num_decoders, num_bands=args.num_bands, feedforward_dim=args.feedforward_dim, bias=args.bias, cropsize=args.cropsize, autoregressive=True, out_activate=nn.ReLU(inplace=True))
 
     if args.pretrained_model is not None:
         model.load_state_dict(torch.load(args.pretrained_model, map_location=device))
@@ -219,12 +222,15 @@ def main():
     train_dataset = dataset.VocalAutoregressiveDataset(
         path="C://cs2048_sr44100_hl1024_nf2048_of0",
         extra_path="G://cs2048_sr44100_hl1024_nf2048_of0",
+        pair_path="G://cs2048_sr44100_hl1024_nf2048_of0_PAIRS",
+        mix_path="C://cs2048_sr44100_hl1024_nf2048_of0_INCLUDES_VOX",
         vocal_path="G://cs2048_sr44100_hl1024_nf2048_of0_VOCALS",
         is_validation=False,
         epoch_size=args.epoch_size,
         cropsize=args.cropsize,
         mixup_rate=args.mixup_rate,
-        mixup_alpha=args.mixup_alpha
+        mixup_alpha=args.mixup_alpha,
+        pair_mul=8,
     )
 
     train_dataloader = torch.utils.data.DataLoader(
@@ -295,13 +301,13 @@ def main():
             .format(train_loss, val_loss)
         )
 
-        if val_loss < best_loss or (scheduler is not None and scheduler.current_step < scheduler.num_steps):
+        if val_loss < best_loss or args.save_all:
             if val_loss < best_loss:
                 best_loss = val_loss
                 logger.info('  * best validation loss')
 
-            model_path = 'models/model_iter{}.pth'.format(epoch)
-            scheduler_path = 'models/scheduler_iter{}.pth'.format(epoch)
+            model_path = f'{args.model_dir}models/model_iter{epoch}.pth'
+            scheduler_path = f'{args.model_dir}models/scheduler_iter{epoch}.pth'
             torch.save(model.state_dict(), model_path)
             torch.save(scheduler.state_dict(), scheduler_path)
 

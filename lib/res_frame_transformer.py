@@ -4,14 +4,14 @@ import torch.nn.functional as F
 import math
 
 class FrameTransformer(nn.Module):
-    def __init__(self, channels, n_fft=2048, feedforward_dim=512, num_bands=4, num_encoders=1, num_decoders=1, cropsize=1024, bias=False, autoregressive=True, out_activate=nn.Sigmoid):
+    def __init__(self, channels, n_fft=2048, feedforward_dim=512, num_bands=4, num_encoders=1, num_decoders=1, cropsize=1024, bias=False, autoregressive=True, out_activate=nn.Sigmoid()):
         super(FrameTransformer, self).__init__()
         self.max_bin = n_fft // 2
         self.output_bin = n_fft // 2 + 1
         
         self.register_buffer('mask', torch.triu(torch.ones(cropsize, cropsize) * float('-inf'), diagonal=1))
         self.autoregressive = autoregressive
-        self.out_activate = out_activate()
+        self.out_activate = out_activate
 
         self.enc1 = FrameConv(2, channels, kernel_size=3, padding=1, stride=1)
         self.enc1_transformer = nn.ModuleList([FrameTransformerEncoder(channels * 1 + i, num_bands, cropsize, n_fft, downsamples=0, feedforward_dim=feedforward_dim, bias=bias) for i in range(num_encoders)])
@@ -239,7 +239,7 @@ class FrameTransformerDecoder(nn.Module):
         self.in_project = nn.Linear(channels, 1, bias=bias)        
         self.skip_project = nn.Linear(skip_channels, 1, bias=bias)
 
-        self.relu = nn.ReLU(inplace=True)        
+        self.relu = nn.ReLU(inplace=True)
 
         self.norm1 = nn.LayerNorm(bins)
         self.self_attn1 = MultibandFrameAttention(num_bands, bins, cropsize)

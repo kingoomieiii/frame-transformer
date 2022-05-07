@@ -15,7 +15,7 @@ except ModuleNotFoundError:
     import spec_utils
 
 class VocalAutoregressiveDataset(torch.utils.data.Dataset):
-    def __init__(self, path, extra_path=None, pair_path=None, vocal_path="", is_validation=False, mul=1, downsamples=0, epoch_size=None, pair_mul=1, slide=True, cropsize=256, mixup_rate=0, mixup_alpha=1):
+    def __init__(self, path, extra_path=None, pair_path=None, mix_path=None, vocal_path="", is_validation=False, mul=1, downsamples=0, epoch_size=None, pair_mul=1, slide=True, cropsize=256, mixup_rate=0, mixup_alpha=1):
         self.epoch_size = epoch_size
         self.slide = slide
         self.mul = mul
@@ -35,6 +35,17 @@ class VocalAutoregressiveDataset(torch.utils.data.Dataset):
                 else:
                     if np.random.uniform() < pair_mul:
                         pair_list.append(p)
+
+        if mix_path is not None:
+            mixes = [os.path.join(mix_path, f) for f in os.listdir(mix_path) if os.path.isfile(os.path.join(mix_path, f))]
+
+            for m in mixes:
+                if pair_mul > 1:
+                    for _ in range(pair_mul):
+                        pair_list.append(m)
+                else:
+                    if np.random.uniform() < pair_mul:
+                        pair_list.append(m)
 
         if extra_path is not None:
             extra_list = [os.path.join(extra_path, f) for f in os.listdir(extra_path) if os.path.isfile(os.path.join(extra_path, f))]
@@ -128,19 +139,16 @@ class VocalAutoregressiveDataset(torch.utils.data.Dataset):
         Y = X if aug else data['Y']
 
         if not self.is_validation:
-            start = np.random.randint(0, X.shape[2] - self.cropsize)
+            start = np.random.randint(0, X.shape[2] - self.cropsize - 1)
             stop = start + self.cropsize
+
+            if not aug:
+                if np.random.uniform() < 0.05:
+                    X = Y
 
             Y = X[:,:,start+1:stop+1]
             X = X[:,:,start:stop]
-
-            if aug and np.random.uniform() > 0.5:
-                V, Vc = self._get_vocals()
-                X = X + V[:,:,:-1]
-                Y = Y + V[:,:,1:]
-                c = np.max([Xc, Vc])
-            else:
-                c = Xc
+            c = Xc
 
             if np.random.uniform() < 0.5:
                 X = X[::-1]
@@ -150,6 +158,7 @@ class VocalAutoregressiveDataset(torch.utils.data.Dataset):
                 X = Y
                 c = Xc
         else:
+            c = Xc
             start = np.random.randint(0, X.shape[2] - self.cropsize - 1)
             stop = start + self.cropsize
 
@@ -644,6 +653,37 @@ def make_dataset(filelist, cropsize, sr, hop_length, n_fft, offset=0, is_validat
                         X=X_pad[:, :, start:start + cropsize],
                         Y=Y_pad[:, :, start:start + cropsize],
                         c=coef.item())
+
+def make_vocals_dataset(filelist, cropsize, sr, hop_length, n_fft, offset=0, is_validation=False, suffix='', root=''):
+    patch_list = []    
+    patch_dir = f'{root}cs{cropsize}_sr{sr}_hl{hop_length}_nf{n_fft}_of{offset}{suffix}'
+    os.makedirs(patch_dir, exist_ok=True)
+
+    for X_path, Y_path in tqdm(filelist):
+        basename = os.path.splitext(os.path.basename(X_path))[0]
+
+        voxaug = X_path == Y_path
+
+        X, Y = spec_utils.load(X_path, Y_path, sr, hop_length, n_fft)
+
+        coef = np.max([np.abs(X).max(), np.abs(Y).max()])
+
+        l, r, roi_size = make_padding(X.shape[2], cropsize, offset)
+        X_pad = np.pad(X, ((0, 0), (0, 0), (l, r)), mode='constant')
+        Y_pad = np.pad(Y, ((0, 0), (0, 0), (l, r)), mode='constant')
+
+        len_dataset = int(np.ceil(X.shape[2] / roi_size))
+        for j in range(len_dataset):
+            outpath = os.path.join(patch_dir, '{}_p{}.npz'.format(basename, j))
+            patch_list.append(outpath)
+
+            start = j * roi_size
+            if not os.path.exists(outpath):
+                np.savez(
+                    outpath,
+                    X=X_pad[:, :, start:start + cropsize],
+                    c=coef.item(),
+                    vocals=True)
 
 def make_validation_set(filelist, sr, hop_length, n_fft, offset=0, root=''):
     patch_list = []    
