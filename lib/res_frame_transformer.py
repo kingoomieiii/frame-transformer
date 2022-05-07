@@ -48,51 +48,51 @@ class FrameTransformer(nn.Module):
 
         e1 = self.enc1(x)
         for module in self.enc1_transformer:
-            t = module(e1, mask=self.mask)
+            t = module(e1, mask=self.mask if self.autoregressive else None)
             e1 = torch.cat((e1, t), dim=1)
 
         e2 = self.enc2(e1)
         for module in self.enc2_transformer:
-            t = module(e2, mask=self.mask)
+            t = module(e2, mask=self.mask if self.autoregressive else None)
             e2 = torch.cat((e2, t), dim=1)
 
         e3 = self.enc3(e2)
         for module in self.enc3_transformer:
-            t = module(e3, mask=self.mask)
+            t = module(e3, mask=self.mask if self.autoregressive else None)
             e3 = torch.cat((e3, t), dim=1)
 
         e4 = self.enc4(e3)
         for module in self.enc4_transformer:
-            t = module(e4, mask=self.mask)
+            t = module(e4, mask=self.mask if self.autoregressive else None)
             e4 = torch.cat((e4, t), dim=1)
 
         e5 = self.enc5(e4)
         h = e5
         for module in self.enc5_transformer:
-            t = module(e5, mask=self.mask)
+            t = module(e5, mask=self.mask if self.autoregressive else None)
             e5 = torch.cat((e5, t), dim=1)
         for module in self.dec4_transformer:
-            t = module(h, skip=e5, mask=self.mask)
+            t = module(h, skip=e5, mask=self.mask if self.autoregressive else None)
             h = torch.cat((h, t), dim=1)
             
         h = self.dec4(h, e4)
         for module in self.dec3_transformer:
-            t = module(h, skip=e4, mask=self.mask)
+            t = module(h, skip=e4, mask=self.mask if self.autoregressive else None)
             h = torch.cat((h, t), dim=1)
 
         h = self.dec3(h, e3)        
         for module in self.dec2_transformer:
-            t = module(h, skip=e3, mask=self.mask)
+            t = module(h, skip=e3, mask=self.mask if self.autoregressive else None)
             h = torch.cat((h, t), dim=1)
 
         h = self.dec2(h, e2)        
         for module in self.dec1_transformer:
-            t = module(h, skip=e2, mask=self.mask)
+            t = module(h, skip=e2, mask=self.mask if self.autoregressive else None)
             h = torch.cat((h, t), dim=1)
 
         h = self.dec1(h, e1)
         for module in self.out_transformer:
-            t = module(h, skip=e1, mask=self.mask)
+            t = module(h, skip=e1, mask=self.mask if self.autoregressive else None)
             h = torch.cat((h, t), dim=1)
 
         out = self.out(h.transpose(1,3)).transpose(1,3)
@@ -185,10 +185,10 @@ class FrameTransformerEncoder(nn.Module):
 
         self.norm2 = nn.LayerNorm(bins)
         self.conv1L = nn.Linear(bins, feedforward_dim, bias=bias)
-        self.conv1R = CausalConv1d(bins, feedforward_dim//4, kernel_size=3, bias=bias)
+        self.conv1R = nn.Conv1d(bins, feedforward_dim//4, kernel_size=3, padding=1, bias=bias)
         self.norm3 = nn.LayerNorm(feedforward_dim)
         self.conv1M = nn.Sequential(
-            CausalConv1d(feedforward_dim, feedforward_dim, kernel_size=9, groups=feedforward_dim, bias=bias),
+            nn.Conv1d(feedforward_dim, feedforward_dim, kernel_size=9, padding=4, groups=feedforward_dim, bias=bias),
             nn.Conv1d(feedforward_dim, bins, kernel_size=1, padding=0, bias=bias))
 
         self.norm4 = nn.LayerNorm(bins)
@@ -248,14 +248,14 @@ class FrameTransformerDecoder(nn.Module):
 
         self.norm2 = nn.LayerNorm(bins)
         self.conv1L = nn.Sequential(
-            CausalConv1d(bins, bins, kernel_size=11, groups=bins, bias=bias),
+            nn.Conv1d(bins, bins, kernel_size=11, padding=5, groups=bins, bias=bias),
             nn.Conv1d(bins, feedforward_dim // 2, kernel_size=1, padding=0, bias=bias))
         self.conv1R = nn.Sequential(
-            CausalConv1d(bins, bins, kernel_size=7, groups=bins, bias=bias),
+            nn.Conv1d(bins, bins, kernel_size=7, padding=3, groups=bins, bias=bias),
             nn.Conv1d(bins, feedforward_dim // 4, kernel_size=1, padding=0, bias=bias))
         self.norm3 = nn.LayerNorm(feedforward_dim // 2)
         self.conv2 = nn.Sequential(
-            CausalConv1d(feedforward_dim // 2, feedforward_dim // 2, kernel_size=7, groups=feedforward_dim // 2, bias=bias),
+            nn.Conv1d(feedforward_dim // 2, feedforward_dim // 2, kernel_size=7, padding=3, groups=feedforward_dim // 2, bias=bias),
             nn.Conv1d(feedforward_dim // 2, bins, kernel_size=1, padding=0, bias=bias))
         self.dropout2 = nn.Dropout(dropout) if dropout > 0 else nn.Identity()
 
@@ -312,13 +312,13 @@ class MultibandFrameAttention(nn.Module):
 
         self.num_bands = num_bands
         self.q_proj = nn.Linear(bins, bins)
-        self.q_conv = CausalConv1d(bins, bins, kernel_size=3, groups=bins)
+        self.q_conv = nn.Conv1d(bins, bins, kernel_size=3, padding=1, groups=bins)
 
         self.k_proj = nn.Linear(bins, bins)
-        self.k_conv = CausalConv1d(bins, bins, kernel_size=3, groups=bins)
+        self.k_conv = nn.Conv1d(bins, bins, kernel_size=3, padding=1, groups=bins)
 
         self.v_proj = nn.Linear(bins, bins)
-        self.v_conv = CausalConv1d(bins, bins, kernel_size=3, groups=bins)
+        self.v_conv = nn.Conv1d(bins, bins, kernel_size=3, padding=1, groups=bins)
 
         self.o_proj = nn.Linear(bins, bins)
 
@@ -341,14 +341,23 @@ class MultibandFrameAttention(nn.Module):
         o = self.o_proj(a)
         return o
 
+class FrameNorm(nn.Module):
+    def __init__(self, cropsize=1024):
+        super(FrameNorm, self).__init__()
+
+        self.norm = nn.InstanceNorm2d(cropsize)
+
+    def forward(self, x):
+        return self.norm(x.transpose(1,3)).transpose(1,3)
+
 class FrameConv(nn.Module):
-    def __init__(self, in_channels, out_channels, kernel_size=3, stride=1, padding=1, dilation=1, groups=1, activate=nn.LeakyReLU, norm=True):
+    def __init__(self, in_channels, out_channels, kernel_size=3, stride=1, padding=1, dilation=1, groups=1, activate=nn.LeakyReLU, norm=True, cropsize=1024):
         super(FrameConv, self).__init__()
 
         body = []
             
         if norm:
-            body.append(nn.BatchNorm2d(in_channels))
+            body.append(FrameNorm(cropsize))
         
         if activate:
             body.append(activate(inplace=True))
