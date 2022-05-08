@@ -183,6 +183,7 @@ class FrameTransformerEncoder(nn.Module):
         self.cropsize = cropsize
         self.num_bands = num_bands
 
+        self.in_norm = nn.InstanceNorm2d(cropsize, affine=True)
         self.in_project = nn.Linear(channels, 1, bias=bias)
 
         self.relu = nn.ReLU(inplace=True)
@@ -208,7 +209,7 @@ class FrameTransformerEncoder(nn.Module):
         self.conv3 = nn.Linear(feedforward_dim, bins, bias=bias)
 
     def __call__(self, x, mask=None):
-        x = self.in_project(x.transpose(1,3)).squeeze(3)
+        x = self.in_project(self.relu(self.in_norm(x.transpose(1,3)))).squeeze(3)
 
         h = self.norm1(x)
         h = self.glu(h)
@@ -245,7 +246,10 @@ class FrameTransformerDecoder(nn.Module):
         self.cropsize = cropsize
         self.num_bands = num_bands
 
-        self.in_project = nn.Linear(channels, 1, bias=bias)        
+        self.in_norm = nn.InstanceNorm2d(cropsize, affine=True)
+        self.in_project = nn.Linear(channels, 1, bias=bias)
+
+        self.skip_norm = nn.InstanceNorm2d(cropsize, affine=True)    
         self.skip_project = nn.Linear(skip_channels, 1, bias=bias)
 
         self.relu = nn.ReLU(inplace=True)
@@ -284,8 +288,8 @@ class FrameTransformerDecoder(nn.Module):
         self.dropout5 = nn.Dropout(dropout) if dropout > 0 else nn.Identity()
 
     def __call__(self, x, skip, mask=None):
-        x = self.in_project(x.transpose(1,3)).squeeze(3)
-        skip = self.skip_project(skip.transpose(1,3)).squeeze(3)
+        x = self.in_project(self.relu(self.in_norm(x.transpose(1,3)))).squeeze(3)
+        skip = self.skip_project(self.relu(self.skip_norm(skip.transpose(1,3)))).squeeze(3)
 
         h = self.norm1(x)
         hs = self.self_attn1(h, mask=mask)
@@ -316,18 +320,18 @@ class FrameTransformerDecoder(nn.Module):
         return x.transpose(1,2).unsqueeze(1)
 
 class MultibandFrameAttention(nn.Module):
-    def __init__(self, num_bands, bins, cropsize):
+    def __init__(self, num_bands, bins, cropsize, kernel_size=3, padding=1):
         super().__init__()
 
         self.num_bands = num_bands
         self.q_proj = nn.Linear(bins, bins)
-        self.q_conv = nn.Conv1d(bins, bins, kernel_size=3, padding=1, groups=bins)
+        self.q_conv = nn.Conv1d(bins, bins, kernel_size=kernel_size, padding=padding, groups=bins)
 
         self.k_proj = nn.Linear(bins, bins)
-        self.k_conv = nn.Conv1d(bins, bins, kernel_size=3, padding=1, groups=bins)
+        self.k_conv = nn.Conv1d(bins, bins, kernel_size=kernel_size, padding=padding, groups=bins)
 
         self.v_proj = nn.Linear(bins, bins)
-        self.v_conv = nn.Conv1d(bins, bins, kernel_size=3, padding=1, groups=bins)
+        self.v_conv = nn.Conv1d(bins, bins, kernel_size=kernel_size, padding=padding, groups=bins)
 
         self.o_proj = nn.Linear(bins, bins)
 
@@ -359,7 +363,8 @@ class FrameNorm(nn.Module):
             for _ in range(downsamples):
                 bins = ((bins - 1) // 2) + 1
 
-        self.norm = nn.InstanceNorm2d(cropsize)
+        #self.norm = nn.LayerNorm(bins)
+        self.norm = nn.InstanceNorm2d(cropsize, affine=True)
 
     def __call__(self, x):
         return self.norm(x.transpose(1,3)).transpose(1,3)
