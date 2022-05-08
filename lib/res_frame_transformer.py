@@ -3,9 +3,18 @@ from torch import nn
 import torch.nn.functional as F
 import math
 
+def get_bins(n_fft, downsamples):
+    bins = (n_fft // 2)
+    if downsamples > 0:
+        for _ in range(downsamples):
+            bins = ((bins - 1) // 2) + 1
+
+    return bins
+
 class FrameTransformer(nn.Module):
     def __init__(self, channels, n_fft=2048, feedforward_dim=512, num_bands=4, num_encoders=1, num_decoders=1, cropsize=1024, bias=False, autoregressive=True, out_activate=nn.Sigmoid()):
         super(FrameTransformer, self).__init__()
+        
         self.max_bin = n_fft // 2
         self.output_bin = n_fft // 2 + 1
         
@@ -342,7 +351,7 @@ class MultibandFrameAttention(nn.Module):
         return o
 
 class FrameNorm(nn.Module):
-    def __init__(self, n_fft=2048, downsamples=0):
+    def __init__(self, n_fft=2048, downsamples=0, cropsize=1024):
         super(FrameNorm, self).__init__()
 
         bins = (n_fft // 2)
@@ -350,19 +359,19 @@ class FrameNorm(nn.Module):
             for _ in range(downsamples):
                 bins = ((bins - 1) // 2) + 1
 
-        self.norm = nn.LayerNorm(bins)
+        self.norm = nn.InstanceNorm2d(cropsize)
 
     def __call__(self, x):
-        return self.norm(x.transpose(2,3)).transpose(2,3)
+        return self.norm(x.transpose(1,3)).transpose(1,3)
 
 class FrameConv(nn.Module):
-    def __init__(self, in_channels, out_channels, kernel_size=3, stride=1, padding=1, dilation=1, groups=1, activate=nn.LeakyReLU, norm=True, n_fft=2048, downsamples=0):
+    def __init__(self, in_channels, out_channels, kernel_size=3, stride=1, padding=1, dilation=1, groups=1, activate=nn.LeakyReLU, norm=True, n_fft=2048, downsamples=0, cropsize=1024):
         super(FrameConv, self).__init__()
 
         body = []
             
         if norm:
-            body.append(FrameNorm(n_fft, downsamples))
+            body.append(FrameNorm(n_fft, downsamples, cropsize))
         
         if activate:
             body.append(activate(inplace=True))
