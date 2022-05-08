@@ -334,8 +334,8 @@ class VocalAugmentationDataset(torch.utils.data.Dataset):
             c = Xc
 
         if self.include_phase:
-            Xp = np.clip((np.angle(X) + np.pi) / (2 * np.pi), 0, 1)
-            Yp = np.clip((np.angle(Y) + np.pi) / (2 * np.pi), 0, 1)
+            Xp = (np.angle(X) + np.pi) / (2 * np.pi)
+            Yp = (np.angle(Y) + np.pi) / (2 * np.pi)
 
         X = np.clip(np.abs(X) / c, 0, 1)
         Y = np.clip(np.abs(Y) / c, 0, 1)
