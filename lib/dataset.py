@@ -344,7 +344,7 @@ class VocalAugmentationDataset(torch.utils.data.Dataset):
             X = np.concatenate((X, Xp), axis=0)
             Y = np.concatenate((Y, Yp), axis=0)
 
-        if np.random.uniform() < self.mixup_rate and root:
+        if np.random.uniform() < self.mixup_rate and root and not self.is_validation:
             MX, MY, p2 = self.__getitem__(np.random.randint(len(self)), root=False)
             a = np.random.beta(self.mixup_alpha, self.mixup_alpha)
             X = X * a + (1 - a) * MX

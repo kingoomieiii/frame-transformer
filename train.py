@@ -360,6 +360,8 @@ def main():
 
             model_path = f'{args.model_dir}models/model_iter{epoch}.pth'
             scheduler_path = f'{args.model_dir}models/scheduler_iter{epoch}.pth'
+            torch.save(model.state_dict(), model_path)
+            torch.save(scheduler.state_dict(), scheduler_path)
 
         log.append([1, val_loss_mag, val_loss_phase])
         with open('loss_{}.json'.format(timestamp), 'w', encoding='utf8') as f:
