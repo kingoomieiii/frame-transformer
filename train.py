@@ -52,22 +52,35 @@ def mixup(X, Y, alpha=1):
     Y = Y * lam + Y2 * inv_lam
     return X, Y
 
-def train_epoch(dataloader, model, device, optimizer, accumulation_steps, grad_scaler, progress_bar, mixup_rate, mixup_alpha, lr_warmup=None):
+def train_epoch(dataloader, model, device, optimizer, accumulation_steps, grad_scaler, progress_bar, mixup_rate, mixup_alpha, lr_warmup=None, include_phase=False):
     model.train()
     sum_loss = 0
-    batch_loss = 0
     crit = nn.L1Loss()
+    batch_loss = 0
+    batch_mag_loss = 0
+    batch_phase_loss = 0
 
     pbar = tqdm(dataloader) if progress_bar else dataloader
-    for itr, (X_batch, y_batch) in enumerate(pbar):
+    for itr, (X_batch, y_batch, p) in enumerate(pbar):
         X_batch = X_batch.to(device)
         y_batch = y_batch.to(device)
 
         with torch.cuda.amp.autocast_mode.autocast(enabled=grad_scaler is not None):
             pred = model(X_batch)
 
-        loss = crit(X_batch * pred, y_batch)
-        accum_loss = loss / accumulation_steps
+        if include_phase:
+            mag = pred[:, :2]
+            phase = pred[:, 2:] * 2
+            mag_pred = X_batch[:, :2] * torch.sigmoid(mag)
+            phase_pred = torch.clip(X_batch[:, 2:] * torch.sigmoid(phase) * 2, 0, 1)
+            mag_loss = crit(mag_pred, y_batch[:, :2]) / accumulation_steps
+            phase_loss = crit(phase_pred, y_batch[:, 2:]) / accumulation_steps
+            accum_loss = 100 * mag_loss + phase_loss # crit(X_batch * pred, y_batch)
+            batch_mag_loss = batch_mag_loss + mag_loss
+            batch_phase_loss = batch_phase_loss + phase_loss
+        else:
+            accum_loss = crit(X_batch[:, :2] * pred, y_batch[:, :2]) / accumulation_steps
+
         batch_loss = batch_loss + accum_loss
 
         if grad_scaler is not None:
@@ -77,7 +90,10 @@ def train_epoch(dataloader, model, device, optimizer, accumulation_steps, grad_s
 
         if (itr + 1) % accumulation_steps == 0:
             if progress_bar:
-                pbar.set_description(str(batch_loss.item()))
+                if include_phase:
+                    pbar.set_description(f'{str(batch_mag_loss.item())} - {str(batch_phase_loss.item())}')
+                else:
+                    pbar.set_description(f'{str(batch_loss.item())}')
 
             if grad_scaler is not None:
                 grad_scaler.unscale_(optimizer)
@@ -92,8 +108,10 @@ def train_epoch(dataloader, model, device, optimizer, accumulation_steps, grad_s
 
             model.zero_grad()
             batch_loss = 0
+            batch_mag_loss = 0
+            batch_phase_loss = 0
 
-        sum_loss += loss.item() * len(X_batch)
+        sum_loss += accum_loss.item() * len(X_batch) * accumulation_steps
 
     # the rest batch
     if (itr + 1) % accumulation_steps != 0:
@@ -105,29 +123,48 @@ def train_epoch(dataloader, model, device, optimizer, accumulation_steps, grad_s
 
     return sum_loss / len(dataloader.dataset)
 
-def validate_epoch(dataloader, model, device, grad_scaler):
+def validate_epoch(dataloader, model, device, grad_scaler, include_phase=False):
     model.eval()
     sum_loss = 0
     crit = nn.L1Loss()
+    
+    mag_sum = 0
+    phase_sum = 0
 
     with torch.no_grad():
-        for X_batch, y_batch in dataloader:
+        for X_batch, y_batch, p in dataloader:
             X_batch = X_batch.to(device)
             y_batch = y_batch.to(device)
 
             with torch.cuda.amp.autocast_mode.autocast(enabled=grad_scaler is not None):
                 pred = model(X_batch)
 
-            y_batch = spec_utils.crop_center(y_batch, pred)
-            loss = crit(X_batch * pred, y_batch)
-    
-            if torch.logical_or(loss.isnan(), loss.isinf()):
-                print('non-finite or nan validation loss; aborting')
-                quit()
-            else:
-                sum_loss += loss.item() * len(X_batch)
+            if include_phase:
+                mag = pred[:, :2]
+                phase = pred[:, 2:] * 2
 
-    return sum_loss / len(dataloader.dataset)
+                mag_pred = X_batch[:, :2] * torch.sigmoid(mag)
+                phase_pred = torch.clip(X_batch[:, 2:] * torch.sigmoid(phase) * 2, 0, 1)
+
+                mag_loss = crit(mag_pred, y_batch[:, :2])
+                phase_loss = crit(phase_pred, y_batch[:, 2:])
+
+                if torch.logical_or(mag_loss.isnan(), mag_loss.isinf()) or torch.logical_or(phase_loss.isnan(), phase_loss.isinf()):
+                    print('non-finite or nan validation loss; aborting')
+                    quit()
+                else:
+                    mag_sum += mag_loss.item() * len(X_batch)
+                    phase_sum += phase_loss.item() * len(X_batch)
+            else:
+                mag_loss = crit(X_batch * pred, y_batch[:, :2])
+
+                if torch.logical_or(mag_loss.isnan(), mag_loss.isinf()):
+                    print('non-finite or nan validation loss; aborting')
+                    quit()
+                else:
+                    mag_sum += mag_loss.item() * len(X_batch)
+
+    return mag_sum / len(dataloader.dataset), phase_sum / len(dataloader.dataset)
 
 def main():
     p = argparse.ArgumentParser()
@@ -175,6 +212,8 @@ def main():
     p.add_argument('--fake_data_prob', type=float, default=math.nan)
     p.add_argument('--mixup_rate', '-M', type=float, default=0.5)
     p.add_argument('--mixup_alpha', '-a', type=float, default=0.4)
+    p.add_argument('--phase_in', type=str, default='false')
+    p.add_argument('--phase_out', type=str, default='false')
     p.add_argument('--pretrained_model', '-P', type=str, default=None)
     p.add_argument('--pretrained_model_scheduler', type=str, default=None)
     p.add_argument('--progress_bar', '-pb', type=str, default='true')
@@ -189,8 +228,54 @@ def main():
     args.bias = str.lower(args.bias) == 'true'
     args.mixed_precision = str.lower(args.mixed_precision) == 'true'
     args.save_all = str.lower(args.save_all) == 'true'
+    args.phase_in = str.lower(args.phase_in) == 'true'
+    args.phase_out = str.lower(args.phase_out) == 'true'
 
     logger.info(args)
+
+    random.seed(args.seed + 1)
+    np.random.seed(args.seed + 1)
+    torch.manual_seed(args.seed + 1)
+
+    train_dataset = dataset.VocalAugmentationDataset(
+        path="C://cs2048_sr44100_hl1024_nf2048_of0",
+        extra_path="G://cs2048_sr44100_hl1024_nf2048_of0",
+        pair_path="G://cs2048_sr44100_hl1024_nf2048_of0_PAIRS",
+        vocal_path="G://cs2048_sr44100_hl1024_nf2048_of0_VOCALS",
+        is_validation=False,
+        epoch_size=args.epoch_size,
+        cropsize=args.cropsize,
+        mixup_rate=args.mixup_rate,
+        mixup_alpha=args.mixup_alpha,
+        pair_mul=1,
+        include_phase=args.phase_in
+    )
+
+    train_dataloader = torch.utils.data.DataLoader(
+        dataset=train_dataset,
+        batch_size=args.batchsize,
+        shuffle=True,
+        num_workers=args.num_workers
+    )
+    
+    val_dataset = dataset.VocalAugmentationDataset(
+        path="C://cs1024_sr44100_hl1024_nf2048_of0_VALIDATION",
+        extra_path=None,#"G://cs2048_sr44100_hl1024_nf2048_of0",
+        vocal_path=None,#"G://cs2048_sr44100_hl1024_nf2048_of0_VOCALS",
+        is_validation=True,
+        epoch_size=args.epoch_size,
+        cropsize=args.cropsize,
+        mixup_rate=args.mixup_rate,
+        mixup_alpha=args.mixup_alpha,
+        include_phase=args.phase_in
+    )
+
+    val_dataloader = torch.utils.data.DataLoader(
+        dataset=val_dataset,
+        batch_size=args.val_batchsize,
+        shuffle=False,
+        num_workers=args.num_workers
+    )
 
     random.seed(args.seed)
     np.random.seed(args.seed)
@@ -211,51 +296,13 @@ def main():
         logger.info('{} {} {}'.format(i + 1, os.path.basename(X_fname), os.path.basename(y_fname)))
 
     device = torch.device('cpu')
-    model = FrameTransformer(channels=args.channels, n_fft=args.n_fft, num_encoders=args.num_encoders, num_decoders=args.num_decoders, num_bands=args.num_bands, feedforward_dim=args.feedforward_dim, bias=args.bias, cropsize=args.cropsize, autoregressive=False, out_activate=nn.Sigmoid())
+    model = FrameTransformer(channels=args.channels, in_channels=4 if args.phase_in else 2, out_channels=4 if args.phase_out else 2, n_fft=args.n_fft, num_encoders=args.num_encoders, num_decoders=args.num_decoders, num_bands=args.num_bands, feedforward_dim=args.feedforward_dim, bias=args.bias, cropsize=args.cropsize, autoregressive=False, out_activate=None if args.phase_out else nn.Sigmoid())
 
     if args.pretrained_model is not None:
         model.load_state_dict(torch.load(args.pretrained_model, map_location=device))
     if torch.cuda.is_available() and args.gpu >= 0:
         device = torch.device('cuda:{}'.format(args.gpu))
-        model.to(device)
-
-    train_dataset = dataset.VocalAugmentationDataset(
-        path="C://cs2048_sr44100_hl1024_nf2048_of0",
-        extra_path="G://cs2048_sr44100_hl1024_nf2048_of0",
-        pair_path="G://cs2048_sr44100_hl1024_nf2048_of0_PAIRS",
-        vocal_path="G://cs2048_sr44100_hl1024_nf2048_of0_VOCALS",
-        is_validation=False,
-        epoch_size=args.epoch_size,
-        cropsize=args.cropsize,
-        mixup_rate=args.mixup_rate,
-        mixup_alpha=args.mixup_alpha,
-        pair_mul=1,
-    )
-
-    train_dataloader = torch.utils.data.DataLoader(
-        dataset=train_dataset,
-        batch_size=args.batchsize,
-        shuffle=True,
-        num_workers=args.num_workers
-    )
-    
-    val_dataset = dataset.VocalAugmentationDataset(
-        path="G://cs2048_sr44100_hl1024_nf2048_of0_VALIDATION",
-        extra_path=None,#"G://cs2048_sr44100_hl1024_nf2048_of0",
-        vocal_path=None,#"G://cs2048_sr44100_hl1024_nf2048_of0_VOCALS",
-        is_validation=True,
-        epoch_size=args.epoch_size,
-        cropsize=args.cropsize,
-        mixup_rate=args.mixup_rate,
-        mixup_alpha=args.mixup_alpha
-    )
-
-    val_dataloader = torch.utils.data.DataLoader(
-        dataset=val_dataset,
-        batch_size=args.val_batchsize,
-        shuffle=False,
-        num_workers=args.num_workers
-    )
+        model.to(device)    
     
     grad_scaler = torch.cuda.amp.grad_scaler.GradScaler() if args.mixed_precision else None
     
@@ -292,25 +339,29 @@ def main():
         train_dataset.rebuild()
 
         logger.info('# epoch {}'.format(epoch))
-        train_loss = train_epoch(train_dataloader, model, device, optimizer, args.accumulation_steps, grad_scaler, args.progress_bar, args.mixup_rate, args.mixup_alpha, lr_warmup=scheduler)
-        val_loss = validate_epoch(val_dataloader, model, device, grad_scaler)
+        train_loss = train_epoch(train_dataloader, model, device, optimizer, args.accumulation_steps, grad_scaler, args.progress_bar, args.mixup_rate, args.mixup_alpha, lr_warmup=scheduler, include_phase=args.phase_out)
+        val_loss_mag, val_loss_phase = validate_epoch(val_dataloader, model, device, grad_scaler, include_phase=args.phase_out)
 
-        logger.info(
-            '  * training loss = {:.6f}, validation loss = {:.6f}'
-            .format(train_loss, val_loss)
-        )
+        if args.phase_out:
+            logger.info(
+                '  * training loss = {:.6f}, validation loss mag = {:.6f}, validation loss phase = {:.6f}'
+                .format(train_loss, val_loss_mag, val_loss_phase)
+            )
+        else:
+            logger.info(
+                '  * training loss = {:.6f}, validation loss mag = {:.6f}'
+                .format(train_loss, val_loss_mag)
+            )
 
-        if val_loss < best_loss or args.save_all:
-            if val_loss < best_loss:
-                best_loss = val_loss
+        if (val_loss_mag + val_loss_phase) < best_loss or args.save_all:
+            if (val_loss_mag + val_loss_phase) < best_loss:
+                best_loss = val_loss_mag + val_loss_phase
                 logger.info('  * best validation loss')
 
             model_path = f'{args.model_dir}models/model_iter{epoch}.pth'
             scheduler_path = f'{args.model_dir}models/scheduler_iter{epoch}.pth'
-            torch.save(model.state_dict(), model_path)
-            torch.save(scheduler.state_dict(), scheduler_path)
 
-        log.append([1, val_loss])
+        log.append([1, val_loss_mag, val_loss_phase])
         with open('loss_{}.json'.format(timestamp), 'w', encoding='utf8') as f:
             json.dump(log, f, ensure_ascii=False)
 

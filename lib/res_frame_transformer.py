@@ -12,7 +12,7 @@ def get_bins(n_fft, downsamples):
     return bins
 
 class FrameTransformer(nn.Module):
-    def __init__(self, channels, n_fft=2048, feedforward_dim=512, num_bands=4, num_encoders=1, num_decoders=1, cropsize=1024, bias=False, autoregressive=True, out_activate=nn.Sigmoid()):
+    def __init__(self, channels, in_channels=2, out_channels=2, n_fft=2048, feedforward_dim=512, num_bands=4, num_encoders=1, num_decoders=1, cropsize=1024, bias=False, autoregressive=True, out_activate=nn.Sigmoid()):
         super(FrameTransformer, self).__init__()
         
         self.max_bin = n_fft // 2
@@ -22,7 +22,7 @@ class FrameTransformer(nn.Module):
         self.autoregressive = autoregressive
         self.out_activate = out_activate
 
-        self.enc1 = FrameConv(2, channels, kernel_size=3, padding=1, stride=1, n_fft=n_fft, downsamples=0)
+        self.enc1 = FrameConv(in_channels, channels, kernel_size=3, padding=1, stride=1, n_fft=n_fft, downsamples=0)
         self.enc1_transformer = nn.ModuleList([FrameTransformerEncoder(channels * 1 + i, num_bands, cropsize, n_fft, downsamples=0, feedforward_dim=feedforward_dim, bias=bias) for i in range(num_encoders)])
 
         self.enc2 = FrameConvEncoder(channels * 1 + num_encoders, channels * 2, kernel_size=3, stride=2, padding=1, n_fft=n_fft, downsamples=0)
@@ -50,7 +50,7 @@ class FrameTransformer(nn.Module):
         self.dec1 = FrameConvDecoder(channels * (1 + 2) + num_decoders + num_encoders, channels * 1, kernel_size=3, padding=1, n_fft=n_fft, downsamples=0)
 
         self.out_transformer = nn.ModuleList([FrameTransformerDecoder(channels + i, channels + num_encoders, num_bands, cropsize, n_fft, downsamples=0, feedforward_dim=feedforward_dim, bias=bias) for i in range(num_decoders)])
-        self.out = nn.Linear(channels + num_decoders, 2)
+        self.out = nn.Linear(channels + num_decoders, out_channels)
 
     def __call__(self, x):
         x = x[:, :, :self.max_bin]
@@ -106,8 +106,11 @@ class FrameTransformer(nn.Module):
 
         out = self.out(h.transpose(1,3)).transpose(1,3)
 
+        if self.out_activate is not None:
+            out = self.out_activate(out)
+
         return F.pad(
-            input=self.out_activate(out),
+            input=out,
             pad=(0, 0, 0, self.output_bin - out.size()[2]),
             mode='replicate'
         )
@@ -346,6 +349,8 @@ class MultibandFrameAttention(nn.Module):
         p = F.pad(torch.matmul(q,self.er), (1,0)).transpose(2,3)[:,:,1:,:]
         qk = (torch.matmul(q,k)+p) / math.sqrt(c)
 
+        
+
         if mask is not None:
             qk = qk + mask
 
@@ -363,7 +368,6 @@ class FrameNorm(nn.Module):
             for _ in range(downsamples):
                 bins = ((bins - 1) // 2) + 1
 
-        #self.norm = nn.LayerNorm(bins)
         self.norm = nn.InstanceNorm2d(cropsize, affine=True)
 
     def __call__(self, x):
