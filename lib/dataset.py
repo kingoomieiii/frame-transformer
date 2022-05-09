@@ -84,7 +84,7 @@ class VocalAutoregressiveDataset(torch.utils.data.Dataset):
     def __len__(self):
         return len(self.curr_list) * self.mul
 
-    def _get_vocals(self):
+    def _get_vocals(self, root=True):
         vidx = np.random.randint(len(self.vocal_list))                
         vpath = self.vocal_list[vidx]
         vdata = np.load(str(vpath))
@@ -103,31 +103,17 @@ class VocalAutoregressiveDataset(torch.utils.data.Dataset):
         stop = start + self.cropsize + 1
         V = V[:,:,start:stop]
 
-        # if np.random.uniform() < 0.5:
-        #     vidx2 = np.random.randint(len(self.vocal_list))
-            
-        #     vpath2 = self.vocal_list[vidx2]
-        #     vdata2 = np.load(str(vpath2))
-        #     V2, Vc2 = vdata2['X'], vdata2['c']
+        if np.random.uniform() < 0.5 and root:
+            V2, Vc2 = self._get_vocals(root=False)
+            a = np.random.beta(1, 1)
+            inv = 1 - a
 
-        #     if np.random.uniform() < 0.5:
-        #         V2 = V2[::-1]
+            start = np.random.randint(0, V2.shape[2] - self.cropsize - 1)
+            stop = start + self.cropsize + 1
+            V2 = V2[:,:,start:stop]
 
-        #     if np.random.uniform() < 0.5:
-        #         if np.random.uniform() < 0.5:
-        #             V2[0] = V2[0] * 0
-        #         else:
-        #             V2[1] = V2[1] * 0
-
-        #     a = np.random.beta(1, 1)
-        #     inv = 1 - a
-
-        #     start = np.random.randint(0, V2.shape[2] - self.cropsize - 1)
-        #     stop = start + self.cropsize + 1
-        #     V2 = V2[:,:,start:stop]
-
-        #     Vc = (Vc * a) + (Vc2 * inv)
-        #     V = (V * a) + (V2 * inv)
+            Vc = (Vc * a) + (Vc2 * inv)
+            V = (V * a) + (V2 * inv)
 
         return V, Vc
 
@@ -142,10 +128,6 @@ class VocalAutoregressiveDataset(torch.utils.data.Dataset):
         if not self.is_validation:
             start = np.random.randint(0, X.shape[2] - self.cropsize - 1)
             stop = start + self.cropsize
-
-            if not aug:
-                if np.random.uniform() < 0.05:
-                    X = Y
 
             Y = X[:,:,start+1:stop+1]
             X = X[:,:,start:stop]
@@ -189,7 +171,7 @@ class VocalAutoregressiveDataset(torch.utils.data.Dataset):
         return X, Y
 
 class VocalAugmentationDataset(torch.utils.data.Dataset):
-    def __init__(self, path, extra_path=None, pair_path=None, vocal_path="", is_validation=False, mul=1, downsamples=0, epoch_size=None, pair_mul=1, slide=True, cropsize=256, mixup_rate=0, mixup_alpha=1, include_phase=False):
+    def __init__(self, path, extra_path=None, pair_path=None, vocal_path="", is_validation=False, mul=1, downsamples=0, epoch_size=None, pair_mul=1, slide=True, cropsize=256, mixup_rate=0, mixup_alpha=1, include_phase=False, force_voxaug=False):
         self.epoch_size = epoch_size
         self.slide = slide
         self.mul = mul
@@ -198,6 +180,7 @@ class VocalAugmentationDataset(torch.utils.data.Dataset):
         self.mixup_rate = mixup_rate
         self.mixup_alpha = mixup_alpha
         self.include_phase = include_phase
+        self.force_voxaug = force_voxaug
         pair_list = []
         extra_list = []
 
@@ -249,12 +232,11 @@ class VocalAugmentationDataset(torch.utils.data.Dataset):
     def __len__(self):
         return len(self.curr_list) * self.mul
 
-    def _get_vocals(self):
+    def _get_vocals(self, root=True):
         vidx = np.random.randint(len(self.vocal_list))                
         vpath = self.vocal_list[vidx]
         vdata = np.load(str(vpath))
         V, Vc = vdata['X'], vdata['c']
-        vp = vpath
 
         if np.random.uniform() < 0.5:
             V = V[::-1]
@@ -270,35 +252,15 @@ class VocalAugmentationDataset(torch.utils.data.Dataset):
             stop = start + self.cropsize
             V = V[:,:,start:stop]
 
-        if np.random.uniform() < 0.5:
-            vidx2 = np.random.randint(len(self.vocal_list))
-            
-            vpath2 = self.vocal_list[vidx2]
-            vdata2 = np.load(str(vpath2))
-            V2, Vc2 = vdata2['X'], vdata2['c']
-            vp = f'{vp} {vpath2}'
-
-            if np.random.uniform() < 0.5:
-                V2 = V2[::-1]
-
-            if np.random.uniform() < 0.025:
-                if np.random.uniform() < 0.5:
-                    V2[0] = V2[0] * 0
-                else:
-                    V2[1] = V2[1] * 0
-
+        if np.random.uniform() < 0.5 and root:
+            V2, Vc2 = self._get_vocals(root=False)
             a = np.random.beta(1, 1)
             inv = 1 - a
-
-            if self.slide:
-                start = np.random.randint(0, V2.shape[2] - self.cropsize)
-                stop = start + self.cropsize
-                V2 = V2[:,:,start:stop]
 
             Vc = (Vc * a) + (Vc2 * inv)
             V = (V * a) + (V2 * inv)
 
-        return V, Vc, vp
+        return V, Vc
 
     def __getitem__(self, idx, root=True):
         path = self.curr_list[idx % len(self.curr_list)]
@@ -306,7 +268,11 @@ class VocalAugmentationDataset(torch.utils.data.Dataset):
         aug = 'Y' not in data.files
         X, Xc = data['X'], data['c']
         Y = X if aug else data['Y']
-        p = path
+
+        if self.force_voxaug:
+            if not aug:
+                X = Y
+                aug = True
 
         if not self.is_validation:
             if self.slide:
@@ -316,10 +282,9 @@ class VocalAugmentationDataset(torch.utils.data.Dataset):
                 Y = Y[:,:,start:stop]
 
             if aug and np.random.uniform() > 0.02:
-                V, Vc, vp = self._get_vocals()
+                V, Vc = self._get_vocals()
                 X = Y + V
                 c = np.max([Xc, Vc])
-                p = f'{p} v={vp}'
             else:
                 c = Xc
 
@@ -345,13 +310,12 @@ class VocalAugmentationDataset(torch.utils.data.Dataset):
             Y = np.concatenate((Y, Yp), axis=0)
 
         if np.random.uniform() < self.mixup_rate and root and not self.is_validation:
-            MX, MY, p2 = self.__getitem__(np.random.randint(len(self)), root=False)
+            MX, MY = self.__getitem__(np.random.randint(len(self)), root=False)
             a = np.random.beta(self.mixup_alpha, self.mixup_alpha)
             X = X * a + (1 - a) * MX
             Y = Y * a + (1 - a) * MY
-            p = f'{p} || {p2}'
 
-        return X, Y, p
+        return X, Y
 
 class VocalRemoverTrainingSet(torch.utils.data.Dataset):
 

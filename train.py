@@ -61,7 +61,7 @@ def train_epoch(dataloader, model, device, optimizer, accumulation_steps, grad_s
     batch_phase_loss = 0
 
     pbar = tqdm(dataloader) if progress_bar else dataloader
-    for itr, (X_batch, y_batch, p) in enumerate(pbar):
+    for itr, (X_batch, y_batch) in enumerate(pbar):
         X_batch = X_batch.to(device)
         y_batch = y_batch.to(device)
 
@@ -132,7 +132,7 @@ def validate_epoch(dataloader, model, device, grad_scaler, include_phase=False):
     phase_sum = 0
 
     with torch.no_grad():
-        for X_batch, y_batch, p in dataloader:
+        for X_batch, y_batch in dataloader:
             X_batch = X_batch.to(device)
             y_batch = y_batch.to(device)
 
@@ -218,6 +218,7 @@ def main():
     p.add_argument('--pretrained_model_scheduler', type=str, default=None)
     p.add_argument('--progress_bar', '-pb', type=str, default='true')
     p.add_argument('--mixed_precision', type=str, default='true')
+    p.add_argument('--force_voxaug', type=str, default='false')
     p.add_argument('--save_all', type=str, default='false')
     p.add_argument('--model_dir', type=str, default='E://')
     p.add_argument('--debug', action='store_true')
@@ -230,6 +231,7 @@ def main():
     args.save_all = str.lower(args.save_all) == 'true'
     args.phase_in = str.lower(args.phase_in) == 'true'
     args.phase_out = str.lower(args.phase_out) == 'true'
+    args.force_voxaug = str.lower(args.force_voxaug) == 'true'
 
     logger.info(args)
 
@@ -247,8 +249,7 @@ def main():
         cropsize=args.cropsize,
         mixup_rate=args.mixup_rate,
         mixup_alpha=args.mixup_alpha,
-        pair_mul=1,
-        include_phase=args.phase_in
+        pair_mul=1
     )
 
     train_dataloader = torch.utils.data.DataLoader(
@@ -266,8 +267,7 @@ def main():
         epoch_size=args.epoch_size,
         cropsize=args.cropsize,
         mixup_rate=args.mixup_rate,
-        mixup_alpha=args.mixup_alpha,
-        include_phase=args.phase_in
+        mixup_alpha=args.mixup_alpha
     )
 
     val_dataloader = torch.utils.data.DataLoader(
@@ -296,7 +296,7 @@ def main():
         logger.info('{} {} {}'.format(i + 1, os.path.basename(X_fname), os.path.basename(y_fname)))
 
     device = torch.device('cpu')
-    model = FrameTransformer(channels=args.channels, in_channels=4 if args.phase_in else 2, out_channels=4 if args.phase_out else 2, n_fft=args.n_fft, num_encoders=args.num_encoders, num_decoders=args.num_decoders, num_bands=args.num_bands, feedforward_dim=args.feedforward_dim, bias=args.bias, cropsize=args.cropsize, autoregressive=False, out_activate=None if args.phase_out else nn.Sigmoid())
+    model = FrameTransformer(channels=args.channels, n_fft=args.n_fft, num_encoders=args.num_encoders, num_decoders=args.num_decoders, num_bands=args.num_bands, feedforward_dim=args.feedforward_dim, bias=args.bias, cropsize=args.cropsize, autoregressive=False, out_activate=None if args.phase_out else nn.Sigmoid())
 
     if args.pretrained_model is not None:
         model.load_state_dict(torch.load(args.pretrained_model, map_location=device))
