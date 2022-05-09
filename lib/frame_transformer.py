@@ -5,10 +5,14 @@ import math
 from lib import spec_utils
 
 class FrameTransformer(nn.Module):
-    def __init__(self, channels, n_fft=2048, feedforward_dim=512, num_bands=4, num_encoders=1, num_decoders=1, cropsize=1024, bias=False):
+    def __init__(self, channels, n_fft=2048, feedforward_dim=512, num_bands=4, num_encoders=1, num_decoders=1, cropsize=1024, bias=False, autoregressive=False, out_activate=nn.Sigmoid()):
         super(FrameTransformer, self).__init__()
         self.max_bin = n_fft // 2
         self.output_bin = n_fft // 2 + 1
+        
+        self.register_buffer('mask', torch.triu(torch.ones(cropsize, cropsize) * float('-inf'), diagonal=1))
+        self.autoregressive = autoregressive
+        self.out_activate = out_activate
 
         self.enc1 = FrameConv(2, channels, kernel_size=3, padding=1, stride=1)
         self.enc1_transformer = nn.ModuleList([FrameTransformerEncoder(channels * 1 + i, num_bands, cropsize, n_fft, downsamples=0, feedforward_dim=feedforward_dim, bias=bias) for i in range(num_encoders)])
@@ -45,57 +49,57 @@ class FrameTransformer(nn.Module):
 
         e1 = self.enc1(x)
         for module in self.enc1_transformer:
-            t = module(e1)
+            t = module(e1, mask=self.mask if self.autoregressive else None)
             e1 = torch.cat((e1, t), dim=1)
 
         e2 = self.enc2(e1)
         for module in self.enc2_transformer:
-            t = module(e2)
+            t = module(e2, mask=self.mask if self.autoregressive else None)
             e2 = torch.cat((e2, t), dim=1)
 
         e3 = self.enc3(e2)
         for module in self.enc3_transformer:
-            t = module(e3)
+            t = module(e3, mask=self.mask if self.autoregressive else None)
             e3 = torch.cat((e3, t), dim=1)
 
         e4 = self.enc4(e3)
         for module in self.enc4_transformer:
-            t = module(e4)
+            t = module(e4, mask=self.mask if self.autoregressive else None)
             e4 = torch.cat((e4, t), dim=1)
 
         e5 = self.enc5(e4)
         h = e5
         for module in self.enc5_transformer:
-            t = module(e5)
+            t = module(e5, mask=self.mask if self.autoregressive else None)
             e5 = torch.cat((e5, t), dim=1)
         for module in self.dec4_transformer:
-            t = module(h, skip=e5)
+            t = module(h, skip=e5, mask=self.mask if self.autoregressive else None)
             h = torch.cat((h, t), dim=1)
             
         h = self.dec4(h, e4)
         for module in self.dec3_transformer:
-            t = module(h, skip=e4)
+            t = module(h, skip=e4, mask=self.mask if self.autoregressive else None)
             h = torch.cat((h, t), dim=1)
 
         h = self.dec3(h, e3)        
         for module in self.dec2_transformer:
-            t = module(h, skip=e3)
+            t = module(h, skip=e3, mask=self.mask if self.autoregressive else None)
             h = torch.cat((h, t), dim=1)
 
         h = self.dec2(h, e2)        
         for module in self.dec1_transformer:
-            t = module(h, skip=e2)
+            t = module(h, skip=e2, mask=self.mask if self.autoregressive else None)
             h = torch.cat((h, t), dim=1)
 
         h = self.dec1(h, e1)
         for module in self.out_transformer:
-            t = module(h, skip=e1)
+            t = module(h, skip=e1, mask=self.mask if self.autoregressive else None)
             h = torch.cat((h, t), dim=1)
 
         out = self.out(h.transpose(1,3)).transpose(1,3)
 
         return F.pad(
-            input=torch.sigmoid(out),
+            input=self.out_activate(out),
             pad=(0, 0, 0, self.output_bin - out.size()[2]),
             mode='replicate'
         )
@@ -144,6 +148,7 @@ class FrameTransformerEncoder(nn.Module):
         self.cropsize = cropsize
         self.num_bands = num_bands
 
+        self.in_norm = nn.LayerNorm(bins)
         self.in_project = nn.Linear(channels, 1, bias=bias)
 
         self.relu = nn.ReLU(inplace=True)
@@ -168,8 +173,8 @@ class FrameTransformerEncoder(nn.Module):
         self.conv2 = nn.Linear(bins, feedforward_dim, bias=bias)
         self.conv3 = nn.Linear(feedforward_dim, bins, bias=bias)
 
-    def __call__(self, x):
-        x = self.in_project(x.transpose(1,3)).squeeze(3)
+    def __call__(self, x, mask=None):
+        x = self.in_project(self.relu(self.in_norm(x.transpose(1,3)))).squeeze(3)
 
         h = self.norm1(x)
         h = self.glu(h)
@@ -184,7 +189,7 @@ class FrameTransformerEncoder(nn.Module):
         x = x + h
 
         h = self.norm4(x)
-        h = self.attn(h)
+        h = self.attn(h, mask=mask)
         x = x + h
 
         h = self.norm5(x)
@@ -206,7 +211,10 @@ class FrameTransformerDecoder(nn.Module):
         self.cropsize = cropsize
         self.num_bands = num_bands
 
-        self.in_project = nn.Linear(channels, 1, bias=bias)        
+        self.in_norm = nn.LayerNorm(bins)
+        self.skip_norm = nn.LayerNorm(bins)
+
+        self.in_project = nn.Linear(channels, 1, bias=bias)
         self.skip_project = nn.Linear(skip_channels, 1, bias=bias)
 
         self.relu = nn.ReLU(inplace=True)        
@@ -244,13 +252,13 @@ class FrameTransformerDecoder(nn.Module):
         self.conv4 = nn.Linear(feedforward_dim, bins, bias=bias)
         self.dropout5 = nn.Dropout(dropout) if dropout > 0 else nn.Identity()
 
-    def __call__(self, x, skip):
-        x = self.in_project(x.transpose(1,3)).squeeze(3)
-        skip = self.skip_project(skip.transpose(1,3)).squeeze(3)
+    def __call__(self, x, skip, mask=None):
+        x = self.in_project(self.relu(self.in_norm(x.transpose(1,3)))).squeeze(3)
+        skip = self.skip_project(self.relu(self.skip_norm(skip.transpose(1,3)))).squeeze(3)
 
         h = self.norm1(x)
-        hs = self.self_attn1(h)
-        hm = self.skip_attn1(h, mem=skip)
+        hs = self.self_attn1(h, mask=mask)
+        hm = self.skip_attn1(h, mem=skip, mask=mask)
         x = x + self.dropout1(hs + hm)
 
         h = self.norm2(x)
@@ -262,11 +270,11 @@ class FrameTransformerDecoder(nn.Module):
         x = x + h
 
         h = self.norm4(x)
-        h = self.dropout3(self.self_attn2(h))
+        h = self.dropout3(self.self_attn2(h, mask=mask))
         x = x + h
 
         h = self.norm5(x)
-        h = self.dropout4(self.skip_attn2(h, mem=skip))
+        h = self.dropout4(self.skip_attn2(h, mem=skip, mask=mask))
         x = x + h
 
         h = self.norm6(x)
@@ -323,7 +331,7 @@ class FrameConv(nn.Module):
         ]
             
         if norm:
-            body.append(nn.BatchNorm2d(out_channels))
+            body.append(nn.Instance(out_channels))
 
         if activate is not None:
             body.append(activate(inplace=True))
