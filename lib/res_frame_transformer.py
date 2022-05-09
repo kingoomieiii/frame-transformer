@@ -3,16 +3,8 @@ from torch import nn
 import torch.nn.functional as F
 import math
 
-def get_bins(n_fft, downsamples):
-    bins = (n_fft // 2)
-    if downsamples > 0:
-        for _ in range(downsamples):
-            bins = ((bins - 1) // 2) + 1
-
-    return bins
-
 class FrameTransformer(nn.Module):
-    def __init__(self, channels, in_channels=2, out_channels=2, n_fft=2048, feedforward_dim=512, num_bands=4, num_encoders=1, num_decoders=1, cropsize=1024, bias=False, autoregressive=True, out_activate=nn.Sigmoid()):
+    def __init__(self, channels, n_fft=2048, feedforward_dim=512, num_bands=4, num_encoders=1, num_decoders=1, cropsize=1024, bias=False, autoregressive=True, out_activate=nn.Sigmoid()):
         super(FrameTransformer, self).__init__()
         
         self.max_bin = n_fft // 2
@@ -22,7 +14,7 @@ class FrameTransformer(nn.Module):
         self.autoregressive = autoregressive
         self.out_activate = out_activate
 
-        self.enc1 = FrameConv(in_channels, channels, kernel_size=3, padding=1, stride=1, cropsize=cropsize)
+        self.enc1 = FrameConv(2, channels, kernel_size=3, padding=1, stride=1, cropsize=cropsize)
         self.enc1_transformer = nn.ModuleList([FrameTransformerEncoder(channels * 1 + i, num_bands, cropsize, n_fft, downsamples=0, feedforward_dim=feedforward_dim, bias=bias) for i in range(num_encoders)])
 
         self.enc2 = FrameConvEncoder(channels * 1 + num_encoders, channels * 2, kernel_size=3, stride=2, padding=1, cropsize=cropsize)
@@ -47,10 +39,10 @@ class FrameTransformer(nn.Module):
         self.dec2 = FrameConvDecoder(channels * (2 + 4) + num_decoders + num_encoders, channels * 2, kernel_size=3, padding=1, cropsize=cropsize)
 
         self.dec1_transformer = nn.ModuleList([FrameTransformerDecoder(channels * 2 + i, channels * 2 + num_encoders, num_bands, cropsize, n_fft, downsamples=1, feedforward_dim=feedforward_dim, bias=bias) for i in range(num_decoders)])
-        self.dec1 = FrameConvDecoder(channels * (1 + 2) + num_decoders + num_encoders, channels * 1, kernel_size=3, cropsize=cropsize)
+        self.dec1 = FrameConvDecoder(channels * (1 + 2) + num_decoders + num_encoders, channels * 1, kernel_size=3, padding=1, cropsize=cropsize)
 
         self.out_transformer = nn.ModuleList([FrameTransformerDecoder(channels + i, channels + num_encoders, num_bands, cropsize, n_fft, downsamples=0, feedforward_dim=feedforward_dim, bias=bias) for i in range(num_decoders)])
-        self.out = nn.Linear(channels + num_decoders, out_channels)
+        self.out = nn.Linear(channels + num_decoders, 2)
 
     def __call__(self, x):
         x = x[:, :, :self.max_bin]
@@ -106,11 +98,8 @@ class FrameTransformer(nn.Module):
 
         out = self.out(h.transpose(1,3)).transpose(1,3)
 
-        if self.out_activate is not None:
-            out = self.out_activate(out)
-
         return F.pad(
-            input=out,
+            input=self.out_activate(out),
             pad=(0, 0, 0, self.output_bin - out.size()[2]),
             mode='replicate'
         )
@@ -135,7 +124,7 @@ class FrameConvDecoder(nn.Module):
     def __init__(self, nin, nout, kernel_size=3, padding=1, activ=nn.LeakyReLU, norm=True, dropout=False, cropsize=1024):
         super(FrameConvDecoder, self).__init__()
 
-        self.identity = FrameConv(nin, nout, kernel_size=1, padding=0, activate=None, norm=False)
+        self.identity = FrameConv(nin, nout, kernel_size=1, padding=0, activate=None, norm=False) 
         self.conv = FrameConv(nin, nout, kernel_size, 1, padding, activate=activ, norm=norm, cropsize=cropsize)
         self.dropout = nn.Dropout2d(0.1) if dropout else None
 
@@ -177,10 +166,7 @@ class FrameTransformerEncoder(nn.Module):
     def __init__(self, channels, num_bands=4, cropsize=1024, n_fft=2048, feedforward_dim=2048, downsamples=0, bias=False, dropout=0.1):
         super(FrameTransformerEncoder, self).__init__()
 
-        bins = (n_fft // 2)
-        if downsamples > 0:
-            for _ in range(downsamples):
-                bins = ((bins - 1) // 2) + 1
+        bins = get_bins(n_fft=n_fft, downsamples=downsamples)
 
         self.bins = bins
         self.cropsize = cropsize
@@ -205,7 +191,7 @@ class FrameTransformerEncoder(nn.Module):
             nn.Conv1d(feedforward_dim, bins, kernel_size=1, padding=0, bias=bias))
 
         self.norm4 = nn.LayerNorm(bins)
-        self.attn = MultibandFrameAttention(num_bands, bins, cropsize)
+        self.attn = MultibandFrameAttention(num_bands, bins, cropsize, kernel_size=7, padding=3)
 
         self.norm5 = nn.LayerNorm(bins)
         self.conv2 = nn.Linear(bins, feedforward_dim, bias=bias)
@@ -240,10 +226,7 @@ class FrameTransformerDecoder(nn.Module):
     def __init__(self, channels, skip_channels, num_bands=4, cropsize=1024, n_fft=2048, feedforward_dim=2048, downsamples=0, bias=False, dropout=0.1):
         super(FrameTransformerDecoder, self).__init__()
 
-        bins = (n_fft // 2)
-        if downsamples > 0:
-            for _ in range(downsamples):
-                bins = ((bins - 1) // 2) + 1
+        bins = get_bins(n_fft=n_fft, downsamples=downsamples)
 
         self.bins = bins
         self.cropsize = cropsize
@@ -258,8 +241,8 @@ class FrameTransformerDecoder(nn.Module):
         self.relu = nn.ReLU(inplace=True)
 
         self.norm1 = nn.LayerNorm(bins)
-        self.self_attn1 = MultibandFrameAttention(num_bands, bins, cropsize)
-        self.skip_attn1 = MultibandFrameAttention(num_bands, bins, cropsize)
+        self.self_attn1 = MultibandFrameAttention(num_bands, bins, cropsize, kernel_size=7, padding=3)
+        self.skip_attn1 = MultibandFrameAttention(num_bands, bins, cropsize, kernel_size=7, padding=3)
         self.dropout1 = nn.Dropout(dropout) if dropout > 0 else nn.Identity()
 
         self.norm2 = nn.LayerNorm(bins)
@@ -276,12 +259,12 @@ class FrameTransformerDecoder(nn.Module):
         self.dropout2 = nn.Dropout(dropout) if dropout > 0 else nn.Identity()
 
         self.norm4 = nn.LayerNorm(bins)
-        self.self_attn2 = MultibandFrameAttention(num_bands, bins, cropsize)
+        self.self_attn2 = MultibandFrameAttention(num_bands, bins, cropsize, kernel_size=7, padding=3)
         self.norm4 = nn.LayerNorm(bins)
         self.dropout3 = nn.Dropout(dropout) if dropout > 0 else nn.Identity()
 
         self.norm5 = nn.LayerNorm(bins)
-        self.skip_attn2 = MultibandFrameAttention(num_bands, bins, cropsize)
+        self.skip_attn2 = MultibandFrameAttention(num_bands, bins, cropsize, kernel_size=7, padding=3)
         self.dropout4 = nn.Dropout(dropout) if dropout > 0 else nn.Identity()
 
         self.norm6 = nn.LayerNorm(bins)
@@ -349,8 +332,6 @@ class MultibandFrameAttention(nn.Module):
         p = F.pad(torch.matmul(q,self.er), (1,0)).transpose(2,3)[:,:,1:,:]
         qk = (torch.matmul(q,k)+p) / math.sqrt(c)
 
-        
-
         if mask is not None:
             qk = qk + mask
 
@@ -397,3 +378,11 @@ class FrameConv(nn.Module):
         h = self.body(x)
 
         return h
+
+def get_bins(n_fft, downsamples):    
+    bins = (n_fft // 2)
+    if downsamples > 0:
+        for _ in range(downsamples):
+            bins = ((bins - 1) // 2) + 1
+
+    return bins

@@ -156,7 +156,7 @@ def validate_epoch(dataloader, model, device, grad_scaler, include_phase=False):
                     mag_sum += mag_loss.item() * len(X_batch)
                     phase_sum += phase_loss.item() * len(X_batch)
             else:
-                mag_loss = crit(X_batch * pred, y_batch[:, :2])
+                mag_loss = crit(X_batch[:, :2] * pred, y_batch[:, :2])
 
                 if torch.logical_or(mag_loss.isnan(), mag_loss.isinf()):
                     print('non-finite or nan validation loss; aborting')
