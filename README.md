@@ -6,6 +6,8 @@ This is a variation of tsurumeso's vocal remover that I've been working on for a
 
 All I ask is that if you make use of what I've done you at least credit me in some way (have already seen an example of someone going into the code and extracting simple parts to claim credit), especially if the ideas are used in an academic setting however farfetched that might be. I am an engineer trying to make a name for myself especially when it comes to AI, and while I work for a fairly large company we don't do much with machine learning. This architecture was heavily inspired by MMDENSELSTM and Tsurumeso's repo, however does have quite a few key differences (namely the frame convolutions and the use of transformer modules that I  coded from scratch in order to learn how they work more intimately). The results are quite promising even when using a measely 16 channels at the widest part of the convolutional portion of the network and actually doesn't even seem to help much.
 
+I may or may not release checkpoints. My dataset is very large and thus can reach high levels of quality, however I am not convinced that it wouldn't just be stolen and have someone claim they trained it at this point. Starting to feel a bit jaded...
+
 If someone would like to work with me please reach out to me at carperbr@gmail.com.
 
 Example of vocal extraction which shows how well it handles low end:
