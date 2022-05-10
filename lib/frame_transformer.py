@@ -12,18 +12,19 @@ class FrameTransformer(nn.Module):
         
         self.register_buffer('mask', torch.triu(torch.ones(cropsize, cropsize) * float('-inf'), diagonal=1))
         self.autoregressive = autoregressive
-        self.out_activate = out_activate
-        self.out_transformer = nn.ModuleList([FrameTransformerEncoder(channels + i, self.max_bin, num_bands, cropsize, n_fft, downsamples=0, feedforward_dim=feedforward_dim, bias=bias) for i in range(num_decoders)])
+        self.activate = out_activate
+        self.transformer = nn.ModuleList([FrameTransformerEncoder(channels + i, self.max_bin, num_bands, cropsize, n_fft, downsamples=0, feedforward_dim=feedforward_dim, bias=bias) for i in range(num_decoders)])
+        self.out = nn.Linear(channels + num_decoders, 2, bias=bias)
 
     def __call__(self, x):
         x = x[:, :, :self.max_bin]
 
-        for module in self.out_transformer:
+        for module in self.transformer:
             t = module(x, mask=self.mask if self.autoregressive else None)
             x = torch.cat((x, t), dim=1)
 
         return F.pad(
-            input=self.out_activate(x[:, -2:]),
+            input=self.activate(self.out(x.transpose(1,3)).transpose(1,3)),
             pad=(0, 0, 0, self.output_bin - self.max_bin),
             mode='replicate'
         )
