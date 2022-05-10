@@ -8,8 +8,8 @@ I will release checkpoints eventually, but I keep iterating on this daily and ma
 
 If someone would like to work with me please reach out to me at carperbr@gmail.com.
 
-Example of vocal extraction which shows how well it handles low end:
-![image](https://user-images.githubusercontent.com/30326384/167472544-8bacf9f4-3155-4ff7-9716-7a8e06d5bb70.png)
+Example of vocal extraction at only the second epoch which shows how it handles low end. 
+![image](https://user-images.githubusercontent.com/30326384/167711869-e02c7a4a-8baf-4119-a531-232836e93187.png)
 
 ## References
 - [1] Jansson et al., "Singing Voice Separation with Deep U-Net Convolutional Networks", https://ismir2017.smcnus.org/wp-content/uploads/2017/10/171_Paper.pdf
