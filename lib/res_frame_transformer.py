@@ -13,18 +13,94 @@ class FrameTransformer(nn.Module):
         self.register_buffer('mask', torch.triu(torch.ones(cropsize, cropsize) * float('-inf'), diagonal=1))
         self.autoregressive = autoregressive
         self.out_activate = out_activate
-        self.out_transformer = nn.ModuleList([FrameTransformerEncoder(channels + i, self.max_bin, num_bands, cropsize, n_fft, downsamples=0, feedforward_dim=feedforward_dim, bias=bias) for i in range(num_decoders)])
+
+        self.enc1 = FrameConv(2, channels, kernel_size=3, padding=1, stride=1, n_fft=n_fft, downsamples=0)
+        self.enc1_transformer = nn.ModuleList([FrameTransformerEncoder(channels * 1 + i, num_bands, cropsize, n_fft, downsamples=0, feedforward_dim=feedforward_dim, bias=bias) for i in range(num_encoders)])
+
+        self.enc2 = FrameConvEncoder(channels * 1 + num_encoders, channels * 2, kernel_size=3, stride=2, padding=1, n_fft=n_fft, downsamples=0)
+        self.enc2_transformer = nn.ModuleList([FrameTransformerEncoder(channels * 2 + i, num_bands, cropsize, n_fft, downsamples=1, feedforward_dim=feedforward_dim, bias=bias) for i in range(num_encoders)])
+
+        self.enc3 = FrameConvEncoder(channels * 2 + num_encoders, channels * 4, kernel_size=3, stride=2, padding=1, n_fft=n_fft, downsamples=1)
+        self.enc3_transformer = nn.ModuleList([FrameTransformerEncoder(channels * 4 + i, num_bands, cropsize, n_fft, downsamples=2, feedforward_dim=feedforward_dim, bias=bias) for i in range(num_encoders)])
+
+        self.enc4 = FrameConvEncoder(channels * 4 + num_encoders, channels * 6, kernel_size=3, stride=2, padding=1, n_fft=n_fft, downsamples=2)
+        self.enc4_transformer = nn.ModuleList([FrameTransformerEncoder(channels * 6 + i, num_bands, cropsize, n_fft, downsamples=3, feedforward_dim=feedforward_dim, bias=bias) for i in range(num_encoders)])
+
+        self.enc5 = FrameConvEncoder(channels * 6 + num_encoders, channels * 8, kernel_size=3, stride=2, padding=1, n_fft=n_fft, downsamples=3)
+        self.enc5_transformer = nn.ModuleList([FrameTransformerEncoder(channels * 8 + i, num_bands, cropsize, n_fft, downsamples=4, feedforward_dim=feedforward_dim, bias=bias) for i in range(num_encoders)])
+        
+        self.dec4_transformer = nn.ModuleList([FrameTransformerDecoder(channels * 8 + i, channels * 8 + num_encoders, num_bands, cropsize, n_fft, downsamples=4, feedforward_dim=feedforward_dim, bias=bias) for i in range(num_decoders)])
+        self.dec4 = FrameConvDecoder(channels * (6 + 8) + num_decoders + num_encoders, channels * 6, kernel_size=3, padding=1, n_fft=n_fft, downsamples=3)
+
+        self.dec3_transformer = nn.ModuleList([FrameTransformerDecoder(channels * 6 + i, channels * 6 + num_encoders, num_bands, cropsize, n_fft, downsamples=3, feedforward_dim=feedforward_dim, bias=bias) for i in range(num_decoders)])
+        self.dec3 = FrameConvDecoder(channels * (4 + 6) + num_decoders + num_encoders, channels * 4, kernel_size=3, padding=1, n_fft=n_fft, downsamples=2)
+
+        self.dec2_transformer = nn.ModuleList([FrameTransformerDecoder(channels * 4 + i, channels * 4 + num_encoders, num_bands, cropsize, n_fft, downsamples=2, feedforward_dim=feedforward_dim, bias=bias) for i in range(num_decoders)])
+        self.dec2 = FrameConvDecoder(channels * (2 + 4) + num_decoders + num_encoders, channels * 2, kernel_size=3, padding=1, n_fft=n_fft, downsamples=1)
+
+        self.dec1_transformer = nn.ModuleList([FrameTransformerDecoder(channels * 2 + i, channels * 2 + num_encoders, num_bands, cropsize, n_fft, downsamples=1, feedforward_dim=feedforward_dim, bias=bias) for i in range(num_decoders)])
+        self.dec1 = FrameConvDecoder(channels * (1 + 2) + num_decoders + num_encoders, channels * 1, kernel_size=3, padding=1, n_fft=n_fft, downsamples=0)
+
+        self.out_transformer = nn.ModuleList([FrameTransformerDecoder(channels + i, channels + num_encoders, num_bands, cropsize, n_fft, downsamples=0, feedforward_dim=feedforward_dim, bias=bias) for i in range(num_decoders)])
+        self.out = nn.Linear(channels + num_decoders, 2)
 
     def __call__(self, x):
         x = x[:, :, :self.max_bin]
 
+        e1 = self.enc1(x)
+        for module in self.enc1_transformer:
+            t = module(e1, mask=self.mask if self.autoregressive else None)
+            e1 = torch.cat((e1, t), dim=1)
+
+        e2 = self.enc2(e1)
+        for module in self.enc2_transformer:
+            t = module(e2, mask=self.mask if self.autoregressive else None)
+            e2 = torch.cat((e2, t), dim=1)
+
+        e3 = self.enc3(e2)
+        for module in self.enc3_transformer:
+            t = module(e3, mask=self.mask if self.autoregressive else None)
+            e3 = torch.cat((e3, t), dim=1)
+
+        e4 = self.enc4(e3)
+        for module in self.enc4_transformer:
+            t = module(e4, mask=self.mask if self.autoregressive else None)
+            e4 = torch.cat((e4, t), dim=1)
+
+        e5 = self.enc5(e4)
+        h = e5
+        for module in self.enc5_transformer:
+            t = module(e5, mask=self.mask if self.autoregressive else None)
+            e5 = torch.cat((e5, t), dim=1)
+        for module in self.dec4_transformer:
+            t = module(h, skip=e5, mask=self.mask if self.autoregressive else None)
+            h = torch.cat((h, t), dim=1)
+            
+        h = self.dec4(h, e4)
+        for module in self.dec3_transformer:
+            t = module(h, skip=e4, mask=self.mask if self.autoregressive else None)
+            h = torch.cat((h, t), dim=1)
+
+        h = self.dec3(h, e3)        
+        for module in self.dec2_transformer:
+            t = module(h, skip=e3, mask=self.mask if self.autoregressive else None)
+            h = torch.cat((h, t), dim=1)
+
+        h = self.dec2(h, e2)        
+        for module in self.dec1_transformer:
+            t = module(h, skip=e2, mask=self.mask if self.autoregressive else None)
+            h = torch.cat((h, t), dim=1)
+
+        h = self.dec1(h, e1)
         for module in self.out_transformer:
-            t = module(x, mask=self.mask if self.autoregressive else None)
-            x = torch.cat((x, t), dim=1)
+            t = module(h, skip=e1, mask=self.mask if self.autoregressive else None)
+            h = torch.cat((h, t), dim=1)
+
+        out = self.out(h.transpose(1,3)).transpose(1,3)
 
         return F.pad(
-            input=self.out_activate(x[:, -2:]),
-            pad=(0, 0, 0, self.output_bin - self.max_bin),
+            input=self.out_activate(out),
+            pad=(0, 0, 0, self.output_bin - out.size()[2]),
             mode='replicate'
         )
         
@@ -87,8 +163,10 @@ class CausalConv1d(nn.Module):
         return F.conv1d(F.pad(x, (self.kernel_size - 1, 0)), weight=self.weight, bias=self.bias, stride=self.stride, groups=self.groups)
 
 class FrameTransformerEncoder(nn.Module):
-    def __init__(self, channels, bins, num_bands=4, cropsize=1024, n_fft=2048, feedforward_dim=2048, downsamples=0, bias=False, dropout=0.1):
+    def __init__(self, channels, num_bands=4, cropsize=1024, n_fft=2048, feedforward_dim=2048, downsamples=0, bias=False, dropout=0.1):
         super(FrameTransformerEncoder, self).__init__()
+
+        bins = get_bins(n_fft=n_fft, downsamples=downsamples)
 
         self.bins = bins
         self.cropsize = cropsize
@@ -155,7 +233,7 @@ class FrameTransformerDecoder(nn.Module):
         self.num_bands = num_bands
 
         self.in_norm = FrameNorm(channels, cropsize, n_fft, downsamples)
-        self.skip_norm = FrameNorm(skip_channels, cropsize, n_fft, downsamples)
+        self.skip_norm =FrameNorm(skip_channels, cropsize, n_fft, downsamples)
 
         self.in_project = nn.Linear(channels, 1, bias=bias)
         self.skip_project = nn.Linear(skip_channels, 1, bias=bias)
