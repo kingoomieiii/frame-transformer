@@ -172,11 +172,11 @@ class FrameTransformerEncoder(nn.Module):
         self.cropsize = cropsize
         self.num_bands = num_bands
 
-        self.in_norm = nn.LayerNorm(bins)
+        self.in_norm = FrameNorm(channels, cropsize, n_fft, downsamples)
         self.in_project = nn.Linear(channels, 1, bias=bias)
 
         self.relu = nn.ReLU(inplace=True)
-        
+
         self.norm1 = nn.LayerNorm(bins)
         self.glu = nn.Sequential(
             nn.Linear(bins, bins * 2, bias=bias),
@@ -198,7 +198,7 @@ class FrameTransformerEncoder(nn.Module):
         self.conv3 = nn.Linear(feedforward_dim, bins, bias=bias)
 
     def __call__(self, x, mask=None):
-        x = self.in_project(self.relu(self.in_norm(x.transpose(2,3)).transpose(2,3)).transpose(1,3)).squeeze(3)
+        x = self.in_project(self.relu(self.in_norm(x)).transpose(1,3)).squeeze(3)
 
         h = self.norm1(x)
         h = self.glu(h)
@@ -232,8 +232,8 @@ class FrameTransformerDecoder(nn.Module):
         self.cropsize = cropsize
         self.num_bands = num_bands
 
-        self.in_norm = nn.LayerNorm(bins)
-        self.skip_norm = nn.LayerNorm(bins)
+        self.in_norm = FrameNorm(channels, cropsize, n_fft, downsamples)
+        self.skip_norm =FrameNorm(skip_channels, cropsize, n_fft, downsamples)
 
         self.in_project = nn.Linear(channels, 1, bias=bias)
         self.skip_project = nn.Linear(skip_channels, 1, bias=bias)
@@ -274,8 +274,8 @@ class FrameTransformerDecoder(nn.Module):
         self.dropout5 = nn.Dropout(dropout) if dropout > 0 else nn.Identity()
 
     def __call__(self, x, skip, mask=None):
-        x = self.in_project(self.relu(self.in_norm(x.transpose(2,3)).transpose(2,3)).transpose(1,3)).squeeze(3)
-        skip = self.skip_project(self.relu(self.skip_norm(skip.transpose(2,3)).transpose(2,3)).transpose(1,3)).squeeze(3)
+        x = self.in_project(self.relu(self.in_norm(x)).transpose(1,3)).squeeze(3)
+        skip = self.skip_project(self.relu(self.skip_norm(skip)).transpose(1,3)).squeeze(3)
 
         h = self.norm1(x)
         hs = self.self_attn1(h, mask=mask)
@@ -341,14 +341,14 @@ class MultibandFrameAttention(nn.Module):
         return o
 
 class FrameNorm(nn.Module):
-    def __init__(self, n_fft=2048, downsamples=0):
+    def __init__(self, channels, cropsize=1024, n_fft=2048, downsamples=0):
         super(FrameNorm, self).__init__()
 
         bins = get_bins(n_fft, downsamples)
-        self.norm = nn.LayerNorm(bins)
+        self.norm = nn.LayerNorm((bins, channels))
 
     def __call__(self, x):
-        return self.norm(x.transpose(2,3)).transpose(2,3)
+        return self.norm(x.transpose(1,3)).transpose(1,3)
 
 class FrameConv(nn.Module):
     def __init__(self, in_channels, out_channels, kernel_size=3, stride=1, padding=1, dilation=1, groups=1, activate=nn.LeakyReLU, norm=True, n_fft=2048, downsamples=0, cropsize=1024):
@@ -357,7 +357,7 @@ class FrameConv(nn.Module):
         body = []
             
         if norm:
-            body.append(FrameNorm(n_fft, downsamples))
+            body.append(FrameNorm(in_channels, cropsize, n_fft, downsamples))
         
         if activate:
             body.append(activate(inplace=True))
