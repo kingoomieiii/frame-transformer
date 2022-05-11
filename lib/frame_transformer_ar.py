@@ -26,13 +26,20 @@ class FrameTransformer(nn.Module):
         self.out = nn.Linear(channels + num_decoders, 2, bias=bias)
         self.activate = out_activate
 
+        self.register_buffer('indices', torch.arange(cropsize))
+        self.embedding = nn.Embedding(cropsize, self.max_bin)
+
+    def embed(self, x):
+        e = self.embedding(self.indices).t()
+        return x + e
+
     def __call__(self, src, tgt):
         mem = self.encode(src)
-        tgt = self.decode(tgt, mem)
+        tgt = self.decode(tgt, mem=mem)
         return tgt
 
     def encode(self, src):
-        src = src[:, :, :self.max_bin]
+        src = self.embed(src[:, :, :self.max_bin])
 
         for module in self.encoder:
             t = module(src)
@@ -40,13 +47,8 @@ class FrameTransformer(nn.Module):
 
         return src
 
-    def decode(self, tgt, mem, idx=-1):
-        tgt = tgt[:, :, :self.max_bin]
-
-        # if idx != -1:
-        #     self.register_buffer('mask', torch.triu(torch.ones(self.cropsize, self.cropsize) * float('-inf'), diagonal=1))
-        #     self.mask[:, idx+1:] = float('-inf')
-        #     self.mask.to(tgt.device)
+    def decode(self, tgt, mem):
+        tgt = self.embed(tgt[:, :, :self.max_bin])
 
         for module in self.decoder:
             t = module(tgt, mem=mem, mask=self.mask)
@@ -86,67 +88,12 @@ class FrameTransformerEncoder(nn.Module):
         self.cropsize = cropsize
         self.num_bands = num_bands
         self.autoregressive = autoregressive
-
-        #self.in_norm = nn.LayerNorm(bins)
         self.in_project = nn.Linear(channels, 1, bias=bias)
-        #self.in_project = nn.Conv2d(channels, 1, kernel_size=1, padding=0, bias=bias)
-
         self.encoder = nn.TransformerEncoderLayer(bins, num_bands, feedforward_dim, batch_first=True, norm_first=True, dropout=dropout)
-
-        self.relu = nn.ReLU(inplace=True)
-
-        # self.norm1 = nn.LayerNorm(bins)
-        # self.glu = nn.Sequential(
-        #     nn.Linear(bins, bins * 2, bias=bias),
-        #     nn.GLU())
-        # self.dropout1 = nn.Dropout(dropout) if dropout > 0 else nn.Identity()
-
-        # self.norm2 = nn.LayerNorm(bins)
-        # self.conv1L = nn.Sequential(
-        #     CausalConv1d(bins, bins, kernel_size=11, groups=bins, bias=bias),
-        #     nn.Conv1d(bins, feedforward_dim // 2, kernel_size=1, padding=0, bias=bias))
-        # self.conv1R = nn.Sequential(
-        #     CausalConv1d(bins, bins, kernel_size=7, groups=bins, bias=bias),
-        #     nn.Conv1d(bins, feedforward_dim // 4, kernel_size=1, padding=0, bias=bias))
-        # self.norm3 = nn.LayerNorm(feedforward_dim // 2)
-        # self.conv1M = nn.Sequential(
-        #     CausalConv1d(feedforward_dim // 2, feedforward_dim // 2, kernel_size=7, groups=feedforward_dim // 2, bias=bias),
-        #     nn.Conv1d(feedforward_dim // 2, bins, kernel_size=1, padding=0, bias=bias))
-        # self.dropout2 = nn.Dropout(dropout) if dropout > 0 else nn.Identity()
-
-        # self.norm4 = nn.LayerNorm(bins)
-        # self.attn = MultibandFrameAttention(num_bands, bins, cropsize, kernel_size=3)
-        # self.dropout3 = nn.Dropout(dropout) if dropout > 0 else nn.Identity()
-
-        # self.norm5 = nn.LayerNorm(bins)
-        # self.conv2 = nn.Linear(bins, feedforward_dim, bias=bias)
-        # self.conv3 = nn.Linear(feedforward_dim, bins, bias=bias)
-        # self.dropout4 = nn.Dropout(dropout) if dropout > 0 else nn.Identity()
 
     def __call__(self, x, mask=None):
         x = self.in_project(x.transpose(1,3)).squeeze(3)
         return self.encoder(x).transpose(1,2).unsqueeze(1)
-
-        # h = self.norm1(x)
-        # h = self.glu(h)
-        # x = x + self.dropout1(h)
-
-        # h = self.norm2(x)
-        # hL = self.relu(self.conv1L(h.transpose(1,2)).transpose(1,2))
-        # hR = self.conv1R(h.transpose(1,2)).transpose(1,2)
-        # h = self.norm3(hL + F.pad(hR, (0, hL.shape[2]-hR.shape[2])))
-        # h = self.dropout2(self.conv1M(h.transpose(1,2)).transpose(1,2))
-        # x = x + self.dropout2(h)
-
-        # h = self.norm4(x)
-        # h = self.attn(h, mask=mask)
-        # x = x + self.dropout3(h)
-
-        # h = self.norm5(x)
-        # h = self.conv3(torch.square(self.relu(self.conv2(h))))
-        # x = x + self.dropout4(h)
-
-        # return x.transpose(1,2).unsqueeze(1)
 
 class FrameTransformerDecoder(nn.Module):
     def __init__(self, channels, skip_channels, num_bands=4, cropsize=1024, bins=2048, feedforward_dim=2048, downsamples=0, bias=False, dropout=0.1):
@@ -155,76 +102,14 @@ class FrameTransformerDecoder(nn.Module):
         self.bins = bins
         self.cropsize = cropsize
         self.num_bands = num_bands
-
         self.in_project = nn.Linear(channels, 1, bias=bias)
         self.mem_project = nn.Linear(skip_channels, 1, bias=bias)
-
         self.decoder = nn.TransformerDecoderLayer(bins, num_bands, feedforward_dim, batch_first=True, norm_first=True, dropout=dropout)
-
-        self.relu = nn.ReLU(inplace=True)
-
-        # self.norm1 = nn.LayerNorm(bins)
-        # self.self_attn1 = MultibandFrameAttention(num_bands, bins, cropsize, kernel_size=3)
-        # self.skip_attn1 = MultibandFrameAttention(num_bands, bins, cropsize, kernel_size=3)
-        # self.dropout1 = nn.Dropout(dropout) if dropout > 0 else nn.Identity()
-
-        # self.norm2 = nn.LayerNorm(bins)
-        # self.conv1L = nn.Sequential(
-        #     CausalConv1d(bins, bins, kernel_size=11, groups=bins, bias=bias),
-        #     nn.Conv1d(bins, feedforward_dim // 2, kernel_size=1, padding=0, bias=bias))
-        # self.conv1R = nn.Sequential(
-        #     CausalConv1d(bins, bins, kernel_size=7, groups=bins, bias=bias),
-        #     nn.Conv1d(bins, feedforward_dim // 4, kernel_size=1, padding=0, bias=bias))
-        # self.norm3 = nn.LayerNorm(feedforward_dim // 2)
-        # self.conv2 = nn.Sequential(
-        #     CausalConv1d(feedforward_dim // 2, feedforward_dim // 2, kernel_size=7, groups=feedforward_dim // 2, bias=bias),
-        #     nn.Conv1d(feedforward_dim // 2, bins, kernel_size=1, padding=0, bias=bias))
-        # self.dropout2 = nn.Dropout(dropout) if dropout > 0 else nn.Identity()
-
-        # self.norm4 = nn.LayerNorm(bins)
-        # self.self_attn2 = MultibandFrameAttention(num_bands, bins, cropsize, kernel_size=3)
-        # self.dropout3 = nn.Dropout(dropout) if dropout > 0 else nn.Identity()
-
-        # self.norm5 = nn.LayerNorm(bins)
-        # self.skip_attn2 = MultibandFrameAttention(num_bands, bins, cropsize, kernel_size=3)
-        # self.dropout4 = nn.Dropout(dropout) if dropout > 0 else nn.Identity()
-
-        # self.norm6 = nn.LayerNorm(bins)
-        # self.conv3 = nn.Linear(bins, feedforward_dim, bias=bias)
-        # self.conv4 = nn.Linear(feedforward_dim, bins, bias=bias)
-        # self.dropout5 = nn.Dropout(dropout) if dropout > 0 else nn.Identity()
 
     def __call__(self, x, mem, mask=None):
         x = self.in_project(x.transpose(1,3)).squeeze(3)
         mem = self.mem_project(mem.transpose(1,3)).squeeze(3)
         return self.decoder(tgt=x, memory=mem, tgt_mask=mask).transpose(1,2).unsqueeze(1)
-
-        # h = self.norm1(x)
-        # hs = self.self_attn1(h, mask=mask)
-        # hm = self.skip_attn1(h, mem=mem)
-        # x = x + self.dropout1(hs + hm)
-
-        # h = self.norm2(x)
-        # hL = self.relu(self.conv1L(h.transpose(1,2)).transpose(1,2))
-        # hR = self.conv1R(h.transpose(1,2)).transpose(1,2)
-        # h = self.norm3(hL + F.pad(hR, (0, hL.shape[2]-hR.shape[2])))
-        # h = self.dropout2(self.conv2(h.transpose(1,2)).transpose(1,2))
-        # x = x + h
-
-        # h = self.norm4(x)
-        # h = self.dropout3(self.self_attn2(h, mask=mask))
-        # x = x + h
-
-        # h = self.norm5(x)
-        # h = self.dropout4(self.skip_attn2(h, mem=mem))
-        # x = x + h
-
-        # h = self.norm6(x)
-        # h = torch.square(torch.relu(self.conv3(h)))
-        # h = self.dropout5(self.conv4(h))
-        # x = x + h
-
-        # return x.transpose(1,2).unsqueeze(1)
 
 class MultibandFrameAttention(nn.Module):
     def __init__(self, num_bands, bins, cropsize, kernel_size=3):
