@@ -65,13 +65,10 @@ def train_epoch(dataloader, model, device, optimizer, accumulation_steps, grad_s
         src = src.to(device)
         tgt = tgt.to(device)
 
-        if np.random.uniform() < mixup_rate:
-            src, tgt = mixup(src, tgt, mixup_alpha)
-
         with torch.cuda.amp.autocast_mode.autocast(enabled=grad_scaler is not None):
             pred = model(src, F.pad(tgt, (1,0))[:, :, :, :-1])
 
-        loss = crit(pred, tgt)
+        loss = crit(src * pred, tgt)
         accum_loss = loss / accumulation_steps
         batch_loss = batch_loss + accum_loss
 
@@ -110,7 +107,7 @@ def train_epoch(dataloader, model, device, optimizer, accumulation_steps, grad_s
 
     return sum_loss / len(dataloader.dataset)
 
-def validate_epoch(dataloader, model, device, grad_scaler, include_phase=False):
+def validate_epoch(dataloader, model: FrameTransformer, device, grad_scaler, include_phase=False):
     model.eval()
     sum_loss = 0
     crit = nn.L1Loss()
@@ -119,13 +116,14 @@ def validate_epoch(dataloader, model, device, grad_scaler, include_phase=False):
         for src, tgt in tqdm(dataloader):
             src = src.to(device)
             tgt = tgt.to(device)
-            curr = torch.zeros_like(src)
+
+            mem = model.encode(src)        
+            h = torch.zeros_like(src)
 
             for i in tqdm(range(src.shape[3])):
-                h = model(src, F.pad(curr, (1,0))[:,:,:,:-1])                
-                curr[:, :, :, i] = h[:, :, :, i]
-
-            loss = crit(curr, tgt)
+                h = model.decode(F.pad(h, (1,0))[:, :, :, :-1], mem=mem, idx=i)
+ 
+            loss = crit(src * h, tgt)
     
             if torch.logical_or(loss.isnan(), loss.isinf()):
                 print('non-finite or nan validation loss; aborting')
@@ -174,8 +172,8 @@ def main():
     p.add_argument('--val_batchsize', '-b', type=int, default=4)
     p.add_argument('--val_cropsize', '-c', type=int, default=1024)
     p.add_argument('--num_workers', '-w', type=int, default=4)
-    p.add_argument('--warmup_epoch', type=int, default=3)
-    p.add_argument('--epoch', '-E', type=int, default=200)
+    p.add_argument('--warmup_epoch', type=int, default=8)
+    p.add_argument('--epoch', '-E', type=int, default=32)
     p.add_argument('--epoch_size', type=int, default=None)
     p.add_argument('--reduction_rate', '-R', type=float, default=0.0)
     p.add_argument('--reduction_level', '-L', type=float, default=0.2)
@@ -192,6 +190,7 @@ def main():
     p.add_argument('--save_all', type=str, default='false')
     p.add_argument('--model_dir', type=str, default='E://')
     p.add_argument('--debug', action='store_true')
+    p.add_argument('--dropout', type=float, default=0.4)
     args = p.parse_args()
 
     args.amsgrad = str.lower(args.amsgrad) == 'true'
@@ -212,7 +211,7 @@ def main():
     train_dataset = dataset.VocalAugmentationDataset(
         path="C://cs2048_sr44100_hl1024_nf2048_of0",
         extra_path="G://cs2048_sr44100_hl1024_nf2048_of0",
-        pair_path="G://cs2048_sr44100_hl1024_nf2048_of0_PAIRS",
+        pair_path=None,#"G://cs2048_sr44100_hl1024_nf2048_of0_PAIRS",
         vocal_path="G://cs2048_sr44100_hl1024_nf2048_of0_VOCALS",
         is_validation=False,
         epoch_size=args.epoch_size,
@@ -266,7 +265,7 @@ def main():
         logger.info('{} {} {}'.format(i + 1, os.path.basename(X_fname), os.path.basename(y_fname)))
 
     device = torch.device('cpu')
-    model = FrameTransformer(channels=args.channels, n_fft=args.n_fft, num_encoders=args.num_encoders, num_decoders=args.num_decoders, num_bands=args.num_bands, feedforward_dim=args.feedforward_dim, bias=args.bias, cropsize=args.cropsize)
+    model = FrameTransformer(channels=args.channels, n_fft=args.n_fft, num_encoders=args.num_encoders, num_decoders=args.num_decoders, num_bands=args.num_bands, feedforward_dim=args.feedforward_dim, bias=args.bias, cropsize=args.cropsize, out_activate=nn.Sigmoid())
 
     if args.pretrained_model is not None:
         model.load_state_dict(torch.load(args.pretrained_model, map_location=device))
