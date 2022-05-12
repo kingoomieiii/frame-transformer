@@ -23,10 +23,10 @@ class VocalAutoregressiveDataset(torch.utils.data.Dataset):
         self.cropsize = cropsize
         self.mixup_rate = mixup_rate
         self.mixup_alpha = mixup_alpha
+        pair_list = []
 
         if pair_path is not None and pair_mul > 0:
             pairs = [os.path.join(pair_path, f) for f in os.listdir(pair_path) if os.path.isfile(os.path.join(pair_path, f))]
-            pair_list = []
 
             for p in pairs:
                 if pair_mul > 1:
@@ -62,9 +62,8 @@ class VocalAutoregressiveDataset(torch.utils.data.Dataset):
         for p in patch_list:
             self.curr_list.append(p)
 
-        if pair_path is not None:
-            for p in pair_list:
-                self.curr_list.append(p)
+        for p in pair_list:
+            self.curr_list.append(p)
 
         self.downsamples = downsamples
         self.full_list = self.curr_list
@@ -99,18 +98,15 @@ class VocalAutoregressiveDataset(torch.utils.data.Dataset):
             else:
                 V[1] = V[1] * 0
 
-        start = np.random.randint(0, V.shape[2] - self.cropsize - 1)
-        stop = start + self.cropsize + 1
-        V = V[:,:,start:stop]
+        if self.slide:
+            start = np.random.randint(0, V.shape[2] - self.cropsize - 2)
+            stop = start + self.cropsize + 1
+            V = V[:,:,start:stop]
 
         if np.random.uniform() < 0.5 and root:
             V2, Vc2 = self._get_vocals(root=False)
             a = np.random.beta(1, 1)
             inv = 1 - a
-
-            start = np.random.randint(0, V2.shape[2] - self.cropsize - 1)
-            stop = start + self.cropsize + 1
-            V2 = V2[:,:,start:stop]
 
             Vc = (Vc * a) + (Vc2 * inv)
             V = (V * a) + (V2 * inv)
@@ -132,7 +128,7 @@ class VocalAutoregressiveDataset(torch.utils.data.Dataset):
             Y = X[:,:,start+1:stop+1]
             X = X[:,:,start:stop]
 
-            if aug and np.random.uniform() < 0.3 and not vocals:
+            if aug and np.random.uniform() < 0.05 and not vocals:
                 V, Vc = self._get_vocals()
                 X = X + V[:,:,:-1]
                 Y = Y + V[:,:,1:]

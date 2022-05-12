@@ -13,42 +13,51 @@ class ReLU1(nn.Module):
         return self.relu(x) / 6.0
 
 class FrameTransformer(nn.Module):
-    def __init__(self, channels, n_fft=2048, feedforward_dim=512, num_bands=4, num_encoders=1, num_decoders=1, cropsize=1024, bias=False, autoregressive=False, out_activate=ReLU1()):
+    def __init__(self, channels, n_fft=2048, feedforward_dim=512, num_bands=4, num_encoders=1, num_decoders=1, cropsize=1024, bias=False, autoregressive=False, out_activate=ReLU1(), encoder_only=False):
         super(FrameTransformer, self).__init__()
         
         self.max_bin = n_fft // 2
         self.output_bin = n_fft // 2 + 1
         self.cropsize = cropsize
         
+        self.encoder_only = encoder_only
         self.register_buffer('mask', torch.triu(torch.ones(cropsize, cropsize) * float('-inf'), diagonal=1))
         self.encoder = nn.ModuleList([FrameTransformerEncoder(channels + i, bins=self.max_bin, num_bands=num_bands, cropsize=cropsize, feedforward_dim=feedforward_dim, bias=bias) for i in range(num_encoders)])
-        self.decoder = nn.ModuleList([FrameTransformerDecoder(channels + i, channels + num_encoders, bins=self.max_bin, num_bands=num_bands, cropsize=cropsize, feedforward_dim=feedforward_dim, bias=bias) for i in range(num_decoders)])
-        self.out = nn.Linear(channels + num_decoders, 2, bias=bias)
-        self.activate = out_activate
+        self.decoder = nn.ModuleList([FrameTransformerDecoder(channels + i, channels + num_encoders, bins=self.max_bin, num_bands=num_bands, cropsize=cropsize, feedforward_dim=feedforward_dim, bias=bias) for i in range(num_decoders)]) if not encoder_only else None
+        self.out = nn.Linear(channels + (num_decoders if not encoder_only else num_encoders), 2, bias=bias)
+        self.activate = out_activate if out_activate is not None else nn.Identity()
 
-        self.register_buffer('indices', torch.arange(cropsize))
-        self.embedding = nn.Embedding(cropsize, self.max_bin)
+        # self.register_buffer('indices', torch.arange(cropsize))
+        # self.embedding = nn.Embedding(cropsize, self.max_bin)
 
     def embed(self, x):
         e = self.embedding(self.indices).t()
         return x + e
 
-    def __call__(self, src, tgt):
-        mem = self.encode(src)
-        tgt = self.decode(tgt, mem=mem)
-        return tgt
+    def __call__(self, src, tgt=None):
+        if self.encoder_only:
+            out = self.encode(src)
+        else:
+            mem = self.encode(src)
+            out = self.decode(tgt, mem=mem)
+
+        return F.pad(
+            input=self.activate(self.out(out.transpose(1,3)).transpose(1,3)),
+            pad=(0, 0, 0, self.output_bin - self.max_bin),
+            mode='replicate'
+        )
 
     def encode(self, src):
-        src = self.embed(src[:, :, :self.max_bin])
+        src = src[:, :, :self.max_bin]
 
         for module in self.encoder:
-            t = module(src)
+            t = module(src, mask=self.mask)
             src = torch.cat((src, t), dim=1)
 
         return src
 
     def decode(self, tgt, mem):
-        tgt = self.embed(tgt[:, :, :self.max_bin])
+        tgt = tgt[:, :, :self.max_bin]
 
         for module in self.decoder:
             t = module(tgt, mem=mem, mask=self.mask)
@@ -78,44 +87,14 @@ class CausalConv1d(nn.Module):
             nn.init.uniform_(self.bias, -bound, bound)
 
     def forward(self, x):
-        return F.conv1d(x, weight=self.weight, bias=self.bias, padding=self.padding, stride=self.stride, groups=self.groups)[:,:,:-self.padding]
-
-class FrameTransformerEncoder(nn.Module):
-    def __init__(self, channels, bins, num_bands=4, cropsize=1024, feedforward_dim=2048, bias=False, dropout=0.1, autoregressive=False):
-        super(FrameTransformerEncoder, self).__init__()
-
-        self.bins = bins
-        self.cropsize = cropsize
-        self.num_bands = num_bands
-        self.autoregressive = autoregressive
-        self.in_project = nn.Linear(channels, 1, bias=bias)
-        self.encoder = nn.TransformerEncoderLayer(bins, num_bands, feedforward_dim, batch_first=True, norm_first=True, dropout=dropout)
-
-    def __call__(self, x, mask=None):
-        x = self.in_project(x.transpose(1,3)).squeeze(3)
-        return self.encoder(x).transpose(1,2).unsqueeze(1)
-
-class FrameTransformerDecoder(nn.Module):
-    def __init__(self, channels, skip_channels, num_bands=4, cropsize=1024, bins=2048, feedforward_dim=2048, downsamples=0, bias=False, dropout=0.1):
-        super(FrameTransformerDecoder, self).__init__()
-
-        self.bins = bins
-        self.cropsize = cropsize
-        self.num_bands = num_bands
-        self.in_project = nn.Linear(channels, 1, bias=bias)
-        self.mem_project = nn.Linear(skip_channels, 1, bias=bias)
-        self.decoder = nn.TransformerDecoderLayer(bins, num_bands, feedforward_dim, batch_first=True, norm_first=True, dropout=dropout)
-
-    def __call__(self, x, mem, mask=None):
-        x = self.in_project(x.transpose(1,3)).squeeze(3)
-        mem = self.mem_project(mem.transpose(1,3)).squeeze(3)
-        return self.decoder(tgt=x, memory=mem, tgt_mask=mask).transpose(1,2).unsqueeze(1)
+        return F.conv1d(F.pad(x, (self.kernel_size - 1, 0)), weight=self.weight, bias=self.bias, stride=self.stride, groups=self.groups)
 
 class MultibandFrameAttention(nn.Module):
     def __init__(self, num_bands, bins, cropsize, kernel_size=3):
         super().__init__()
 
         self.num_bands = num_bands
+
         self.q_proj = nn.Linear(bins, bins)
         self.q_conv = CausalConv1d(bins, bins, kernel_size=kernel_size, groups=bins)
 
@@ -140,12 +119,59 @@ class MultibandFrameAttention(nn.Module):
         qk = (torch.matmul(q,k)+p) / math.sqrt(c)
 
         if mask is not None:
-            qk = qk.masked_fill(mask == 0, float('-inf'))
+            qk = qk + mask
 
         a = F.softmax(qk, dim=-1)
         a = torch.matmul(a,v).transpose(1,2).reshape(b,w,-1)
         o = self.o_proj(a)
         return o
+
+class FrameTransformerEncoder(nn.Module):
+    def __init__(self, channels, bins, num_bands=4, cropsize=1024, feedforward_dim=2048, bias=False, dropout=0.1, autoregressive=False):
+        super(FrameTransformerEncoder, self).__init__()
+
+        self.bins = bins
+        self.cropsize = cropsize
+        self.num_bands = num_bands
+        self.autoregressive = autoregressive
+        self.in_project = nn.Linear(channels, 1, bias=bias)
+
+        self.norm1 = nn.LayerNorm(bins)
+        self.attn = MultibandFrameAttention(num_bands, bins, cropsize, kernel_size=3)
+
+        self.norm2 = nn.LayerNorm(bins)
+        self.relu = nn.ReLU(inplace=True)
+        self.linear1 = nn.Linear(bins, feedforward_dim, bias=bias)
+        self.linear2 = nn.Linear(feedforward_dim, bins, bias=bias)
+
+    def __call__(self, x, mask=None):
+        x = self.in_project(x.transpose(1,3)).squeeze(3)
+
+        h = self.norm1(x)
+        h = self.attn(h, mask=mask)
+        x = x + h
+
+        h = self.norm2(x)
+        h = self.linear2(torch.square(self.relu(self.linear1(h))))
+        x = x + h
+
+        return x.transpose(1,2).unsqueeze(1)
+
+class FrameTransformerDecoder(nn.Module):
+    def __init__(self, channels, skip_channels, num_bands=4, cropsize=1024, bins=2048, feedforward_dim=2048, downsamples=0, bias=False, dropout=0.1):
+        super(FrameTransformerDecoder, self).__init__()
+
+        self.bins = bins
+        self.cropsize = cropsize
+        self.num_bands = num_bands
+        self.in_project = nn.Linear(channels, 1, bias=bias)
+        self.mem_project = nn.Linear(skip_channels, 1, bias=bias)
+        self.decoder = nn.TransformerDecoderLayer(bins, num_bands, feedforward_dim, batch_first=True, norm_first=True, dropout=dropout)
+
+    def __call__(self, x, mem, mask=None):
+        x = self.in_project(x.transpose(1,3)).squeeze(3)
+        mem = self.mem_project(mem.transpose(1,3)).squeeze(3)
+        return self.decoder(tgt=x, memory=mem, tgt_mask=mask).transpose(1,2).unsqueeze(1)
 
 class FrameNorm(nn.Module):
     def __init__(self, channels, cropsize=1024, n_fft=2048, downsamples=0):

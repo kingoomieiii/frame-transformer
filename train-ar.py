@@ -66,7 +66,7 @@ def train_epoch(dataloader, model, device, optimizer, accumulation_steps, grad_s
         tgt = tgt.to(device)
 
         with torch.cuda.amp.autocast_mode.autocast(enabled=grad_scaler is not None):
-            pred = model(src, F.pad(tgt, (1,0))[:, :, :, :-1])
+            pred = F.relu6(model(src)) / 6
 
         loss = crit(src * pred, tgt)
         accum_loss = loss / accumulation_steps
@@ -117,13 +117,10 @@ def validate_epoch(dataloader, model: FrameTransformer, device, grad_scaler, inc
             src = src.to(device)
             tgt = tgt.to(device)
 
-            mem = model.encode(src)        
-            h = torch.zeros_like(src)
-
-            for i in tqdm(range(src.shape[3])):
-                h = model.decode(F.pad(h, (1,0))[:, :, :, :-1], mem=mem, idx=i)
+            with torch.cuda.amp.autocast_mode.autocast(enabled=grad_scaler is not None):
+                h = F.relu6(model(src))/6.0
  
-            loss = crit(src * h, tgt)
+            loss = crit(h, tgt)
     
             if torch.logical_or(loss.isnan(), loss.isinf()):
                 print('non-finite or nan validation loss; aborting')
@@ -172,7 +169,7 @@ def main():
     p.add_argument('--val_batchsize', '-b', type=int, default=4)
     p.add_argument('--val_cropsize', '-c', type=int, default=1024)
     p.add_argument('--num_workers', '-w', type=int, default=4)
-    p.add_argument('--warmup_epoch', type=int, default=8)
+    p.add_argument('--warmup_epoch', type=int, default=4)
     p.add_argument('--epoch', '-E', type=int, default=32)
     p.add_argument('--epoch_size', type=int, default=None)
     p.add_argument('--reduction_rate', '-R', type=float, default=0.0)
@@ -187,7 +184,7 @@ def main():
     p.add_argument('--progress_bar', '-pb', type=str, default='true')
     p.add_argument('--mixed_precision', type=str, default='true')
     p.add_argument('--force_voxaug', type=str, default='false')
-    p.add_argument('--save_all', type=str, default='false')
+    p.add_argument('--save_all', type=str, default='true')
     p.add_argument('--model_dir', type=str, default='E://')
     p.add_argument('--debug', action='store_true')
     p.add_argument('--dropout', type=float, default=0.4)
@@ -208,10 +205,10 @@ def main():
     np.random.seed(args.seed + 1)
     torch.manual_seed(args.seed + 1)
 
-    train_dataset = dataset.VocalAugmentationDataset(
+    train_dataset = dataset.VocalAutoregressiveDataset(
         path="C://cs2048_sr44100_hl1024_nf2048_of0",
         extra_path="G://cs2048_sr44100_hl1024_nf2048_of0",
-        pair_path=None,#"G://cs2048_sr44100_hl1024_nf2048_of0_PAIRS",
+        mix_path="C://cs2048_sr44100_hl1024_nf2048_of0_MIXES",
         vocal_path="G://cs2048_sr44100_hl1024_nf2048_of0_VOCALS",
         is_validation=False,
         epoch_size=args.epoch_size,
@@ -228,10 +225,8 @@ def main():
         num_workers=args.num_workers
     )
     
-    val_dataset = dataset.VocalAugmentationDataset(
-        path="C://cs1024_sr44100_hl1024_nf2048_of0_VALIDATION",
-        extra_path=None,#"G://cs2048_sr44100_hl1024_nf2048_of0",
-        vocal_path=None,#"G://cs2048_sr44100_hl1024_nf2048_of0_VOCALS",
+    val_dataset = dataset.VocalAutoregressiveDataset(
+        path="G://cs2048_sr44100_hl1024_nf2048_of0_VALIDATION",
         is_validation=True,
         epoch_size=args.epoch_size,
         cropsize=args.cropsize,
@@ -265,7 +260,7 @@ def main():
         logger.info('{} {} {}'.format(i + 1, os.path.basename(X_fname), os.path.basename(y_fname)))
 
     device = torch.device('cpu')
-    model = FrameTransformer(channels=args.channels, n_fft=args.n_fft, num_encoders=args.num_encoders, num_decoders=args.num_decoders, num_bands=args.num_bands, feedforward_dim=args.feedforward_dim, bias=args.bias, cropsize=args.cropsize, out_activate=nn.Sigmoid())
+    model = FrameTransformer(channels=args.channels, n_fft=args.n_fft, num_encoders=args.num_encoders, num_decoders=args.num_decoders, num_bands=args.num_bands, feedforward_dim=args.feedforward_dim, bias=args.bias, cropsize=args.cropsize, out_activate=None, encoder_only=True)
 
     if args.pretrained_model is not None:
         model.load_state_dict(torch.load(args.pretrained_model, map_location=device))
