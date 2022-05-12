@@ -68,7 +68,7 @@ def train_epoch(dataloader, model, device, optimizer, accumulation_steps, grad_s
         with torch.cuda.amp.autocast_mode.autocast(enabled=grad_scaler is not None):
             pred = F.relu6(model(src)) / 6
 
-        loss = crit(src * pred, tgt)
+        loss = crit(pred, tgt)
         accum_loss = loss / accumulation_steps
         batch_loss = batch_loss + accum_loss
 
@@ -169,7 +169,7 @@ def main():
     p.add_argument('--val_batchsize', '-b', type=int, default=4)
     p.add_argument('--val_cropsize', '-c', type=int, default=1024)
     p.add_argument('--num_workers', '-w', type=int, default=4)
-    p.add_argument('--warmup_epoch', type=int, default=6)
+    p.add_argument('--warmup_epoch', type=int, default=4)
     p.add_argument('--epoch', '-E', type=int, default=32)
     p.add_argument('--epoch_size', type=int, default=None)
     p.add_argument('--reduction_rate', '-R', type=float, default=0.0)
