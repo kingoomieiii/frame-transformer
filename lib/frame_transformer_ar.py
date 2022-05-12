@@ -134,26 +134,32 @@ class FrameTransformerEncoder(nn.Module):
         self.cropsize = cropsize
         self.num_bands = num_bands
         self.autoregressive = autoregressive
+
+        self.in_norm = nn.LayerNorm(bins)
         self.in_project = nn.Linear(channels, 1, bias=bias)
 
         self.norm1 = nn.LayerNorm(bins)
         self.attn = MultibandFrameAttention(num_bands, bins, cropsize, kernel_size=3)
+        self.dropout1 = nn.Dropout(dropout)
 
         self.norm2 = nn.LayerNorm(bins)
         self.relu = nn.ReLU(inplace=True)
         self.linear1 = nn.Linear(bins, feedforward_dim, bias=bias)
+        self.dropout2 = nn.Dropout(dropout)
         self.linear2 = nn.Linear(feedforward_dim, bins, bias=bias)
+        self.dropout3 = nn.Dropout(dropout)
 
     def __call__(self, x, mask=None):
+        x = self.in_norm(x.transpose(2,3)).transpose(2,3)        
         x = self.in_project(x.transpose(1,3)).squeeze(3)
 
         h = self.norm1(x)
         h = self.attn(h, mask=mask)
-        x = x + h
+        x = x + self.dropout1(h)
 
         h = self.norm2(x)
-        h = self.linear2(torch.square(self.relu(self.linear1(h))))
-        x = x + h
+        h = self.linear2(self.dropout2(torch.square(self.relu(self.linear1(h)))))
+        x = x + self.dropout3(h)
 
         return x.transpose(1,2).unsqueeze(1)
 
