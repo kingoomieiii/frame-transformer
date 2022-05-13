@@ -294,16 +294,8 @@ class VocalAugmentationDataset(torch.utils.data.Dataset):
         else:
             c = Xc
 
-        if self.include_phase:
-            Xp = (np.angle(X) + np.pi) / (2 * np.pi)
-            Yp = (np.angle(Y) + np.pi) / (2 * np.pi)
-
         X = np.clip(np.abs(X) / c, 0, 1)
         Y = np.clip(np.abs(Y) / c, 0, 1)
-
-        if self.include_phase:
-            X = np.concatenate((X, Xp), axis=0)
-            Y = np.concatenate((Y, Yp), axis=0)
 
         if np.random.uniform() < self.mixup_rate and root and not self.is_validation:
             MX, MY = self.__getitem__(np.random.randint(len(self)), root=False)

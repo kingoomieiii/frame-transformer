@@ -114,7 +114,8 @@ class MultibandFrameAttention(nn.Module):
         p = F.pad(torch.matmul(q,self.er), (1,0)).transpose(2,3)[:,:,1:,:]
         qk = (torch.matmul(q,k)+p) / math.sqrt(c)
 
-        qk = qk + mask
+        if mask is not None:
+            qk = qk + mask
 
         a = F.softmax(qk, dim=-1)
         a = torch.matmul(a,v).transpose(1,2).reshape(b,w,-1)
