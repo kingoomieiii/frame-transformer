@@ -66,7 +66,7 @@ def train_epoch(dataloader, model, device, optimizer, accumulation_steps, grad_s
         tgt = tgt.to(device)
 
         with torch.cuda.amp.autocast_mode.autocast(enabled=grad_scaler is not None):
-            pred = F.relu6(model(src)) / 6
+            pred = F.relu6(model(src)) / 6.0
 
         loss = crit(pred, tgt)
         accum_loss = loss / accumulation_steps
@@ -118,9 +118,9 @@ def validate_epoch(dataloader, model, device, grad_scaler, include_phase=False):
             tgt = tgt.to(device)
 
             with torch.cuda.amp.autocast_mode.autocast(enabled=grad_scaler is not None):
-                h = F.relu6(model(src))/6.0
+                pred = F.relu6(model(src)) / 6.0
  
-            loss = crit(h, tgt)
+            loss = crit(pred, tgt)
     
             if torch.logical_or(loss.isnan(), loss.isinf()):
                 print('non-finite or nan validation loss; aborting')
@@ -208,6 +208,7 @@ def main():
     train_dataset = dataset.VocalAutoregressiveDataset(
         path="C://cs2048_sr44100_hl1024_nf2048_of0",
         extra_path="G://cs2048_sr44100_hl1024_nf2048_of0",
+        pair_path="G://cs2048_sr44100_hl1024_nf2048_of0_PAIRS",
         mix_path="C://cs2048_sr44100_hl1024_nf2048_of0_MIXES",
         vocal_path="G://cs2048_sr44100_hl1024_nf2048_of0_VOCALS",
         is_validation=False,

@@ -19,16 +19,12 @@ class FrameTransformer(nn.Module):
         self.max_bin = n_fft // 2
         self.output_bin = n_fft // 2 + 1
         self.cropsize = cropsize
-        
         self.encoder_only = encoder_only
         self.register_buffer('mask', torch.triu(torch.ones(cropsize, cropsize) * float('-inf'), diagonal=1))
         self.encoder = nn.ModuleList([FrameTransformerEncoder(channels + i, bins=self.max_bin, num_bands=num_bands, cropsize=cropsize, feedforward_dim=feedforward_dim, bias=bias) for i in range(num_encoders)])
         self.decoder = nn.ModuleList([FrameTransformerDecoder(channels + i, channels + num_encoders, bins=self.max_bin, num_bands=num_bands, cropsize=cropsize, feedforward_dim=feedforward_dim, bias=bias) for i in range(num_decoders)]) if not encoder_only else None
         self.out = nn.Linear(channels + (num_decoders if not encoder_only else num_encoders), 2, bias=bias)
         self.activate = out_activate if out_activate is not None else nn.Identity()
-
-        # self.register_buffer('indices', torch.arange(cropsize))
-        # self.embedding = nn.Embedding(cropsize, self.max_bin)
 
     def embed(self, x):
         e = self.embedding(self.indices).t()
@@ -118,8 +114,7 @@ class MultibandFrameAttention(nn.Module):
         p = F.pad(torch.matmul(q,self.er), (1,0)).transpose(2,3)[:,:,1:,:]
         qk = (torch.matmul(q,k)+p) / math.sqrt(c)
 
-        if mask is not None:
-            qk = qk + mask
+        qk = qk + mask
 
         a = F.softmax(qk, dim=-1)
         a = torch.matmul(a,v).transpose(1,2).reshape(b,w,-1)
@@ -135,7 +130,6 @@ class FrameTransformerEncoder(nn.Module):
         self.num_bands = num_bands
         self.autoregressive = autoregressive
 
-        self.in_norm = nn.LayerNorm(bins)
         self.in_project = nn.Linear(channels, 1, bias=bias)
 
         self.norm1 = nn.LayerNorm(bins)
@@ -150,7 +144,6 @@ class FrameTransformerEncoder(nn.Module):
         self.dropout3 = nn.Dropout(dropout)
 
     def __call__(self, x, mask=None):
-        x = self.in_norm(x.transpose(2,3)).transpose(2,3)        
         x = self.in_project(x.transpose(1,3)).squeeze(3)
 
         h = self.norm1(x)
