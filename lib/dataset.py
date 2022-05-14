@@ -313,14 +313,16 @@ class MaskedPretrainingDataset(torch.utils.data.Dataset):
         
         Y = X.copy()
 
-        masked_blocks = np.random.randint(1, 16)
-        mask = np.ones((self.cropsize, self.cropsize), dtype=np.float32)
+        mask = None
+        if root:
+            masked_blocks = np.random.randint(1, 16)
+            mask = np.ones((self.cropsize, self.cropsize), dtype=np.float32)
 
-        for _ in range(masked_blocks):
-            width = np.random.randint(1, self.cropsize // 64)
-            start = np.random.randint(0, self.cropsize - width)
-            mask[:, start:start+width] = float('-inf')
-            X[:, :, start:start+width] = 1.0
+            for _ in range(masked_blocks):
+                width = np.random.randint(1, self.cropsize // 64)
+                start = np.random.randint(0, self.cropsize - width)
+                mask[:, start:start+width] = float('-inf')
+                X[:, :, start:start+width] = 1.0
       
         return X, Y, mask
 
