@@ -120,7 +120,7 @@ class VocalAutoregressiveDataset(torch.utils.data.Dataset):
         X, Xc = data['X'], data['c']
         Y = X if aug else data['Y']
         vocals = 'vocals' in data.files
-
+        
         if not self.is_validation:
             start = np.random.randint(0, X.shape[2] - self.cropsize - 1)
             stop = start + self.cropsize
@@ -165,6 +165,164 @@ class VocalAutoregressiveDataset(torch.utils.data.Dataset):
             Y = Y * a + (1 - a) * MY
 
         return X, Y
+
+class MaskedPretrainingDataset(torch.utils.data.Dataset):
+    def __init__(self, path, extra_path=None, pair_path=None, mix_path=None, vocal_path="", is_validation=False, mul=1, downsamples=0, epoch_size=None, pair_mul=1, slide=True, cropsize=256, mixup_rate=0, mixup_alpha=1):
+        self.epoch_size = epoch_size
+        self.slide = slide
+        self.mul = mul
+        patch_list = [os.path.join(path, f) for f in os.listdir(path) if os.path.isfile(os.path.join(path, f))]
+        self.cropsize = cropsize
+        self.mixup_rate = mixup_rate
+        self.mixup_alpha = mixup_alpha
+        pair_list = []
+
+        if pair_path is not None and pair_mul > 0:
+            pairs = [os.path.join(pair_path, f) for f in os.listdir(pair_path) if os.path.isfile(os.path.join(pair_path, f))]
+
+            for p in pairs:
+                if pair_mul > 1:
+                    for _ in range(pair_mul):
+                        pair_list.append(p)
+                else:
+                    if np.random.uniform() < pair_mul:
+                        pair_list.append(p)
+
+        if mix_path is not None:
+            mixes = [os.path.join(mix_path, f) for f in os.listdir(mix_path) if os.path.isfile(os.path.join(mix_path, f))]
+
+            for m in mixes:
+                if pair_mul > 1:
+                    for _ in range(pair_mul):
+                        pair_list.append(m)
+                else:
+                    if np.random.uniform() < pair_mul:
+                        pair_list.append(m)
+
+        if extra_path is not None:
+            extra_list = [os.path.join(extra_path, f) for f in os.listdir(extra_path) if os.path.isfile(os.path.join(extra_path, f))]
+
+            for f in extra_list:
+                patch_list.append(f) 
+        
+        if not is_validation and vocal_path != "":
+            self.vocal_list = [os.path.join(vocal_path, f) for f in os.listdir(vocal_path) if os.path.isfile(os.path.join(vocal_path, f))]
+
+        self.is_validation = is_validation
+
+        self.curr_list = []
+        for p in patch_list:
+            self.curr_list.append(p)
+
+        for p in pair_list:
+            self.curr_list.append(p)
+
+        self.downsamples = downsamples
+        self.full_list = self.curr_list
+
+        if not is_validation and self.epoch_size is not None:
+            self.curr_list = self.full_list[:self.epoch_size]            
+            self.rebuild()
+
+    def rebuild(self):
+        self.vidx = 0
+        random.shuffle(self.vocal_list)
+
+        if self.epoch_size is not None:
+            random.shuffle(self.full_list)
+            self.curr_list = self.full_list[:self.epoch_size]
+
+    def __len__(self):
+        return len(self.curr_list) * self.mul
+
+    def _get_vocals(self, root=True):
+        vidx = np.random.randint(len(self.vocal_list))                
+        vpath = self.vocal_list[vidx]
+        vdata = np.load(str(vpath))
+        V, Vc = vdata['X'], vdata['c']
+
+        if np.random.uniform() < 0.5:
+            V = V[::-1]
+
+        if np.random.uniform() < 0.025:
+            if np.random.uniform() < 0.5:
+                V[0] = V[0] * 0
+            else:
+                V[1] = V[1] * 0
+
+        if self.slide:
+            start = np.random.randint(0, V.shape[2] - self.cropsize - 1)
+            stop = start + self.cropsize
+            V = V[:,:,start:stop]
+
+        if np.random.uniform() < 0.5 and root:
+            V2, Vc2 = self._get_vocals(root=False)
+            a = np.random.beta(1, 1)
+            inv = 1 - a
+
+            Vc = (Vc * a) + (Vc2 * inv)
+            V = (V * a) + (V2 * inv)
+
+        return V, Vc
+
+    def __getitem__(self, idx, root=True):
+        path = self.curr_list[idx % len(self.curr_list)]
+        data = np.load(str(path))
+        aug = 'Y' not in data.files
+        X, Xc = data['X'], data['c']
+        Y = X if aug else data['Y']
+        vocals = 'vocals' in data.files
+        
+        if not self.is_validation:
+            start = np.random.randint(0, X.shape[2] - self.cropsize - 1)
+            stop = start + self.cropsize
+
+            X = X[:,:,start:stop]
+            Y = Y[:,:,start:stop]
+
+            if aug and np.random.uniform() < 0.05 and not vocals:
+                V, Vc = self._get_vocals()
+                X = X + V
+                c = np.max([Xc, Vc])
+            else:
+                c = Xc
+
+                if np.random.uniform() < 0.025:
+                    X = Y
+                    c = Xc
+
+            if np.random.uniform() < 0.5:
+                X = X[::-1]
+                Y = Y[::-1]
+        else:
+            c = Xc
+            start = np.random.randint(0, X.shape[2] - self.cropsize - 1)
+            stop = start + self.cropsize
+
+            if np.random.uniform() < 0.5:
+                X = X[:,:,start:stop]
+            else:
+                X = Y[:,:,start:stop]
+
+        X = np.clip(np.abs(X) / c, 0, 1)
+
+        if np.random.uniform() < self.mixup_rate and root and not self.is_validation:
+            _, MX, _ = self.__getitem__(np.random.randint(len(self)), root=False)
+            a = np.random.beta(self.mixup_alpha, self.mixup_alpha)
+            X = X * a + (1 - a) * MX
+        
+        Y = X.copy()
+
+        masked_blocks = np.random.randint(1, 16)
+        mask = np.ones((self.cropsize, self.cropsize), dtype=np.float32)
+
+        for _ in range(masked_blocks):
+            width = np.random.randint(1, self.cropsize // 64)
+            start = np.random.randint(0, self.cropsize - width)
+            mask[:, start:start+width] = float('-inf')
+            X[:, start:start+width] = 0
+      
+        return X, Y, mask
 
 class VocalAugmentationDataset(torch.utils.data.Dataset):
     def __init__(self, path, extra_path=None, pair_path=None, vocal_path="", is_validation=False, mul=1, downsamples=0, epoch_size=None, pair_mul=1, slide=True, cropsize=256, mixup_rate=0, mixup_alpha=1, include_phase=False, force_voxaug=False):
@@ -306,7 +464,6 @@ class VocalAugmentationDataset(torch.utils.data.Dataset):
         return X, Y
 
 class VocalRemoverTrainingSet(torch.utils.data.Dataset):
-
     def __init__(self, training_set, cropsize, reduction_rate, reduction_weight, mixup_rate, mixup_alpha):
         self.training_set = training_set
         self.cropsize = cropsize
