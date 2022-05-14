@@ -304,17 +304,14 @@ class MaskedPretrainingDataset(torch.utils.data.Dataset):
             else:
                 X = Y[:,:,start:stop]
 
-        X = np.clip(np.abs(X) / c, 0, 1)
-
         if np.random.uniform() < self.mixup_rate and root and not self.is_validation:
             _, MX, _ = self.__getitem__(np.random.randint(len(self)), root=False)
             a = np.random.beta(self.mixup_alpha, self.mixup_alpha)
             X = X * a + (1 - a) * MX
         
-        Y = X.copy()
-
         mask = None
         if root:
+            Y = X.copy()
             masked_blocks = np.random.randint(1, 16)
             mask = np.ones((self.cropsize, self.cropsize), dtype=np.float32)
 
@@ -323,6 +320,9 @@ class MaskedPretrainingDataset(torch.utils.data.Dataset):
                 start = np.random.randint(0, self.cropsize - width)
                 mask[:, start:start+width] = float('-inf')
                 X[:, :, start:start+width] = 1.0
+
+            X = np.clip(np.abs(X) / c, 0, 1)
+            Y = np.clip(np.abs(Y) / c, 0, 1)
       
         return X, Y, mask
 
