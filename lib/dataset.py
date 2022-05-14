@@ -320,7 +320,7 @@ class MaskedPretrainingDataset(torch.utils.data.Dataset):
             width = np.random.randint(1, self.cropsize // 64)
             start = np.random.randint(0, self.cropsize - width)
             mask[:, start:start+width] = float('-inf')
-            X[:, :, start:start+width] = 0
+            X[:, :, start:start+width] = 1.0
       
         return X, Y, mask
 
