@@ -280,7 +280,7 @@ class MaskedPretrainingDataset(torch.utils.data.Dataset):
             X = X[:,:,start:stop]
             Y = Y[:,:,start:stop]
 
-            if aug and np.random.uniform() < 0.05 and not vocals:
+            if aug and np.random.uniform() < 0.15 and not vocals:
                 V, Vc = self._get_vocals()
                 X = X + V
                 c = np.max([Xc, Vc])
@@ -320,7 +320,7 @@ class MaskedPretrainingDataset(torch.utils.data.Dataset):
             width = np.random.randint(1, self.cropsize // 64)
             start = np.random.randint(0, self.cropsize - width)
             mask[:, start:start+width] = float('-inf')
-            X[:, start:start+width] = 0
+            X[:, :, start:start+width] = 0
       
         return X, Y, mask
 
