@@ -90,6 +90,7 @@ class FrameTransformerEncoder(nn.Module):
         self.glu = nn.Sequential(
             nn.Linear(bins, bins * 2, bias=bias),
             nn.GLU())
+        self.dropout1 = nn.Dropout(dropout)
 
         self.norm2 = nn.LayerNorm(bins)
         self.conv1L = nn.Sequential(
@@ -106,31 +107,33 @@ class FrameTransformerEncoder(nn.Module):
 
         self.norm4 = nn.LayerNorm(bins)
         self.attn = MultibandFrameAttention(num_bands, bins, cropsize, kernel_size=7, padding=3)
+        self.dropout3 = nn.Dropout(dropout) if dropout > 0 else nn.Identity()
 
         self.norm5 = nn.LayerNorm(bins)
         self.conv2 = nn.Linear(bins, feedforward_dim, bias=bias)
         self.conv3 = nn.Linear(feedforward_dim, bins, bias=bias)
+        self.dropout4 = nn.Dropout(dropout) if dropout > 0 else nn.Identity()
 
     def __call__(self, x, mask=None):
         x = self.in_project(x.transpose(1,3)).squeeze(3)
 
         h = self.norm1(x)
         h = self.glu(h)
-        x = x + h
+        x = x + self.dropout1(h)
 
         h = self.norm2(x)
         hL = self.relu(self.conv1L(h))
         hR = self.relu(self.conv1R(h.transpose(1,2))).transpose(1,2)
         h = self.norm3(hL + F.pad(hR, (0, hL.shape[2]-hR.shape[2])))
         h = self.conv1M(h.transpose(1,2)).transpose(1,2)
-        x = x + h
+        x = x + self.dropout2(h)
 
         h = self.norm4(x)
         h = self.attn(h, mask=mask)
-        x = x + h
+        x = x + self.dropout3(h)
 
         h = self.norm5(x)
         h = self.conv3(torch.square(self.relu(self.conv2(h))))
-        x = x + h
+        x = x + self.dropout4(h)
 
         return x.transpose(1,2).unsqueeze(1)
