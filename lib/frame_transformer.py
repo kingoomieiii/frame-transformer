@@ -3,17 +3,8 @@ from torch import nn
 import torch.nn.functional as F
 import math
 
-class ReLU1(nn.Module):
-    def __init__(self, inplace=True):
-        super(ReLU1, self).__init__()
-
-        self.relu = nn.ReLU6(inplace=inplace)
-
-    def __call__(self, x):
-        return self.relu(x) / 6.0
-
 class FrameTransformer(nn.Module):
-    def __init__(self, channels, n_fft=2048, feedforward_dim=512, num_bands=4, num_encoders=1, num_decoders=1, cropsize=1024, bias=False, out_activate=ReLU1()):
+    def __init__(self, channels, n_fft=2048, feedforward_dim=512, num_bands=4, num_encoders=1, num_decoders=1, cropsize=1024, bias=False, out_activate=nn.Sigmoid()):
         super(FrameTransformer, self).__init__()
         
         self.max_bin = n_fft // 2
@@ -44,8 +35,14 @@ class MultibandFrameAttention(nn.Module):
         self.num_bands = num_bands
 
         self.q_proj = nn.Linear(bins, bins)
+        self.q_conv = nn.Conv1d(bins, bins, kernel_size=3, padding=1, groups=bins)
+
         self.k_proj = nn.Linear(bins, bins)
+        self.k_conv = nn.Conv1d(bins, bins, kernel_size=3, padding=1, groups=bins)
+
         self.v_proj = nn.Linear(bins, bins)
+        self.v_conv = nn.Conv1d(bins, bins, kernel_size=3, padding=1, groups=bins)
+
         self.o_proj = nn.Linear(bins, bins)
 
         self.er = nn.Parameter(torch.empty(bins // num_bands, cropsize))
@@ -84,7 +81,7 @@ class FrameTransformerEncoder(nn.Module):
         self.dropout1 = nn.Dropout(dropout)
 
         self.norm2 = nn.LayerNorm(bins)
-        self.relu = nn.ReLU(inplace=True)
+        self.gelu = nn.GELU()
         self.linear1 = nn.Linear(bins, feedforward_dim, bias=bias)
         self.dropout2 = nn.Dropout(dropout)
         self.linear2 = nn.Linear(feedforward_dim, bins, bias=bias)
@@ -92,13 +89,12 @@ class FrameTransformerEncoder(nn.Module):
 
     def __call__(self, x, mask=None):
         x = self.in_project(x.transpose(1,3)).squeeze(3)
-
         h = self.norm1(x)
         h = self.attn(h, mask=mask)
         x = x + self.dropout1(h)
 
         h = self.norm2(x)
-        h = self.linear2(self.dropout2(torch.square(self.relu(self.linear1(h)))))
+        h = self.linear2(self.dropout2(self.gelu(self.linear1(h))))
         x = x + self.dropout3(h)
 
         return x.transpose(1,2).unsqueeze(1)

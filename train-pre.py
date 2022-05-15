@@ -16,7 +16,7 @@ from lib import dataset
 from lib import spec_utils
 from tqdm import tqdm
 
-from lib.frame_transformer import FrameTransformer
+from lib.evl_frame_transformer import FrameTransformer
 from lib.lr_scheduler_linear_warmup import LinearWarmupScheduler
 from lib.lr_scheduler_polynomial_decay import PolynomialDecayScheduler
 
@@ -69,7 +69,7 @@ def train_epoch(dataloader, model, device, optimizer, accumulation_steps, grad_s
         with torch.cuda.amp.autocast_mode.autocast(enabled=grad_scaler is not None):
             pred = model(src, mask=mask)
 
-        loss = crit(pred, tgt)
+        loss = crit(src * pred, tgt)
         accum_loss = loss / accumulation_steps
         batch_loss = batch_loss + accum_loss
 
@@ -122,7 +122,7 @@ def validate_epoch(dataloader, model, device, grad_scaler, include_phase=False):
             with torch.cuda.amp.autocast_mode.autocast(enabled=grad_scaler is not None):
                 pred = model(src, mask=mask)
  
-            loss = crit(pred, tgt)
+            loss = crit(src * pred, tgt)
     
             if torch.logical_or(loss.isnan(), loss.isinf()):
                 print('non-finite or nan validation loss; aborting')
@@ -135,18 +135,13 @@ def validate_epoch(dataloader, model, device, grad_scaler, include_phase=False):
 def main():
     p = argparse.ArgumentParser()
     p.add_argument('--id', type=str, default='')
-    p.add_argument('--channels', type=int, default=8)
-    p.add_argument('--num_encoders', type=int, default=2)
+    p.add_argument('--channels', type=int, default=2)
+    p.add_argument('--num_encoders', type=int, default=24)
     p.add_argument('--num_decoders', type=int, default=2)
-    p.add_argument('--num_bands', type=int, default=8)
-    p.add_argument('--feedforward_dim', type=int, default=3072)
+    p.add_argument('--num_bands', type=int, default=16)
+    p.add_argument('--feedforward_dim', type=int, default=2048)
     p.add_argument('--bias', type=str, default='true')
     p.add_argument('--amsgrad', type=str, default='false')
-    p.add_argument('--vocal_recurse_prob', type=float, default=0.5)
-    p.add_argument('--vocal_recurse_prob_decay', type=float, default=0.5)
-    p.add_argument('--vocal_noise_prob', type=float, default=0.5)
-    p.add_argument('--vocal_noise_magnitude', type=float, default=0.5)
-    p.add_argument('--vocal_pan_prob', type=float, default=0.5)
     p.add_argument('--batchsize', '-B', type=int, default=1)
     p.add_argument('--accumulation_steps', '-A', type=int, default=4)
     p.add_argument('--gpu', '-g', type=int, default=-1)
@@ -156,9 +151,9 @@ def main():
     p.add_argument('--n_fft', '-f', type=int, default=2048)
     p.add_argument('--dataset', '-d', required=False)
     p.add_argument('--split_mode', '-S', type=str, choices=['random', 'subdirs'], default='random')
-    p.add_argument('--learning_rate', '-l', type=float, default=1e-3)
-    p.add_argument('--weight_decay', type=float, default=0)
-    p.add_argument('--optimizer', type=str.lower, choices=['adam', 'adamw'], default='adam')
+    p.add_argument('--learning_rate', '-l', type=float, default=1e-4)
+    p.add_argument('--weight_decay', type=float, default=1e-2)
+    p.add_argument('--optimizer', type=str.lower, choices=['adam', 'adamw'], default='adamw')
     p.add_argument('--lr_scheduler_decay_target', type=int, default=1e-7)
     #p.add_argument('--lr_scheduler_warmup_steps', '-LW', type=int, default=32000) # controlled by args.warmup_epoch now
     #p.add_argument('--lr_scheduler_decay_steps', type=int, default=128000) # controlled by args.epoch now
@@ -171,13 +166,13 @@ def main():
     p.add_argument('--val_batchsize', '-b', type=int, default=4)
     p.add_argument('--val_cropsize', '-c', type=int, default=1024)
     p.add_argument('--num_workers', '-w', type=int, default=4)
-    p.add_argument('--warmup_epoch', type=int, default=3)
-    p.add_argument('--epoch', '-E', type=int, default=42)
+    p.add_argument('--warmup_epoch', type=int, default=2)
+    p.add_argument('--epoch', '-E', type=int, default=25)
     p.add_argument('--epoch_size', type=int, default=None)
     p.add_argument('--reduction_rate', '-R', type=float, default=0.0)
     p.add_argument('--reduction_level', '-L', type=float, default=0.2)
     p.add_argument('--fake_data_prob', type=float, default=math.nan)
-    p.add_argument('--mixup_rate', '-M', type=float, default=0.5)
+    p.add_argument('--mixup_rate', '-M', type=float, default=0.25)
     p.add_argument('--mixup_alpha', '-a', type=float, default=0.4)
     p.add_argument('--phase_in', type=str, default='false')
     p.add_argument('--phase_out', type=str, default='false')
@@ -189,7 +184,7 @@ def main():
     p.add_argument('--save_all', type=str, default='true')
     p.add_argument('--model_dir', type=str, default='E://')
     p.add_argument('--debug', action='store_true')
-    p.add_argument('--dropout', type=float, default=0.4)
+    p.add_argument('--dropout', type=float, default=0.1)
     args = p.parse_args()
 
     args.amsgrad = str.lower(args.amsgrad) == 'true'
@@ -209,10 +204,10 @@ def main():
 
     train_dataset = dataset.MaskedPretrainingDataset(
         path="C://cs2048_sr44100_hl1024_nf2048_of0",
-        extra_path="G://cs2048_sr44100_hl1024_nf2048_of0",
-        pair_path="G://cs2048_sr44100_hl1024_nf2048_of0_PAIRS",
-        mix_path="C://cs2048_sr44100_hl1024_nf2048_of0_MIXES",
-        vocal_path="G://cs2048_sr44100_hl1024_nf2048_of0_VOCALS",
+        extra_path="D://cs2048_sr44100_hl1024_nf2048_of0",
+        pair_path=None,#"G://cs2048_sr44100_hl1024_nf2048_of0_PAIRS",
+        mix_path="D://cs2048_sr44100_hl1024_nf2048_of0_MIXES",
+        vocal_path="D://cs2048_sr44100_hl1024_nf2048_of0_VOCALS",
         is_validation=False,
         epoch_size=args.epoch_size,
         cropsize=args.cropsize,
@@ -229,7 +224,7 @@ def main():
     )
     
     val_dataset = dataset.MaskedPretrainingDataset(
-        path="G://cs2048_sr44100_hl1024_nf2048_of0_VALIDATION",
+        path="C://cs2048_sr44100_hl1024_nf2048_of0_VALIDATION",
         is_validation=True,
         epoch_size=args.epoch_size,
         cropsize=args.cropsize,
@@ -263,7 +258,7 @@ def main():
         logger.info('{} {} {}'.format(i + 1, os.path.basename(X_fname), os.path.basename(y_fname)))
 
     device = torch.device('cpu')
-    model = FrameTransformer(channels=args.channels, n_fft=args.n_fft, num_encoders=args.num_encoders, num_bands=args.num_bands, feedforward_dim=args.feedforward_dim, bias=args.bias, cropsize=args.cropsize)
+    model = FrameTransformer(channels=args.channels, n_fft=args.n_fft, num_encoders=args.num_encoders, num_bands=args.num_bands, feedforward_dim=args.feedforward_dim, bias=args.bias, cropsize=args.cropsize, out_activate=nn.Sigmoid())
 
     if args.pretrained_model is not None:
         model.load_state_dict(torch.load(args.pretrained_model, map_location=device))
