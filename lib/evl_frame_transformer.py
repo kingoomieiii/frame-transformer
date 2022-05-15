@@ -90,7 +90,7 @@ class FrameTransformerEncoder(nn.Module):
         self.glu = nn.Sequential(
             nn.Linear(bins, bins * 2, bias=bias),
             nn.GLU())
-        self.dropout1 = nn.Dropout(dropout)
+        self.dropout1 = nn.Dropout(dropout) if dropout > 0 else nn.Identity()
 
         self.norm2 = nn.LayerNorm(bins)
         self.conv1L = nn.Sequential(
