@@ -12,6 +12,32 @@ class ReLU1(nn.Module):
     def __call__(self, x):
         return self.relu(x) / 6.0
 
+class ResBlock(nn.Module):
+    def __init__(self, in_channels, out_channels, kernel_size=3, padding=1, bias=False):
+        super(ResBlock, self).__init__()
+
+        self.conv1 = nn.Sequential(
+            nn.InstanceNorm2d(in_channels, affine=True),
+            nn.ReLU(inplace=True),
+            nn.Conv2d(in_channels, out_channels, kernel_size=kernel_size, padding=padding, bias=False))
+
+        self.conv2 = nn.Sequential(
+            nn.InstanceNorm2d(out_channels, affine=True),
+            nn.ReLU(inplace=True),
+            nn.Conv2d(out_channels, out_channels, kernel_size=kernel_size, padding=padding, bias=False))
+
+        self.identity = nn.Conv2d(in_channels, out_channels, kernel_size=1, padding=0, bias=False) if in_channels != out_channels else None
+
+    def __call__(self, x):
+        identity = self.identity(x) if self.identity is not None else x
+
+        h = self.conv1(x)
+        h = self.conv2(h)
+
+        x = identity + h
+
+        return x
+
 class FrameTransformer(nn.Module):
     def __init__(self, channels, n_fft=2048, feedforward_dim=512, num_bands=4, num_encoders=1, cropsize=1024, bias=False, out_activate=ReLU1(), dropout=0.1):
         super(FrameTransformer, self).__init__()
@@ -21,18 +47,18 @@ class FrameTransformer(nn.Module):
         self.cropsize = cropsize
 
         self.encoder = nn.ModuleList([FrameTransformerEncoder(channels + i, bins=self.max_bin, num_bands=num_bands, cropsize=cropsize, feedforward_dim=feedforward_dim, bias=bias, dropout=dropout) for i in range(num_encoders)])
-        self.out = nn.Linear(channels + num_encoders, 2, bias=bias)
+        #self.out = nn.Linear(channels + num_encoders, 2, bias=bias)
+        self.out = ResBlock(2 + num_encoders, 2, kernel_size=3, padding=1, bias=bias)
         self.activate = out_activate if out_activate is not None else nn.Identity()
 
     def __call__(self, src, mask=None):
         src = src[:, :, :self.max_bin]
 
         for module in self.encoder:
-            t = module(src, mask=mask)
-            src = torch.cat((src, t), dim=1)
+            src = torch.cat((src, module(src, mask=mask)), dim=1)
 
         return F.pad(
-            input=self.activate(self.out(src.transpose(1,3)).transpose(1,3)),
+            input=self.activate(self.out(src)),
             pad=(0, 0, 0, self.output_bin - self.max_bin),
             mode='replicate'
         )
