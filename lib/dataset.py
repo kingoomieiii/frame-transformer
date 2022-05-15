@@ -167,7 +167,7 @@ class VocalAutoregressiveDataset(torch.utils.data.Dataset):
         return X, Y
 
 class MaskedPretrainingDataset(torch.utils.data.Dataset):
-    def __init__(self, path, extra_path=None, pair_path=None, mix_path=None, vocal_path="", is_validation=False, mul=1, downsamples=0, epoch_size=None, pair_mul=1, slide=True, cropsize=256, mixup_rate=0, mixup_alpha=1):
+    def __init__(self, path, extra_path=None, pair_path=None, mix_path=None, vocal_path="", is_validation=False, mul=1, downsamples=0, epoch_size=None, pair_mul=1, slide=True, cropsize=256, mixup_rate=0, mixup_alpha=1, mask_rate=0.15):
         self.epoch_size = epoch_size
         self.slide = slide
         self.mul = mul
@@ -175,6 +175,7 @@ class MaskedPretrainingDataset(torch.utils.data.Dataset):
         self.cropsize = cropsize
         self.mixup_rate = mixup_rate
         self.mixup_alpha = mixup_alpha
+        self.mask_rate = mask_rate
         pair_list = []
 
         if pair_path is not None and pair_mul > 0:
@@ -295,26 +296,26 @@ class MaskedPretrainingDataset(torch.utils.data.Dataset):
                 X = Y[:,:,start:stop]
 
         if np.random.uniform() < self.mixup_rate and root and not self.is_validation:
-            _, MX, _ = self.__getitem__(np.random.randint(len(self)), root=False)
+            MX, _ = self.__getitem__(np.random.randint(len(self)), root=False)
             a = np.random.beta(self.mixup_alpha, self.mixup_alpha)
             X = X * a + (1 - a) * MX
         
-        mask = None
         if root:
             Y = X.copy()
-            masked_blocks = np.random.randint(4, 32)
-            mask = np.ones((self.cropsize, self.cropsize), dtype=np.float32)
 
-            for _ in range(masked_blocks):
-                width = np.random.randint(8, 16)
-                start = np.random.randint(0, self.cropsize - width)
-                mask[:, start:start+width] = float('-inf')
-                X[:, :, start:start+width] = 1.0
+            rand_frames = np.random.uniform(0, 1, X.shape)
+            mask_indices = np.random.randint(0, self.cropsize, math.ceil(self.cropsize * self.mask_rate))
+            mask_rand_indices = np.random.randint(0, mask_indices.shape[0], math.ceil(mask_indices.shape[0] * 0.1))
+            mask_revert_indices = np.random.randint(0, mask_indices.shape[0], math.ceil(mask_indices.shape[0] * 0.1))            
+
+            X[:, :, mask_indices] = 1.0
+            X[:, :, mask_indices[mask_rand_indices]] = rand_frames[:, :, mask_indices[mask_rand_indices]]
+            X[:, :, mask_indices[mask_revert_indices]] = Y[:, :, mask_indices[mask_revert_indices]]
 
         X = np.clip(np.abs(X) / c, 0, 1)
         Y = np.clip(np.abs(Y) / c, 0, 1)
       
-        return X, Y, mask
+        return X, Y
 
 class VocalAugmentationDataset(torch.utils.data.Dataset):
     def __init__(self, path, extra_path=None, pair_path=None, vocal_path="", is_validation=False, mul=1, downsamples=0, epoch_size=None, pair_mul=1, slide=True, cropsize=256, mixup_rate=0, mixup_alpha=1, include_phase=False, force_voxaug=False):

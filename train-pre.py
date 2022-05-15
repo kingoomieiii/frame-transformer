@@ -61,13 +61,12 @@ def train_epoch(dataloader, model, device, optimizer, accumulation_steps, grad_s
     crit = nn.L1Loss()
 
     pbar = tqdm(dataloader) if progress_bar else dataloader
-    for itr, (src, tgt, mask) in enumerate(pbar):
+    for itr, (src, tgt) in enumerate(pbar):
         src = src.to(device)
         tgt = tgt.to(device)
-        mask = mask.to(device)
 
         with torch.cuda.amp.autocast_mode.autocast(enabled=grad_scaler is not None):
-            pred = model(src, mask=mask)
+            pred = model(src)
 
         loss = crit(src * pred, tgt)
         accum_loss = loss / accumulation_steps
@@ -114,13 +113,12 @@ def validate_epoch(dataloader, model, device, grad_scaler, include_phase=False):
     crit = nn.L1Loss()
 
     with torch.no_grad():
-        for src, tgt, mask in tqdm(dataloader):
+        for src, tgt in tqdm(dataloader):
             src = src.to(device)
             tgt = tgt.to(device)
-            mask = mask.to(device)
 
             with torch.cuda.amp.autocast_mode.autocast(enabled=grad_scaler is not None):
-                pred = model(src, mask=mask)
+                pred = model(src)
  
             loss = crit(src * pred, tgt)
     
@@ -185,6 +183,7 @@ def main():
     p.add_argument('--model_dir', type=str, default='E://')
     p.add_argument('--debug', action='store_true')
     p.add_argument('--dropout', type=float, default=0.1)
+    p.add_argument('--mask_rate', type=float, default=0.15)
     args = p.parse_args()
 
     args.amsgrad = str.lower(args.amsgrad) == 'true'
@@ -213,7 +212,8 @@ def main():
         cropsize=args.cropsize,
         mixup_rate=args.mixup_rate,
         mixup_alpha=args.mixup_alpha,
-        pair_mul=1
+        pair_mul=1,
+        mask_rate=args.mask_rate
     )
 
     train_dataloader = torch.utils.data.DataLoader(
@@ -229,7 +229,8 @@ def main():
         epoch_size=args.epoch_size,
         cropsize=args.cropsize,
         mixup_rate=args.mixup_rate,
-        mixup_alpha=args.mixup_alpha
+        mixup_alpha=args.mixup_alpha,
+        mask_rate=args.mask_rate
     )
 
     val_dataloader = torch.utils.data.DataLoader(
