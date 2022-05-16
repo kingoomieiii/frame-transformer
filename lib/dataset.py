@@ -167,7 +167,7 @@ class VocalAutoregressiveDataset(torch.utils.data.Dataset):
         return X, Y
 
 class MaskedPretrainingDataset(torch.utils.data.Dataset):
-    def __init__(self, path, n_fft=2048, extra_path=None, pair_path=None, mix_path=None, mix_path2=None, vocal_path="", is_validation=False, mul=1, downsamples=0, epoch_size=None, pair_mul=1, slide=True, cropsize=256, mixup_rate=0, mixup_alpha=1, mask_rate=0.15, next_frame_chunk_size=16):
+    def __init__(self, path, extra_path=None, pair_path=None, mix_path=None, mix_path2=None, vocal_path="", is_validation=False, mul=1, downsamples=0, epoch_size=None, pair_mul=1, slide=True, cropsize=256, mixup_rate=0, mixup_alpha=1, mask_rate=0.15, next_frame_chunk_size=16):
         self.epoch_size = epoch_size
         self.slide = slide
         self.mul = mul
@@ -177,7 +177,6 @@ class MaskedPretrainingDataset(torch.utils.data.Dataset):
         self.mixup_alpha = mixup_alpha
         self.mask_rate = mask_rate
         self.next_frame_chunk_size = next_frame_chunk_size
-        self.bins = n_fft // 2 + 1
         pair_list = []
 
         if pair_path is not None and pair_mul > 0:
@@ -329,23 +328,14 @@ class MaskedPretrainingDataset(torch.utils.data.Dataset):
                 Y[:, :, -self.next_frame_chunk_size:] = NX[:, :, -self.next_frame_chunk_size:]
                 is_next = 0.0
 
-            mask_token = np.ones(X.shape[1])
-            mask_token[0::2] = 0
-            mask_token = np.expand_dims(mask_token, (0, 2))
-
-            separator_token = np.ones(X.shape[1])
-            separator_token[1::2] = 0
-
             rand_frames = np.random.uniform(0, 1, X.shape)
             mask_indices = np.random.randint(0, self.cropsize + self.next_frame_chunk_size, math.ceil(self.cropsize * self.mask_rate))
             mask_rand_indices = np.random.randint(0, mask_indices.shape[0], math.ceil(mask_indices.shape[0] * 0.1))
             mask_revert_indices = np.random.randint(0, mask_indices.shape[0], math.ceil(mask_indices.shape[0] * 0.1))            
 
-            X[:, :, mask_indices] = mask_token
+            X[:, :, mask_indices] = 1.0
             X[:, :, mask_indices[mask_rand_indices]] = rand_frames[:, :, mask_indices[mask_rand_indices]]
             X[:, :, mask_indices[mask_revert_indices]] = Y[:, :, mask_indices[mask_revert_indices]]
-            X[:, :, -self.next_frame_chunk_size+1:] = X[:, :, -self.next_frame_chunk_size:-1]
-            X[:, :, -self.next_frame_chunk_size] = separator_token
 
         X = np.clip(np.abs(X) / c, 0, 1)
         Y = np.clip(np.abs(Y) / c, 0, 1)
