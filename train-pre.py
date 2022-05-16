@@ -71,8 +71,8 @@ def train_epoch(dataloader, model, device, optimizer, accumulation_steps, grad_s
     for itr, (src, tgt, is_next) in enumerate(pbar):
         src = src.to(device)
         tgt = tgt.to(device)
-        is_next = is_next.to(device).type(torch.float)
-
+        is_next = is_next.to(device)
+        
         if len(is_next.shape) == 1:
             is_next = is_next.unsqueeze(0)
 
@@ -81,7 +81,7 @@ def train_epoch(dataloader, model, device, optimizer, accumulation_steps, grad_s
 
         mask_loss = mask_crit(src * pred, tgt)
         nxt_loss = next_crit(nxt, is_next)
-        loss = mask_loss + nxt_loss        
+        loss = mask_loss + nxt_loss
         accum_loss = loss / accumulation_steps
 
         batch_mask_loss = batch_mask_loss + (mask_loss / accumulation_steps)
@@ -138,6 +138,9 @@ def validate_epoch(dataloader, model, device, grad_scaler, include_phase=False):
             src = src.to(device)
             tgt = tgt.to(device)
             is_next = is_next.to(device)
+
+            if len(is_next.shape) == 1:
+                is_next = is_next.unsqueeze(0)
 
             with torch.cuda.amp.autocast_mode.autocast(enabled=grad_scaler is not None):
                 pred, nxt = model(src)
@@ -208,7 +211,7 @@ def main():
     p.add_argument('--model_dir', type=str, default='E://')
     p.add_argument('--debug', action='store_true')
     p.add_argument('--dropout', type=float, default=0.1)
-    p.add_argument('--mask_rate', type=float, default=0.15)
+    p.add_argument('--mask_rate', type=float, default=0.2)
     p.add_argument('--next_frame_chunk_size', type=int, default=80)
     args = p.parse_args()
 

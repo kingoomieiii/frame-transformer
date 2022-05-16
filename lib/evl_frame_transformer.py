@@ -45,7 +45,6 @@ class FrameTransformer(nn.Module):
         self.max_bin = n_fft // 2
         self.output_bin = n_fft // 2 + 1
         self.cropsize = cropsize
-
         self.encoder = nn.ModuleList([FrameTransformerEncoder(channels + i, bins=self.max_bin, num_bands=num_bands, cropsize=cropsize, feedforward_dim=feedforward_dim, bias=bias, dropout=dropout) for i in range(num_encoders)])
         self.out = nn.Linear(channels + num_encoders, 2, bias=bias)
         self.is_next = nn.Linear(channels + num_encoders, 1, bias=bias)
@@ -69,16 +68,16 @@ class MultibandFrameAttention(nn.Module):
 
         self.num_bands = num_bands
 
-        self.q_proj = nn.Linear(bins, bins)
-        self.q_conv = nn.Conv1d(bins, bins, kernel_size=kernel_size, padding=padding, groups=bins)
+        self.q_proj = nn.Linear(bins, bins, bias=False)
+        self.q_conv = nn.Conv1d(bins, bins, kernel_size=kernel_size, padding=padding, groups=bins, bias=False)
 
-        self.k_proj = nn.Linear(bins, bins)
-        self.k_conv = nn.Conv1d(bins, bins, kernel_size=kernel_size, padding=padding, groups=bins)
+        self.k_proj = nn.Linear(bins, bins, bias=False)
+        self.k_conv = nn.Conv1d(bins, bins, kernel_size=kernel_size, padding=padding, groups=bins, bias=False)
 
-        self.v_proj = nn.Linear(bins, bins)
-        self.v_conv = nn.Conv1d(bins, bins, kernel_size=kernel_size, padding=padding, groups=bins)
+        self.v_proj = nn.Linear(bins, bins, bias=False)
+        self.v_conv = nn.Conv1d(bins, bins, kernel_size=kernel_size, padding=padding, groups=bins, bias=False)
 
-        self.o_proj = nn.Linear(bins, bins)
+        self.o_proj = nn.Linear(bins, bins, bias=False)
 
         self.er = nn.Parameter(torch.empty(bins // num_bands, cropsize))
         nn.init.normal_(self.er)
