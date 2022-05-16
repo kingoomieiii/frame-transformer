@@ -185,7 +185,7 @@ def main():
     #p.add_argument('--lr_scheduler_decay_steps', type=int, default=128000) # controlled by args.epoch now
     p.add_argument('--lr_scheduler_decay_power', type=float, default=1.0)
     p.add_argument('--lr_scheduler_current_step', type=int, default=0)
-    p.add_argument('--cropsize', '-C', type=int, default=1024)
+    p.add_argument('--cropsize', '-C', type=int, default=552)
     p.add_argument('--patches', '-p', type=int, default=16)
     p.add_argument('--val_rate', '-v', type=float, default=0.2)
     p.add_argument('--val_filelist', '-V', type=str, default=None)
@@ -212,7 +212,7 @@ def main():
     p.add_argument('--debug', action='store_true')
     p.add_argument('--dropout', type=float, default=0.1)
     p.add_argument('--mask_rate', type=float, default=0.2)
-    p.add_argument('--next_frame_chunk_size', type=int, default=80)
+    p.add_argument('--next_frame_chunk_size', type=int, default=552)
     args = p.parse_args()
 
     args.amsgrad = str.lower(args.amsgrad) == 'true'
