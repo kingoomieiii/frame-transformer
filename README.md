@@ -8,7 +8,7 @@ This architecture is what I call a frame transformer. It consists of a series of
 
 Right now my focus is on train-pre.py, so train.py probably isn't going to work if you try it (though it wouldn't be that much effort to fix it). train-pre.py currently launches a pretraining regimen that follows Bert's pretraining. It takes as input a spectrogram of cropsize + next_frame_chunk_size frames. The default settings split evenly with 552 frames for spectrogram a and spectrogram b. Both spectrograms (or half the time, one long spectrogram) will have frames randomly whited out by default at a 20% chance. As with bert, 10% of the time these selected frames are randomized and another 10% of the time they are left alone. The neural network then will output a single scalar specifying whether or not the second part of the spectrogram is a continuation of the first part of the spectrogram in addition to its unmasked prediction output.
 
-I will be releasing a pretrained checkpoint in the coming weeks. I have a dataset that consists of 78,046 spectrograms, each spectrogram having 2048 frames. Currently it is trained on just instrumental songs and mix songs, for finetuning I will be using my vocal stem database of 488 vocal tracks to create exponentially more data for the downstream task.
+I will be releasing a pretrained checkpoint in the coming weeks. I have a dataset that consists of 78,046 spectrograms, each spectrogram having 2048 frames. Currently it is trained on just instrumental songs and mix songs, for finetuning I will be using my vocal stem database of 492 vocal tracks to create exponentially more data for the downstream task.
 
 If someone would like to work with me please reach out to me at carperbr@gmail.com.
 
