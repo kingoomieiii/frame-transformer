@@ -48,6 +48,7 @@ class FrameTransformer(nn.Module):
 
         self.encoder = nn.ModuleList([FrameTransformerEncoder(channels + i, bins=self.max_bin, num_bands=num_bands, cropsize=cropsize, feedforward_dim=feedforward_dim, bias=bias, dropout=dropout) for i in range(num_encoders)])
         self.out = nn.Linear(channels + num_encoders, 2, bias=bias)
+        self.is_next = nn.Linear(channels + num_encoders, 1, bias=bias)
         self.activate = out_activate if out_activate is not None else nn.Identity()
 
     def __call__(self, src):
@@ -60,7 +61,7 @@ class FrameTransformer(nn.Module):
             input=self.activate(self.out(src.transpose(1,3)).transpose(1,3)),
             pad=(0, 0, 0, self.output_bin - self.max_bin),
             mode='replicate'
-        )
+        ), F.adaptive_avg_pool2d(self.is_next(src.transpose(1,3)).transpose(1,3), (1,1)).squeeze(-1).squeeze(-1)
 
 class MultibandFrameAttention(nn.Module):
     def __init__(self, num_bands, bins, cropsize, kernel_size=3, padding=1):
@@ -143,7 +144,7 @@ class FrameTransformerEncoder(nn.Module):
         x = x + self.dropout1(h)
 
         h = self.norm2(x)
-        hL = self.relu(self.conv1L(h))
+        hL = self.relu(self.conv1L(h.transpose(1,2))).transpose(1,2)
         hR = self.relu(self.conv1R(h.transpose(1,2))).transpose(1,2)
         h = self.norm3(hL + F.pad(hR, (0, hL.shape[2]-hR.shape[2])))
         h = self.conv1M(h.transpose(1,2)).transpose(1,2)

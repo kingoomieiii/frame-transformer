@@ -167,7 +167,7 @@ class VocalAutoregressiveDataset(torch.utils.data.Dataset):
         return X, Y
 
 class MaskedPretrainingDataset(torch.utils.data.Dataset):
-    def __init__(self, path, extra_path=None, pair_path=None, mix_path=None, vocal_path="", is_validation=False, mul=1, downsamples=0, epoch_size=None, pair_mul=1, slide=True, cropsize=256, mixup_rate=0, mixup_alpha=1, mask_rate=0.15):
+    def __init__(self, path, extra_path=None, pair_path=None, mix_path=None, vocal_path="", is_validation=False, mul=1, downsamples=0, epoch_size=None, pair_mul=1, slide=True, cropsize=256, mixup_rate=0, mixup_alpha=1, mask_rate=0.15, next_frame_chunk_size=16):
         self.epoch_size = epoch_size
         self.slide = slide
         self.mul = mul
@@ -176,6 +176,7 @@ class MaskedPretrainingDataset(torch.utils.data.Dataset):
         self.mixup_rate = mixup_rate
         self.mixup_alpha = mixup_alpha
         self.mask_rate = mask_rate
+        self.next_frame_chunk_size = next_frame_chunk_size
         pair_list = []
 
         if pair_path is not None and pair_mul > 0:
@@ -252,8 +253,8 @@ class MaskedPretrainingDataset(torch.utils.data.Dataset):
                 V[1] = V[1] * 0
 
         if self.slide:
-            start = np.random.randint(0, V.shape[2] - self.cropsize - 1)
-            stop = start + self.cropsize
+            start = np.random.randint(0, V.shape[2] - self.cropsize - 1 - self.next_frame_chunk_size)
+            stop = start + self.cropsize + self.next_frame_chunk_size
             V = V[:,:,start:stop]
 
         if np.random.uniform() < 0.5 and root:
@@ -275,8 +276,8 @@ class MaskedPretrainingDataset(torch.utils.data.Dataset):
         vocals = 'vocals' in data.files
         
         if not self.is_validation:
-            start = np.random.randint(0, X.shape[2] - self.cropsize - 1)
-            stop = start + self.cropsize
+            start = np.random.randint(0, X.shape[2] - self.cropsize - 1 - self.next_frame_chunk_size)
+            stop = start + self.cropsize + self.next_frame_chunk_size
 
             X = X[:,:,start:stop]
             Y = Y[:,:,start:stop]
@@ -287,8 +288,8 @@ class MaskedPretrainingDataset(torch.utils.data.Dataset):
                 Y = Y[::-1]
         else:
             c = Xc
-            start = np.random.randint(0, X.shape[2] - self.cropsize - 1)
-            stop = start + self.cropsize
+            start = np.random.randint(0, X.shape[2] - self.cropsize - 1 - self.next_frame_chunk_size)
+            stop = start + self.cropsize + self.next_frame_chunk_size
 
             if np.random.uniform() < 0.5:
                 X = X[:,:,start:stop]
@@ -296,15 +297,17 @@ class MaskedPretrainingDataset(torch.utils.data.Dataset):
                 X = Y[:,:,start:stop]
 
         if np.random.uniform() < self.mixup_rate and root and not self.is_validation:
-            MX, _ = self.__getitem__(np.random.randint(len(self)), root=False)
+            MX, _, _ = self.__getitem__(np.random.randint(len(self)), root=False)
             a = np.random.beta(self.mixup_alpha, self.mixup_alpha)
             X = X * a + (1 - a) * MX
+        
+        is_next = 1.0
         
         if root:
             Y = X.copy()
 
             rand_frames = np.random.uniform(0, 1, X.shape)
-            mask_indices = np.random.randint(0, self.cropsize, math.ceil(self.cropsize * self.mask_rate))
+            mask_indices = np.random.randint(0, self.cropsize + self.next_frame_chunk_size, math.ceil(self.cropsize * self.mask_rate))
             mask_rand_indices = np.random.randint(0, mask_indices.shape[0], math.ceil(mask_indices.shape[0] * 0.1))
             mask_revert_indices = np.random.randint(0, mask_indices.shape[0], math.ceil(mask_indices.shape[0] * 0.1))            
 
@@ -312,10 +315,21 @@ class MaskedPretrainingDataset(torch.utils.data.Dataset):
             X[:, :, mask_indices[mask_rand_indices]] = rand_frames[:, :, mask_indices[mask_rand_indices]]
             X[:, :, mask_indices[mask_revert_indices]] = Y[:, :, mask_indices[mask_revert_indices]]
 
+            if np.random.uniform() < 0.5:
+                nidx = np.random.randint(len(self))
+
+                if nidx == idx:
+                    nidx = (idx + np.random.randint(1, len(self.curr_list) - 2)) % len(self.curr_list)
+
+                NX, _, _ = self.__getitem__(nidx, root=False)
+                X[:, :, -self.next_frame_chunk_size:] = NX[:, :, -self.next_frame_chunk_size:]
+                Y[:, :, -self.next_frame_chunk_size:] = NX[:, :, -self.next_frame_chunk_size:]
+                is_next = 0.0
+
         X = np.clip(np.abs(X) / c, 0, 1)
         Y = np.clip(np.abs(Y) / c, 0, 1)
       
-        return X, Y
+        return X, Y, is_next
 
 class VocalAugmentationDataset(torch.utils.data.Dataset):
     def __init__(self, path, extra_path=None, pair_path=None, vocal_path="", is_validation=False, mul=1, downsamples=0, epoch_size=None, pair_mul=1, slide=True, cropsize=256, mixup_rate=0, mixup_alpha=1, include_phase=False, force_voxaug=False):

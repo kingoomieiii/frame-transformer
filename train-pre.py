@@ -57,20 +57,35 @@ def mixup(X, Y, alpha=1):
 def train_epoch(dataloader, model, device, optimizer, accumulation_steps, grad_scaler, progress_bar, mixup_rate, mixup_alpha, lr_warmup=None):
     model.train()
     sum_loss = 0
-    batch_loss = 0
-    crit = nn.L1Loss()
+
+    sum_mask_loss = 0
+    sum_nxt_loss = 0
+
+    batch_mask_loss = 0
+    batch_nxt_loss = 0
+
+    mask_crit = nn.L1Loss()
+    next_crit = nn.BCEWithLogitsLoss()
 
     pbar = tqdm(dataloader) if progress_bar else dataloader
-    for itr, (src, tgt) in enumerate(pbar):
+    for itr, (src, tgt, is_next) in enumerate(pbar):
         src = src.to(device)
         tgt = tgt.to(device)
+        is_next = is_next.to(device).type(torch.float)
+
+        if len(is_next.shape) == 1:
+            is_next = is_next.unsqueeze(0)
 
         with torch.cuda.amp.autocast_mode.autocast(enabled=grad_scaler is not None):
-            pred = model(src)
+            pred, nxt = model(src)
 
-        loss = crit(src * pred, tgt)
+        mask_loss = mask_crit(src * pred, tgt)
+        nxt_loss = next_crit(nxt, is_next)
+        loss = mask_loss + nxt_loss        
         accum_loss = loss / accumulation_steps
-        batch_loss = batch_loss + accum_loss
+
+        batch_mask_loss = batch_mask_loss + (mask_loss / accumulation_steps)
+        batch_nxt_loss = batch_nxt_loss + (nxt_loss / accumulation_steps)
 
         if grad_scaler is not None:
             grad_scaler.scale(accum_loss).backward()
@@ -79,7 +94,7 @@ def train_epoch(dataloader, model, device, optimizer, accumulation_steps, grad_s
 
         if (itr + 1) % accumulation_steps == 0:
             if progress_bar:
-                pbar.set_description(str(batch_loss.item()))
+                pbar.set_description(f'{str(batch_mask_loss.item())}|{str(batch_nxt_loss.item())}')
 
             if grad_scaler is not None:
                 grad_scaler.unscale_(optimizer)
@@ -93,9 +108,11 @@ def train_epoch(dataloader, model, device, optimizer, accumulation_steps, grad_s
                 lr_warmup.step()
 
             model.zero_grad()
-            batch_loss = 0
+            batch_mask_loss = 0
+            batch_nxt_loss = 0
 
-        sum_loss += loss.item() * len(src)
+        sum_mask_loss += mask_loss.item() * len(src)
+        sum_nxt_loss += nxt_loss.item() * len(src)
 
     # the rest batch
     if (itr + 1) % accumulation_steps != 0:
@@ -105,30 +122,38 @@ def train_epoch(dataloader, model, device, optimizer, accumulation_steps, grad_s
         grad_scaler.update()
         model.zero_grad()
 
-    return sum_loss / len(dataloader.dataset)
+    return sum_mask_loss / len(dataloader.dataset), sum_nxt_loss / len(dataloader.dataset)
 
 def validate_epoch(dataloader, model, device, grad_scaler, include_phase=False):
     model.eval()
-    sum_loss = 0
-    crit = nn.L1Loss()
+
+    sum_mask_loss = 0
+    sum_nxt_loss = 0
+
+    mask_crit = nn.L1Loss()
+    next_crit = nn.BCEWithLogitsLoss()
 
     with torch.no_grad():
-        for src, tgt in tqdm(dataloader):
+        for src, tgt, is_next in tqdm(dataloader):
             src = src.to(device)
             tgt = tgt.to(device)
+            is_next = is_next.to(device)
 
             with torch.cuda.amp.autocast_mode.autocast(enabled=grad_scaler is not None):
-                pred = model(src)
+                pred, nxt = model(src)
  
-            loss = crit(src * pred, tgt)
+            mask_loss = mask_crit(src * pred, tgt)
+            nxt_loss = next_crit(nxt, is_next)
+            loss = mask_loss + nxt_loss
     
             if torch.logical_or(loss.isnan(), loss.isinf()):
                 print('non-finite or nan validation loss; aborting')
                 quit()
             else:
-                sum_loss += loss.item() * len(src)
+                sum_mask_loss += mask_loss.item() * len(src)
+                sum_nxt_loss += nxt_loss.item() * len(src)
 
-    return sum_loss / len(dataloader.dataset)
+    return sum_mask_loss / len(dataloader.dataset), sum_nxt_loss / len(dataloader.dataset)
 
 def main():
     p = argparse.ArgumentParser()
@@ -184,6 +209,7 @@ def main():
     p.add_argument('--debug', action='store_true')
     p.add_argument('--dropout', type=float, default=0.1)
     p.add_argument('--mask_rate', type=float, default=0.15)
+    p.add_argument('--next_frame_chunk_size', type=int, default=80)
     args = p.parse_args()
 
     args.amsgrad = str.lower(args.amsgrad) == 'true'
@@ -213,7 +239,8 @@ def main():
         mixup_rate=args.mixup_rate,
         mixup_alpha=args.mixup_alpha,
         pair_mul=1,
-        mask_rate=args.mask_rate
+        mask_rate=args.mask_rate,
+        next_frame_chunk_size=args.next_frame_chunk_size
     )
 
     train_dataloader = torch.utils.data.DataLoader(
@@ -230,7 +257,8 @@ def main():
         cropsize=args.cropsize,
         mixup_rate=args.mixup_rate,
         mixup_alpha=args.mixup_alpha,
-        mask_rate=args.mask_rate
+        mask_rate=args.mask_rate,
+        next_frame_chunk_size=args.next_frame_chunk_size
     )
 
     val_dataloader = torch.utils.data.DataLoader(
@@ -259,7 +287,7 @@ def main():
         logger.info('{} {} {}'.format(i + 1, os.path.basename(X_fname), os.path.basename(y_fname)))
 
     device = torch.device('cpu')
-    model = FrameTransformer(channels=args.channels, n_fft=args.n_fft, num_encoders=args.num_encoders, num_bands=args.num_bands, feedforward_dim=args.feedforward_dim, bias=args.bias, cropsize=args.cropsize, out_activate=nn.Sigmoid())
+    model = FrameTransformer(channels=args.channels, n_fft=args.n_fft, num_encoders=args.num_encoders, num_bands=args.num_bands, feedforward_dim=args.feedforward_dim, bias=args.bias, cropsize=args.cropsize + args.next_frame_chunk_size, out_activate=nn.Sigmoid())
 
     if args.pretrained_model is not None:
         model.load_state_dict(torch.load(args.pretrained_model, map_location=device))
@@ -306,17 +334,22 @@ def main():
         train_dataset.rebuild()
 
         logger.info('# epoch {}'.format(epoch))
-        train_loss = train_epoch(train_dataloader, model, device, optimizer, args.accumulation_steps, grad_scaler, args.progress_bar, args.mixup_rate, args.mixup_alpha, lr_warmup=scheduler)
-        val_loss_mag = validate_epoch(val_dataloader, model, device, grad_scaler)
+        train_loss_mask, train_loss_nxt = train_epoch(train_dataloader, model, device, optimizer, args.accumulation_steps, grad_scaler, args.progress_bar, args.mixup_rate, args.mixup_alpha, lr_warmup=scheduler)
+        val_loss_mask, val_loss_nxt = validate_epoch(val_dataloader, model, device, grad_scaler)
 
         logger.info(
-            '  * training loss = {:.6f}, validation loss mag = {:.6f}'
-            .format(train_loss, val_loss_mag)
+            '  * training loss mask = {:.6f}, train loss next = {:.6f}'
+            .format(train_loss_mask, train_loss_nxt)
         )
 
-        if (val_loss_mag) < best_loss or args.save_all:
-            if (val_loss_mag) < best_loss:
-                best_loss = val_loss_mag
+        logger.info(
+            '  * validation loss mask = {:.6f}, validation loss next = {:.6f}'
+            .format(val_loss_mask, val_loss_nxt)
+        )
+
+        if (val_loss_mask + val_loss_nxt) < best_loss or args.save_all:
+            if (val_loss_mask + val_loss_nxt) < best_loss:
+                best_loss = val_loss_mask + val_loss_nxt
                 logger.info('  * best validation loss')
 
             model_path = f'{args.model_dir}models/model_iter{epoch}.pth'
@@ -324,7 +357,7 @@ def main():
             torch.save(model.state_dict(), model_path)
             torch.save(scheduler.state_dict(), scheduler_path)
 
-        log.append([1, val_loss_mag])
+        log.append([train_loss_mask, train_loss_nxt, val_loss_mask, val_loss_nxt])
         with open('loss_{}.json'.format(timestamp), 'w', encoding='utf8') as f:
             json.dump(log, f, ensure_ascii=False)
 
