@@ -235,6 +235,7 @@ def main():
         extra_path="D://cs2048_sr44100_hl1024_nf2048_of0",
         pair_path=None,#"G://cs2048_sr44100_hl1024_nf2048_of0_PAIRS",
         mix_path="D://cs2048_sr44100_hl1024_nf2048_of0_MIXES",
+        mix_path2="C://cs2048_sr44100_hl1024_nf2048_of0_MIXES",
         vocal_path="D://cs2048_sr44100_hl1024_nf2048_of0_VOCALS",
         is_validation=False,
         epoch_size=args.epoch_size,
