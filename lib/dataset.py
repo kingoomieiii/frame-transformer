@@ -318,8 +318,8 @@ class MaskedPretrainingDataset(torch.utils.data.Dataset):
             if np.random.uniform() < 0.5:
                 nidx = np.random.randint(len(self))
 
-                if nidx == idx:
-                    nidx = (idx + np.random.randint(1, len(self.curr_list) - 2)) % len(self.curr_list)
+                while nidx == idx:
+                    nidx = np.random.randint(len(self))
 
                 NX, _, _ = self.__getitem__(nidx, root=False)
                 X[:, :, -self.next_frame_chunk_size:] = NX[:, :, -self.next_frame_chunk_size:]
