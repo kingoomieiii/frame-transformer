@@ -72,9 +72,9 @@ def train_epoch(dataloader, model, device, optimizer, accumulation_steps, grad_s
         src = src.to(device)
         tgt = tgt.to(device)
         is_next = is_next.to(device)
-        
+
         if len(is_next.shape) == 1:
-            is_next = is_next.unsqueeze(0)
+            is_next = is_next.unsqueeze(1)
 
         with torch.cuda.amp.autocast_mode.autocast(enabled=grad_scaler is not None):
             pred, nxt = model(src)
@@ -140,7 +140,7 @@ def validate_epoch(dataloader, model, device, grad_scaler, include_phase=False):
             is_next = is_next.to(device)
 
             if len(is_next.shape) == 1:
-                is_next = is_next.unsqueeze(0)
+                is_next = is_next.unsqueeze(1)
 
             with torch.cuda.amp.autocast_mode.autocast(enabled=grad_scaler is not None):
                 pred, nxt = model(src)
@@ -189,7 +189,7 @@ def main():
     p.add_argument('--patches', '-p', type=int, default=16)
     p.add_argument('--val_rate', '-v', type=float, default=0.2)
     p.add_argument('--val_filelist', '-V', type=str, default=None)
-    p.add_argument('--val_batchsize', '-b', type=int, default=4)
+    p.add_argument('--val_batchsize', '-b', type=int, default=2)
     p.add_argument('--val_cropsize', '-c', type=int, default=1024)
     p.add_argument('--num_workers', '-w', type=int, default=4)
     p.add_argument('--warmup_epoch', type=int, default=2)
@@ -211,7 +211,7 @@ def main():
     p.add_argument('--model_dir', type=str, default='E://')
     p.add_argument('--debug', action='store_true')
     p.add_argument('--dropout', type=float, default=0.1)
-    p.add_argument('--mask_rate', type=float, default=0.3)
+    p.add_argument('--mask_rate', type=float, default=0.5)
     p.add_argument('--next_frame_chunk_size', type=int, default=552)
     args = p.parse_args()
 

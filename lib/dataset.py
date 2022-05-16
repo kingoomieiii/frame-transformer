@@ -334,7 +334,7 @@ class MaskedPretrainingDataset(torch.utils.data.Dataset):
             mask_revert_indices = np.random.choice(mask_indices.shape[0], size=math.ceil(mask_indices.shape[0] * 0.1), replace=False)
 
             X[:, :, mask_indices] = 1.0
-            X[:, :, mask_indices[mask_rand_indices]] = X[:, :, mask_indices[mask_rand_indices]] + rand_frames[:, :, mask_indices[mask_rand_indices]]
+            X[:, :, mask_indices[mask_rand_indices]] = Y[:, :, mask_indices[mask_rand_indices]] + rand_frames[:, :, mask_indices[mask_rand_indices]]
             X[:, :, mask_indices[mask_revert_indices]] = Y[:, :, mask_indices[mask_revert_indices]]
             X[:, :, -self.next_frame_chunk_size] = 1.0
 
