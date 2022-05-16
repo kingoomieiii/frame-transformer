@@ -338,13 +338,6 @@ class MaskedPretrainingDataset(torch.utils.data.Dataset):
             X[:, :, mask_indices[mask_revert_indices]] = Y[:, :, mask_indices[mask_revert_indices]]
             X[:, :, -self.next_frame_chunk_size] = 1.0
 
-            separator_token = np.ones(X.shape[1])
-            separator_token[1::2] = 0
-            X[:, :, -self.next_frame_chunk_size+1:] = X[:, :, -self.next_frame_chunk_size:-1]
-            Y[:, :, -self.next_frame_chunk_size+1:] = Y[:, :, -self.next_frame_chunk_size:-1]
-            X[:, :, -self.next_frame_chunk_size] = separator_token
-            Y[:, :, -self.next_frame_chunk_size] = separator_token
-
         X = np.clip(np.abs(X) / c, 0, 1)
         Y = np.clip(np.abs(Y) / c, 0, 1)
       
