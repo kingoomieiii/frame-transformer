@@ -12,9 +12,6 @@ I will be releasing a pretrained checkpoint in the coming weeks. I have a datase
 
 If someone would like to work with me please reach out to me at carperbr@gmail.com.
 
-Example of vocal extraction at only the second epoch which shows how it handles low end. 
-![image](https://user-images.githubusercontent.com/30326384/167711869-e02c7a4a-8baf-4119-a531-232836e93187.png)
-
 ## References
 - [1] Jansson et al., "Singing Voice Separation with Deep U-Net Convolutional Networks", https://ismir2017.smcnus.org/wp-content/uploads/2017/10/171_Paper.pdf
 - [2] Takahashi et al., "Multi-scale Multi-band DenseNets for Audio Source Separation", https://arxiv.org/pdf/1706.09588.pdf
