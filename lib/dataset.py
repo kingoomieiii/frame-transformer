@@ -23,6 +23,7 @@ class VocalAutoregressiveDataset(torch.utils.data.Dataset):
         self.cropsize = cropsize
         self.mixup_rate = mixup_rate
         self.mixup_alpha = mixup_alpha
+        self.token_size = 8
         pair_list = []
 
         if pair_path is not None and pair_mul > 0:
@@ -177,6 +178,7 @@ class MaskedPretrainingDataset(torch.utils.data.Dataset):
         self.mixup_alpha = mixup_alpha
         self.mask_rate = mask_rate
         self.next_frame_chunk_size = next_frame_chunk_size
+        self.token_size = 8
         pair_list = []
 
         if pair_path is not None and pair_mul > 0:
@@ -328,14 +330,22 @@ class MaskedPretrainingDataset(torch.utils.data.Dataset):
                 Y[:, :, -self.next_frame_chunk_size:] = NX[:, :, -self.next_frame_chunk_size:]
                 is_next = 0.0
 
-            rand_frames = np.random.uniform(0, 1, X.shape)
-            mask_indices = np.random.choice(self.cropsize + self.next_frame_chunk_size, size=math.ceil(self.cropsize * self.mask_rate), replace=False)
-            mask_rand_indices = np.random.choice(mask_indices.shape[0], size=math.ceil(mask_indices.shape[0] * 0.1), replace=False)
-            mask_revert_indices = np.random.choice(mask_indices.shape[0], size=math.ceil(mask_indices.shape[0] * 0.1), replace=False)
+            noise = np.random.uniform(0, 1, X.shape)
+            num_tokens = (self.cropsize + self.next_frame_chunk_size) // self.token_size
+            token_indices = np.random.choice(num_tokens, size=math.ceil(num_tokens * self.mask_rate), replace=False) * self.token_size
 
-            X[:, :, mask_indices] = 1.0
-            X[:, :, mask_indices[mask_rand_indices]] = Y[:, :, mask_indices[mask_rand_indices]] + rand_frames[:, :, mask_indices[mask_rand_indices]]
-            X[:, :, mask_indices[mask_revert_indices]] = Y[:, :, mask_indices[mask_revert_indices]]
+            for i in range(len(token_indices)):
+                start = token_indices[i]
+                stop = start + self.token_size
+        
+                X[:, :, start:stop] = 1.0
+
+                if np.random.uniform() < 0.2:
+                    if np.random.uniform() < 0.5:
+                        X[:, :, start:stop] = Y[:, :, start:stop] + noise[:, :, start:stop]
+                    else:
+                        X[:, :, start:stop] = Y[:, :, start:stop]
+
             X[:, :, -self.next_frame_chunk_size] = 1.0
 
         X = np.clip(np.abs(X) / c, 0, 1)
