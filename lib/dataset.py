@@ -168,7 +168,7 @@ class VocalAutoregressiveDataset(torch.utils.data.Dataset):
         return X, Y
 
 class MaskedPretrainingDataset(torch.utils.data.Dataset):
-    def __init__(self, path, extra_path=None, pair_path=None, mix_path=None, mix_path2=None, vocal_path="", is_validation=False, mul=1, downsamples=0, epoch_size=None, pair_mul=1, slide=True, cropsize=256, mixup_rate=0, mixup_alpha=1, mask_rate=0.15, next_frame_chunk_size=16):
+    def __init__(self, path, extra_path=None, pair_path=None, mix_path=None, mix_path2=None, mix_path3=None, vocal_path="", is_validation=False, mul=1, downsamples=0, epoch_size=None, pair_mul=1, slide=True, cropsize=256, mixup_rate=0, mixup_alpha=1, mask_rate=0.15, next_frame_chunk_size=16):
         self.epoch_size = epoch_size
         self.slide = slide
         self.mul = mul
@@ -205,6 +205,17 @@ class MaskedPretrainingDataset(torch.utils.data.Dataset):
 
         if mix_path2 is not None:
             mixes = [os.path.join(mix_path2, f) for f in os.listdir(mix_path2) if os.path.isfile(os.path.join(mix_path2, f))]
+
+            for m in mixes:
+                if pair_mul > 1:
+                    for _ in range(pair_mul):
+                        pair_list.append(m)
+                else:
+                    if np.random.uniform() < pair_mul:
+                        pair_list.append(m)
+
+        if mix_path3 is not None:
+            mixes = [os.path.join(mix_path3, f) for f in os.listdir(mix_path3) if os.path.isfile(os.path.join(mix_path3, f))]
 
             for m in mixes:
                 if pair_mul > 1:
@@ -325,26 +336,29 @@ class MaskedPretrainingDataset(torch.utils.data.Dataset):
                 while nidx == idx:
                     nidx = np.random.randint(len(self))
 
-                NX, _, _ = self.__getitem__(nidx, root=False)
-                X[:, :, -self.next_frame_chunk_size:] = NX[:, :, -self.next_frame_chunk_size:]
-                Y[:, :, -self.next_frame_chunk_size:] = NX[:, :, -self.next_frame_chunk_size:]
                 is_next = 0.0
+                NX, _, _ = self.__getitem__(nidx, root=False)
+                start = np.random.randint(0, NX.shape[2] -self.next_frame_chunk_size)
+                stop = start + self.next_frame_chunk_size
+
+                X[:, :, -self.next_frame_chunk_size:] = NX[:, :, start:stop]
+                Y[:, :, -self.next_frame_chunk_size:] = NX[:, :, start:stop]
 
             noise = np.random.uniform(0, 1, X.shape)
             num_tokens = (self.cropsize + self.next_frame_chunk_size) // self.token_size
-            token_indices = np.random.choice(num_tokens, size=math.ceil(num_tokens * self.mask_rate), replace=False) * self.token_size
 
-            for i in range(len(token_indices)):
-                start = token_indices[i]
-                stop = start + self.token_size
-        
-                X[:, :, start:stop] = 1.0
+            for token in range(num_tokens):
+                if np.random.uniform() < self.mask_rate:
+                    start = token * self.token_size
+                    stop = start + self.token_size
+            
+                    X[:, :, start:stop] = 1.0
 
-                if np.random.uniform() < 0.2:
-                    if np.random.uniform() < 0.5:
-                        X[:, :, start:stop] = Y[:, :, start:stop] + noise[:, :, start:stop]
-                    else:
-                        X[:, :, start:stop] = Y[:, :, start:stop]
+                    if np.random.uniform() < 0.2:
+                        if np.random.uniform() < 0.5:
+                            X[:, :, start:stop] = Y[:, :, start:stop] + noise[:, :, start:stop]
+                        else:
+                            X[:, :, start:stop] = Y[:, :, start:stop]
 
             X[:, :, -self.next_frame_chunk_size] = 1.0
 
