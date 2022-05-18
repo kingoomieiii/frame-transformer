@@ -179,7 +179,7 @@ def main():
     #p.add_argument('--lr_scheduler_decay_steps', type=int, default=128000) # controlled by args.epoch now
     p.add_argument('--lr_scheduler_decay_power', type=float, default=1.0)
     p.add_argument('--lr_scheduler_current_step', type=int, default=0)
-    p.add_argument('--cropsize', '-C', type=int, default=552)
+    p.add_argument('--cropsize', '-C', type=int, default=512)
     p.add_argument('--patches', '-p', type=int, default=16)
     p.add_argument('--val_rate', '-v', type=float, default=0.2)
     p.add_argument('--val_filelist', '-V', type=str, default=None)
@@ -188,7 +188,7 @@ def main():
     p.add_argument('--num_workers', '-w', type=int, default=4)
     p.add_argument('--curr_warmup_epoch', type=int, default=0)
     p.add_argument('--warmup_epoch', type=int, default=2)
-    p.add_argument('--epoch', '-E', type=int, default=25)
+    p.add_argument('--epoch', '-E', type=int, default=30)
     p.add_argument('--epoch_size', type=int, default=None)
     p.add_argument('--reduction_rate', '-R', type=float, default=0.0)
     p.add_argument('--reduction_level', '-L', type=float, default=0.2)
@@ -207,7 +207,7 @@ def main():
     p.add_argument('--debug', action='store_true')
     p.add_argument('--dropout', type=float, default=0.1)
     p.add_argument('--mask_rate', type=float, default=0.5)
-    p.add_argument('--next_frame_chunk_size', type=int, default=560)
+    p.add_argument('--next_frame_chunk_size', type=int, default=512)
     args = p.parse_args()
 
     args.amsgrad = str.lower(args.amsgrad) == 'true'
@@ -318,7 +318,7 @@ def main():
 
     steps = len(train_dataset) // (args.batchsize * args.accumulation_steps)
     warmup_steps = steps * args.warmup_epoch
-    decay_steps = steps * args.epoch - warmup_steps
+    decay_steps = steps * args.epoch
 
     scheduler = torch.optim.lr_scheduler.ChainedScheduler([
         LinearWarmupScheduler(optimizer, target_lr=args.learning_rate, num_steps=warmup_steps, current_step=(steps * args.curr_warmup_epoch)),
@@ -335,7 +335,14 @@ def main():
 
         logger.info('# epoch {}'.format(epoch))
         train_loss_mask, train_loss_nxt = train_epoch(train_dataloader, model, device, optimizer, args.accumulation_steps, grad_scaler, args.progress_bar, args.mixup_rate, args.mixup_alpha, lr_warmup=scheduler)
-        val_loss_mask, val_loss_nxt = validate_epoch(val_dataloader, model, device, grad_scaler)
+
+        val_loss_mask1, val_loss_nxt1 = validate_epoch(val_dataloader, model, device, grad_scaler)
+        val_loss_mask2, val_loss_nxt2 = validate_epoch(val_dataloader, model, device, grad_scaler)
+        val_loss_mask3, val_loss_nxt3 = validate_epoch(val_dataloader, model, device, grad_scaler)
+        val_loss_mask4, val_loss_nxt4 = validate_epoch(val_dataloader, model, device, grad_scaler)
+
+        val_loss_mask = (val_loss_mask1 + val_loss_mask2 + val_loss_mask3 + val_loss_mask4) / 4
+        val_loss_nxt = (val_loss_nxt1 + val_loss_nxt2 + val_loss_nxt3 + val_loss_nxt4) / 4
 
         logger.info(
             '  * training loss mask = {:.6f}, train loss next = {:.6f}'
@@ -344,7 +351,22 @@ def main():
 
         logger.info(
             '  * validation loss mask = {:.6f}, validation loss next = {:.6f}'
-            .format(val_loss_mask, val_loss_nxt)
+            .format(val_loss_mask1, val_loss_nxt1)
+        )
+
+        logger.info(
+            '  * validation loss mask = {:.6f}, validation loss next = {:.6f}'
+            .format(val_loss_mask2, val_loss_nxt2)
+        )
+
+        logger.info(
+            '  * validation loss mask = {:.6f}, validation loss next = {:.6f}'
+            .format(val_loss_mask3, val_loss_nxt3)
+        )
+
+        logger.info(
+            '  * validation loss mask = {:.6f}, validation loss next = {:.6f}'
+            .format(val_loss_mask4, val_loss_nxt4)
         )
 
         if (val_loss_mask + val_loss_nxt) < best_loss or args.save_all:
@@ -353,9 +375,7 @@ def main():
                 logger.info('  * best validation loss')
 
             model_path = f'{args.model_dir}models/model_iter{epoch}.pth'
-            scheduler_path = f'{args.model_dir}models/scheduler_iter{epoch}.pth'
             torch.save(model.state_dict(), model_path)
-            torch.save(scheduler.state_dict(), scheduler_path)
 
         log.append([train_loss_mask, train_loss_nxt, val_loss_mask, val_loss_nxt])
         with open('loss_{}.json'.format(timestamp), 'w', encoding='utf8') as f:

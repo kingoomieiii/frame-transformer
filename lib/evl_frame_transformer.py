@@ -12,32 +12,6 @@ class ReLU1(nn.Module):
     def __call__(self, x):
         return self.relu(x) / 6.0
 
-class ResBlock(nn.Module):
-    def __init__(self, in_channels, out_channels, kernel_size=3, padding=1, bias=False):
-        super(ResBlock, self).__init__()
-
-        self.conv1 = nn.Sequential(
-            nn.InstanceNorm2d(in_channels, affine=True),
-            nn.ReLU(inplace=True),
-            nn.Conv2d(in_channels, out_channels, kernel_size=kernel_size, padding=padding, bias=False))
-
-        self.conv2 = nn.Sequential(
-            nn.InstanceNorm2d(out_channels, affine=True),
-            nn.ReLU(inplace=True),
-            nn.Conv2d(out_channels, out_channels, kernel_size=kernel_size, padding=padding, bias=False))
-
-        self.identity = nn.Conv2d(in_channels, out_channels, kernel_size=1, padding=0, bias=False) if in_channels != out_channels else None
-
-    def __call__(self, x):
-        identity = self.identity(x) if self.identity is not None else x
-
-        h = self.conv1(x)
-        h = self.conv2(h)
-
-        x = identity + h
-
-        return x
-
 class FrameTransformer(nn.Module):
     def __init__(self, channels, n_fft=2048, feedforward_dim=512, num_bands=4, num_encoders=1, cropsize=1024, bias=False, out_activate=ReLU1(), dropout=0.1):
         super(FrameTransformer, self).__init__()
@@ -46,11 +20,12 @@ class FrameTransformer(nn.Module):
         self.output_bin = n_fft // 2 + 1
         self.cropsize = cropsize
         self.encoder = nn.ModuleList([FrameTransformerEncoder(channels + i, bins=self.max_bin, num_bands=num_bands, cropsize=cropsize, feedforward_dim=feedforward_dim, bias=bias, dropout=dropout) for i in range(num_encoders)])
-        self.out = nn.Linear(channels + num_encoders, 2, bias=bias)
+
+        self.out = nn.Conv2d(channels + num_encoders, 2, kernel_size=(3, 1), padding=(1, 0), bias=bias)
         
         self.is_next = nn.Sequential(
-            nn.Linear(channels + num_encoders, 2, bias=bias),
-            nn.LogSoftmax(dim=-1))
+            nn.Conv2d(channels + num_encoders, 2, kernel_size=(3, 1), padding=(1, 0), bias=bias),
+            nn.LogSoftmax(dim=1))
             
         self.activate = out_activate if out_activate is not None else nn.Identity()
 
@@ -63,10 +38,10 @@ class FrameTransformer(nn.Module):
             src = torch.cat((src, h), dim=1)
 
         return F.pad(
-            input=self.activate(self.out(src.transpose(1,3)).transpose(1,3)),
+            input=self.activate(self.out(src)),
             pad=(0, 0, 0, self.output_bin - self.max_bin),
             mode='replicate'
-        ), F.adaptive_avg_pool2d(self.is_next(src.transpose(1,3)).transpose(1,3), (1,1)).squeeze(-1).squeeze(-1)
+        ), F.log_softmax(F.adaptive_avg_pool2d(self.is_next(src), (1,1)), dim=-1).squeeze(-1).squeeze(-1)
 
 class MultibandFrameAttention(nn.Module):
     def __init__(self, num_bands, bins, cropsize, kernel_size=3, padding=1):
@@ -141,8 +116,8 @@ class FrameTransformerEncoder(nn.Module):
         self.dropout3 = nn.Dropout(dropout) if dropout > 0 else nn.Identity()
 
         self.norm5 = nn.LayerNorm(bins)
-        self.conv2 = nn.Linear(bins, feedforward_dim, bias=bias)
-        self.conv3 = nn.Linear(feedforward_dim, bins, bias=bias)
+        self.conv2 = nn.Conv2d(1, 1, kernel_size=(9, 1), padding=(4, 0), bias=bias)
+        self.conv3 = nn.Conv2d(1, 1, kernel_size=(9, 1), padding=(4, 0), bias=bias)
         self.dropout4 = nn.Dropout(dropout) if dropout > 0 else nn.Identity()
 
     def __call__(self, x, prev_qk=None):
@@ -163,8 +138,38 @@ class FrameTransformerEncoder(nn.Module):
         h, qk = self.attn(h, prev_qk=prev_qk)
         x = x + self.dropout3(h)
 
-        h = self.norm5(x)
+        h = self.norm5(x).transpose(1,2).unsqueeze(1)
+        x = x.transpose(1,2).unsqueeze(1)
         h = self.conv3(torch.square(self.relu(self.conv2(h))))
         x = x + self.dropout4(h)
 
-        return x.transpose(1,2).unsqueeze(1), qk
+        return x, qk
+
+class FrameConv(nn.Module):
+    def __init__(self, in_channels, out_channels, kernel_size=3, stride=1, padding=1, dilation=1, groups=1, activate=nn.ReLU, norm=True):
+        super(FrameConv, self).__init__()
+
+        self.weight = nn.Parameter(torch.empty(kernel_size))
+
+        self.conv = nn.Conv2d(
+                in_channels, out_channels,
+                kernel_size=(kernel_size, 1),
+                stride=(stride, 1),
+                padding=(padding, 0),
+                dilation=(dilation, 1),
+                groups=groups,
+                bias=False)
+
+        self.norm = nn.BatchNorm2d(out_channels) if norm else None
+        self.activate = activate(inplace=True) if activate is not None else None
+
+    def __call__(self, x):
+        h = self.conv(x)
+        
+        if self.norm is not None:
+            h = self.norm(h)
+
+        if self.activate is not None:
+            h = self.activate(h)
+
+        return h

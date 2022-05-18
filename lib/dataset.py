@@ -178,7 +178,7 @@ class MaskedPretrainingDataset(torch.utils.data.Dataset):
         self.mixup_alpha = mixup_alpha
         self.mask_rate = mask_rate
         self.next_frame_chunk_size = next_frame_chunk_size
-        self.token_size = 8
+        self.token_size = 16
         pair_list = []
 
         if pair_path is not None and pair_mul > 0:
@@ -361,7 +361,10 @@ class MaskedPretrainingDataset(torch.utils.data.Dataset):
                         else:
                             X[:, :, start:stop] = Y[:, :, start:stop]
 
-            X[:, :, -self.next_frame_chunk_size] = 1.0
+            separator_token = np.ones(X.shape)
+            separator_token[:, 1::2, :] = 0
+            X[:, :, -self.next_frame_chunk_size-(self.token_size//2):-self.next_frame_chunk_size+(self.token_size//2)] = separator_token[:, :, -self.next_frame_chunk_size-(self.token_size//2):-self.next_frame_chunk_size+(self.token_size//2)]
+            Y[:, :, -self.next_frame_chunk_size-(self.token_size//2):-self.next_frame_chunk_size+(self.token_size//2)] = separator_token[:, :, -self.next_frame_chunk_size-(self.token_size//2):-self.next_frame_chunk_size+(self.token_size//2)]
 
         X = np.clip(np.abs(X) / c, 0, 1)
         Y = np.clip(np.abs(Y) / c, 0, 1)
