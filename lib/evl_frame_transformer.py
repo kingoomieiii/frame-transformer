@@ -21,12 +21,12 @@ class FrameTransformer(nn.Module):
         self.cropsize = cropsize
         self.encoder = nn.ModuleList([FrameTransformerEncoder(channels + i, bins=self.max_bin, num_bands=num_bands, cropsize=cropsize, feedforward_dim=feedforward_dim, bias=bias, dropout=dropout) for i in range(num_encoders)])
 
-        self.out = nn.Conv2d(channels + num_encoders, 2, kernel_size=(3, 1), padding=(1, 0), bias=bias)
+        self.out = nn.Linear(channels + num_encoders, 2, bias=bias)
         
         self.is_next = nn.Sequential(
-            nn.Conv2d(channels + num_encoders, 2, kernel_size=(3, 1), padding=(1, 0), bias=bias),
-            nn.LogSoftmax(dim=1))
-            
+            nn.Linear(channels + num_encoders, 2, bias=bias),
+            nn.LogSoftmax(dim=-1))
+
         self.activate = out_activate if out_activate is not None else nn.Identity()
 
     def __call__(self, src):
@@ -38,10 +38,10 @@ class FrameTransformer(nn.Module):
             src = torch.cat((src, h), dim=1)
 
         return F.pad(
-            input=self.activate(self.out(src)),
+            input=self.activate(self.out(src.transpose(1,3)).transpose(1,3)),
             pad=(0, 0, 0, self.output_bin - self.max_bin),
             mode='replicate'
-        ), F.log_softmax(F.adaptive_avg_pool2d(self.is_next(src), (1,1)), dim=-1).squeeze(-1).squeeze(-1)
+        ), F.adaptive_avg_pool2d(self.is_next(src.transpose(1,3)).transpose(1,3), (1,1)).squeeze(-1).squeeze(-1)
 
 class MultibandFrameAttention(nn.Module):
     def __init__(self, num_bands, bins, cropsize, kernel_size=3, padding=1):
