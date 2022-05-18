@@ -50,7 +50,7 @@ class FrameTransformer(nn.Module):
         
         self.is_next = nn.Sequential(
             nn.Linear(channels + num_encoders, 2, bias=bias),
-            nn.LogSoftmax())
+            nn.LogSoftmax(dim=-1))
             
         self.activate = out_activate if out_activate is not None else nn.Identity()
 
