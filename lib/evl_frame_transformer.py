@@ -66,7 +66,7 @@ class FrameTransformer(nn.Module):
             input=self.activate(self.out(src.transpose(1,3)).transpose(1,3)),
             pad=(0, 0, 0, self.output_bin - self.max_bin),
             mode='replicate'
-        ), F.adaptive_max_pool2d(self.is_next(src.transpose(1,3)).transpose(1,3), (1,1)).squeeze(-1).squeeze(-1)
+        ), F.adaptive_avg_pool2d(self.is_next(src.transpose(1,3)).transpose(1,3), (1,1)).squeeze(-1).squeeze(-1)
 
 class MultibandFrameAttention(nn.Module):
     def __init__(self, num_bands, bins, cropsize, kernel_size=3, padding=1):
