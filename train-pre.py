@@ -65,20 +65,17 @@ def train_epoch(dataloader, model, device, optimizer, accumulation_steps, grad_s
     batch_nxt_loss = 0
 
     mask_crit = nn.L1Loss()
-    next_crit = nn.BCEWithLogitsLoss()
+    next_crit = nn.CrossEntropyLoss()
 
     pbar = tqdm(dataloader) if progress_bar else dataloader
     for itr, (src, tgt, is_next) in enumerate(pbar):
         src = src.to(device)
         tgt = tgt.to(device)
-        is_next = is_next.to(device)
-
-        if len(is_next.shape) == 1:
-            is_next = is_next.unsqueeze(1)
+        is_next = is_next.to(device).type(torch.long)
 
         with torch.cuda.amp.autocast_mode.autocast(enabled=grad_scaler is not None):
             pred, nxt = model(src)
-
+            
         mask_loss = mask_crit(src * pred, tgt)
         nxt_loss = next_crit(nxt, is_next)
         loss = mask_loss + nxt_loss
@@ -131,16 +128,13 @@ def validate_epoch(dataloader, model, device, grad_scaler, include_phase=False):
     sum_nxt_loss = 0
 
     mask_crit = nn.L1Loss()
-    next_crit = nn.BCEWithLogitsLoss()
+    next_crit = nn.CrossEntropyLoss()
 
     with torch.no_grad():
         for src, tgt, is_next in tqdm(dataloader):
             src = src.to(device)
             tgt = tgt.to(device)
-            is_next = is_next.to(device)
-
-            if len(is_next.shape) == 1:
-                is_next = is_next.unsqueeze(1)
+            is_next = is_next.to(device).type(torch.long)
 
             with torch.cuda.amp.autocast_mode.autocast(enabled=grad_scaler is not None):
                 pred, nxt = model(src)
@@ -189,9 +183,10 @@ def main():
     p.add_argument('--patches', '-p', type=int, default=16)
     p.add_argument('--val_rate', '-v', type=float, default=0.2)
     p.add_argument('--val_filelist', '-V', type=str, default=None)
-    p.add_argument('--val_batchsize', '-b', type=int, default=2)
+    p.add_argument('--val_batchsize', '-b', type=int, default=1)
     p.add_argument('--val_cropsize', '-c', type=int, default=1024)
     p.add_argument('--num_workers', '-w', type=int, default=4)
+    p.add_argument('--curr_warmup_epoch', type=int, default=0)
     p.add_argument('--warmup_epoch', type=int, default=2)
     p.add_argument('--epoch', '-E', type=int, default=25)
     p.add_argument('--epoch_size', type=int, default=None)
@@ -212,7 +207,7 @@ def main():
     p.add_argument('--debug', action='store_true')
     p.add_argument('--dropout', type=float, default=0.1)
     p.add_argument('--mask_rate', type=float, default=0.5)
-    p.add_argument('--next_frame_chunk_size', type=int, default=552)
+    p.add_argument('--next_frame_chunk_size', type=int, default=560)
     args = p.parse_args()
 
     args.amsgrad = str.lower(args.amsgrad) == 'true'
@@ -326,8 +321,8 @@ def main():
     decay_steps = steps * args.epoch - warmup_steps
 
     scheduler = torch.optim.lr_scheduler.ChainedScheduler([
-        LinearWarmupScheduler(optimizer, target_lr=args.learning_rate, num_steps=warmup_steps, current_step=args.lr_scheduler_current_step),
-        PolynomialDecayScheduler(optimizer, target=args.lr_scheduler_decay_target, power=args.lr_scheduler_decay_power, num_decay_steps=decay_steps, start_step=warmup_steps, current_step=args.lr_scheduler_current_step)
+        LinearWarmupScheduler(optimizer, target_lr=args.learning_rate, num_steps=warmup_steps, current_step=(steps * args.curr_warmup_epoch)),
+        PolynomialDecayScheduler(optimizer, target=args.lr_scheduler_decay_target, power=args.lr_scheduler_decay_power, num_decay_steps=decay_steps, start_step=warmup_steps, current_step=(steps * args.curr_warmup_epoch))
     ])
 
     if args.pretrained_model_scheduler is not None:

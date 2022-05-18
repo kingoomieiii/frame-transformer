@@ -325,7 +325,7 @@ class MaskedPretrainingDataset(torch.utils.data.Dataset):
             a = np.random.beta(self.mixup_alpha, self.mixup_alpha)
             X = X * a + (1 - a) * MX
         
-        is_next = 1.0
+        is_next = 1
         
         if root:
             Y = X.copy()
@@ -336,11 +336,12 @@ class MaskedPretrainingDataset(torch.utils.data.Dataset):
                 while nidx == idx:
                     nidx = np.random.randint(len(self))
 
-                is_next = 0.0
                 NX, _, _ = self.__getitem__(nidx, root=False)
-                start = np.random.randint(0, NX.shape[2] -self.next_frame_chunk_size)
+
+                start = np.random.randint(0, NX.shape[2] - self.next_frame_chunk_size)
                 stop = start + self.next_frame_chunk_size
 
+                is_next = 0
                 X[:, :, -self.next_frame_chunk_size:] = NX[:, :, start:stop]
                 Y[:, :, -self.next_frame_chunk_size:] = NX[:, :, start:stop]
 

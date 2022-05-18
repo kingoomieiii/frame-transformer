@@ -1,5 +1,5 @@
 import torch
-from torch import nn
+from torch import log_softmax, nn
 import torch.nn.functional as F
 import math
 
@@ -47,20 +47,26 @@ class FrameTransformer(nn.Module):
         self.cropsize = cropsize
         self.encoder = nn.ModuleList([FrameTransformerEncoder(channels + i, bins=self.max_bin, num_bands=num_bands, cropsize=cropsize, feedforward_dim=feedforward_dim, bias=bias, dropout=dropout) for i in range(num_encoders)])
         self.out = nn.Linear(channels + num_encoders, 2, bias=bias)
-        self.is_next = nn.Linear(channels + num_encoders, 1, bias=bias)
+        
+        self.is_next = nn.Sequential(
+            nn.Linear(channels + num_encoders, 2, bias=bias),
+            nn.LogSoftmax())
+            
         self.activate = out_activate if out_activate is not None else nn.Identity()
 
     def __call__(self, src):
         src = src[:, :, :self.max_bin]
 
+        prev_qk = None
         for module in self.encoder:
-            src = torch.cat((src, module(src)), dim=1)
+            h, prev_qk = module(src, prev_qk=prev_qk)
+            src = torch.cat((src, h), dim=1)
 
         return F.pad(
             input=self.activate(self.out(src.transpose(1,3)).transpose(1,3)),
             pad=(0, 0, 0, self.output_bin - self.max_bin),
             mode='replicate'
-        ), F.adaptive_avg_pool2d(self.is_next(src.transpose(1,3)).transpose(1,3), (1,1)).squeeze(-1).squeeze(-1)
+        ), F.adaptive_max_pool2d(self.is_next(src.transpose(1,3)).transpose(1,3), (1,1)).squeeze(-1).squeeze(-1)
 
 class MultibandFrameAttention(nn.Module):
     def __init__(self, num_bands, bins, cropsize, kernel_size=3, padding=1):
@@ -82,7 +88,7 @@ class MultibandFrameAttention(nn.Module):
         self.er = nn.Parameter(torch.empty(bins // num_bands, cropsize))
         nn.init.normal_(self.er)
 
-    def forward(self, x, mem=None):
+    def forward(self, x, mem=None, prev_qk=None):
         b,w,c = x.shape
 
         q = self.q_conv(self.q_proj(x).transpose(1,2)).transpose(1,2).reshape(b, w, self.num_bands, -1).permute(0,2,1,3)
@@ -90,10 +96,14 @@ class MultibandFrameAttention(nn.Module):
         v = self.q_conv(self.v_proj(x if mem is None else mem).transpose(1,2)).transpose(1,2).reshape(b, w, self.num_bands, -1).permute(0,2,1,3)
         p = F.pad(torch.matmul(q,self.er), (1,0)).transpose(2,3)[:,:,1:,:]
         qk = (torch.matmul(q,k)+p) / math.sqrt(c)
+
+        if prev_qk is not None:
+            qk = qk + prev_qk
+
         a = F.softmax(qk, dim=-1)
         a = torch.matmul(a,v).transpose(1,2).reshape(b,w,-1)
         o = self.o_proj(a)
-        return o
+        return o, qk
 
 class FrameTransformerEncoder(nn.Module):
     def __init__(self, channels, bins, num_bands=4, cropsize=1024, feedforward_dim=2048, bias=False, dropout=0.1):
@@ -135,7 +145,7 @@ class FrameTransformerEncoder(nn.Module):
         self.conv3 = nn.Linear(feedforward_dim, bins, bias=bias)
         self.dropout4 = nn.Dropout(dropout) if dropout > 0 else nn.Identity()
 
-    def __call__(self, x):
+    def __call__(self, x, prev_qk=None):
         x = self.in_project(x.transpose(1,3)).squeeze(-1)
 
         h = self.norm1(x)
@@ -150,11 +160,11 @@ class FrameTransformerEncoder(nn.Module):
         x = x + self.dropout2(h)
 
         h = self.norm4(x)
-        h = self.attn(h)
+        h, qk = self.attn(h, prev_qk=prev_qk)
         x = x + self.dropout3(h)
 
         h = self.norm5(x)
         h = self.conv3(torch.square(self.relu(self.conv2(h))))
         x = x + self.dropout4(h)
 
-        return x.transpose(1,2).unsqueeze(1)
+        return x.transpose(1,2).unsqueeze(1), qk
