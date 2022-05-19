@@ -88,7 +88,7 @@ class FrameTransformerEncoder(nn.Module):
         self.cropsize = cropsize
         self.num_bands = num_bands
 
-        self.in_project = nn.Linear(channels, 1, bias=bias)
+        self.in_project = nn.Conv2d(channels, 1, kernel_size=(7,1), padding=(3,0))
 
         self.relu = nn.ReLU(inplace=True)
 
@@ -116,12 +116,12 @@ class FrameTransformerEncoder(nn.Module):
         self.dropout3 = nn.Dropout(dropout) if dropout > 0 else nn.Identity()
 
         self.norm5 = nn.LayerNorm(bins)
-        self.conv2 = nn.Conv2d(1, 16, kernel_size=(9, 1), padding=(4, 0), bias=bias)
-        self.conv3 = nn.Conv2d(16, 1, kernel_size=(9, 1), padding=(4, 0), bias=bias)
+        self.conv2 = nn.Linear(bins, feedforward_dim, bias=bias)
+        self.conv3 = nn.Linear(feedforward_dim, bins, bias=bias)
         self.dropout4 = nn.Dropout(dropout) if dropout > 0 else nn.Identity()
 
     def __call__(self, x, prev_qk=None):
-        x = self.in_project(x.transpose(1,3)).squeeze(-1)
+        x = self.in_project(x).transpose(1,3).squeeze(-1)
 
         h = self.norm1(x)
         h = self.glu(h)
@@ -138,12 +138,11 @@ class FrameTransformerEncoder(nn.Module):
         h, qk = self.attn(h, prev_qk=prev_qk)
         x = x + self.dropout3(h)
 
-        h = self.norm5(x).transpose(1,2).unsqueeze(1)
-        x = x.transpose(1,2).unsqueeze(1)
+        h = self.norm5(x)
         h = self.conv3(torch.square(self.relu(self.conv2(h))))
         x = x + self.dropout4(h)
 
-        return x, qk
+        return x.transpose(1,2).unsqueeze(1), qk
 
 class FrameConv(nn.Module):
     def __init__(self, in_channels, out_channels, kernel_size=3, stride=1, padding=1, dilation=1, groups=1, activate=nn.ReLU, norm=True):
