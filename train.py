@@ -16,7 +16,7 @@ from lib import dataset
 from lib import spec_utils
 from tqdm import tqdm
 
-from lib.frame_transformer_ar import FrameTransformer
+from lib.evl_frame_transformer import FrameTransformer
 from lib.lr_scheduler_linear_warmup import LinearWarmupScheduler
 from lib.lr_scheduler_polynomial_decay import PolynomialDecayScheduler
 
@@ -66,7 +66,7 @@ def train_epoch(dataloader, model, device, optimizer, accumulation_steps, grad_s
         y_batch = y_batch.to(device)
 
         with torch.cuda.amp.autocast_mode.autocast(enabled=grad_scaler is not None):
-            pred = torch.sigmoid(model(X_batch))
+            pred, _ = model(X_batch)
 
         accum_loss = crit(X_batch * pred, y_batch) / accumulation_steps
 
@@ -126,7 +126,8 @@ def validate_epoch(dataloader, model, device, grad_scaler, include_phase=False):
             y_batch = y_batch.to(device)
 
             with torch.cuda.amp.autocast_mode.autocast(enabled=grad_scaler is not None):
-                pred = torch.sigmoid(model(X_batch))                
+                pred, _ = model(X_batch)
+
 
             mag_loss = crit(X_batch * pred, y_batch)
 
@@ -141,7 +142,7 @@ def validate_epoch(dataloader, model, device, grad_scaler, include_phase=False):
 def main():
     p = argparse.ArgumentParser()
     p.add_argument('--id', type=str, default='')
-    p.add_argument('--channels', type=int, default=8)
+    p.add_argument('--channels', type=int, default=2)
     p.add_argument('--num_encoders', type=int, default=2)
     p.add_argument('--num_decoders', type=int, default=2)
     p.add_argument('--num_bands', type=int, default=8)
@@ -178,7 +179,7 @@ def main():
     p.add_argument('--val_cropsize', '-c', type=int, default=1024)
     p.add_argument('--num_workers', '-w', type=int, default=4)
     p.add_argument('--warmup_epoch', type=int, default=3)
-    p.add_argument('--epoch', '-E', type=int, default=200)
+    p.add_argument('--epoch', '-E', type=int, default=42)
     p.add_argument('--epoch_size', type=int, default=None)
     p.add_argument('--reduction_rate', '-R', type=float, default=0.0)
     p.add_argument('--reduction_level', '-L', type=float, default=0.2)
@@ -194,7 +195,7 @@ def main():
     p.add_argument('--force_voxaug', type=str, default='false')
     p.add_argument('--save_all', type=str, default='false')
     p.add_argument('--model_dir', type=str, default='E://')
-    p.add_argument('--llrd', type=str, default='true')
+    p.add_argument('--llrd', type=str, default='false')
     p.add_argument('--debug', action='store_true')
     args = p.parse_args()
 
@@ -216,9 +217,9 @@ def main():
 
     train_dataset = dataset.VocalAugmentationDataset(
         path="C://cs2048_sr44100_hl1024_nf2048_of0",
-        extra_path="G://cs2048_sr44100_hl1024_nf2048_of0",
+        extra_path="D://cs2048_sr44100_hl1024_nf2048_of0",
         pair_path=None,#"G://cs2048_sr44100_hl1024_nf2048_of0_PAIRS",
-        vocal_path="G://cs2048_sr44100_hl1024_nf2048_of0_VOCALS",
+        vocal_path="D://cs2048_sr44100_hl1024_nf2048_of0_VOCALS",
         is_validation=False,
         epoch_size=args.epoch_size,
         cropsize=args.cropsize,
@@ -271,34 +272,33 @@ def main():
         logger.info('{} {} {}'.format(i + 1, os.path.basename(X_fname), os.path.basename(y_fname)))
 
     device = torch.device('cpu')
-    model = FrameTransformer(channels=args.channels, n_fft=args.n_fft, num_encoders=args.num_encoders, num_decoders=args.num_decoders, num_bands=args.num_bands, feedforward_dim=args.feedforward_dim, bias=args.bias, cropsize=args.cropsize, autoregressive=False, out_activate=None, encoder_only=True)
+    model = FrameTransformer(n_fft=args.n_fft, num_encoders=args.num_encoders, num_bands=args.num_bands, feedforward_dim=args.feedforward_dim, bias=args.bias, cropsize=args.cropsize, out_activate=nn.Sigmoid())
 
     if args.pretrained_model is not None:
         model.load_state_dict(torch.load(args.pretrained_model, map_location=device))
     if torch.cuda.is_available() and args.gpu >= 0:
         device = torch.device('cuda:{}'.format(args.gpu))
-        model.to(device)
-
-    #model.encoder.requires_grad_(False)
-    model.mask = None
-    model.out.reset_parameters()
-    #model.out.requires_grad_(True)
-    
-    grad_scaler = torch.cuda.amp.grad_scaler.GradScaler() if args.mixed_precision else None
-    
+        model.to(device)    
+        
     model_parameters = filter(lambda p: p.requires_grad, model.parameters())
     params = sum([np.prod(p.size()) for p in model_parameters])
     print(f'# num params: {params}')
 
+    grad_scaler = torch.cuda.amp.grad_scaler.GradScaler() if args.mixed_precision else None 
+
+    model.out.reset_parameters()
+
     groups = []
 
     if args.llrd:
+        start_level = 0
         for i, encoder in enumerate(model.encoder):
             print(f'lr for {i}: { args.learning_rate * (1 / (args.num_encoders - i))}')
 
-            groups.append(
-                { "params": filter(lambda p: p.requires_grad, encoder.parameters()), "lr": args.learning_rate * (1 / (args.num_encoders - i + 1))}
-            )
+            if i >= start_level:
+                groups.append(
+                    { "params": filter(lambda p: p.requires_grad, encoder.parameters()), "lr": args.learning_rate * (1 / (args.num_encoders - i + 1))}
+                )
 
         print(f'lr for out: {args.learning_rate}')
         groups.append(
@@ -308,7 +308,7 @@ def main():
         groups = [
             { "params": filter(lambda p: p.requires_grad, model.parameters()), "lr": args.learning_rate }
         ]
-    
+
     if args.optimizer == 'adam':
         optimizer = torch.optim.Adam(
             groups,

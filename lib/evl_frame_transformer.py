@@ -6,7 +6,7 @@ import math
 from lib.frame_transformer_common import FrameTransformerEncoder
 
 class FrameTransformer(nn.Module):
-    def __init__(self, channels, n_fft=2048, feedforward_dim=512, num_bands=4, num_encoders=1, cropsize=1024, bias=False, out_activate=nn.Sigmoid(), dropout=0.1):
+    def __init__(self, channels=2, n_fft=2048, feedforward_dim=512, num_bands=4, num_encoders=1, cropsize=1024, bias=False, out_activate=nn.Sigmoid(), dropout=0.1):
         super(FrameTransformer, self).__init__()
         
         self.max_bin = n_fft // 2

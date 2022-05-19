@@ -54,7 +54,7 @@ class FrameTransformerEncoder(nn.Module):
         self.cropsize = cropsize
         self.num_bands = num_bands
 
-        self.in_project = nn.Linear(channels, 1, bias=bias)
+        self.in_project = nn.Conv2d(channels, 1, kernel_size=(9,1), padding=(4,0), bias=bias)
 
         self.relu = nn.ReLU(inplace=True)
 
@@ -83,7 +83,7 @@ class FrameTransformerEncoder(nn.Module):
         self.dropout4 = nn.Dropout(dropout) if dropout > 0 else nn.Identity()
 
     def __call__(self, x):
-        x = self.in_project(x.transpose(1,3)).squeeze(-1)
+        x = self.in_project(x).transpose(1,3).squeeze(-1)
 
         h = self.norm1(x)
         h = self.glu(h)
@@ -119,8 +119,8 @@ class FrameTransformerDecoder(nn.Module):
         self.cropsize = cropsize
         self.num_bands = num_bands
 
-        self.in_project = nn.Linear(channels, 1, bias=bias)
-        self.skip_project = nn.Linear(skip_channels, 1, bias=bias)
+        self.in_project = nn.Conv2d(channels, 1, kernel_size=(9,1), padding=(4,0), bias=bias)
+        self.skip_project = nn.Conv2d(skip_channels, 1, kernel_size=(9,1), padding=(4,0), bias=bias)
 
         self.relu = nn.ReLU(inplace=True)        
 
@@ -158,8 +158,8 @@ class FrameTransformerDecoder(nn.Module):
         self.dropout5 = nn.Dropout(dropout) if dropout > 0 else nn.Identity()
 
     def __call__(self, x, skip, mask=None):
-        x = self.in_project(x.transpose(1,3)).squeeze(-1)
-        skip = self.skip_project(skip.transpose(1,3)).squeeze(-1)
+        x = self.in_project(x).transpose(1,3).squeeze(-1)
+        skip = self.skip_project(skip).transpose(1,3).squeeze(-1)
 
         h = self.norm1(x)
         hs = self.self_attn1(h, mask=mask)
