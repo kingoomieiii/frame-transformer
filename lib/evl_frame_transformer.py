@@ -116,8 +116,8 @@ class FrameTransformerEncoder(nn.Module):
         self.dropout3 = nn.Dropout(dropout) if dropout > 0 else nn.Identity()
 
         self.norm5 = nn.LayerNorm(bins)
-        self.conv2 = nn.Conv2d(1, 1, kernel_size=(9, 1), padding=(4, 0), bias=bias)
-        self.conv3 = nn.Conv2d(1, 1, kernel_size=(9, 1), padding=(4, 0), bias=bias)
+        self.conv2 = nn.Conv2d(1, 16, kernel_size=(9, 1), padding=(4, 0), bias=bias)
+        self.conv3 = nn.Conv2d(16, 1, kernel_size=(9, 1), padding=(4, 0), bias=bias)
         self.dropout4 = nn.Dropout(dropout) if dropout > 0 else nn.Identity()
 
     def __call__(self, x, prev_qk=None):
