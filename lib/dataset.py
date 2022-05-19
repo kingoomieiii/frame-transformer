@@ -357,7 +357,7 @@ class MaskedPretrainingDataset(torch.utils.data.Dataset):
 
                     if np.random.uniform() < 0.2:
                         if np.random.uniform() < 0.5:
-                            X[:, :, start:stop] = Y[:, :, start:stop] + noise[:, :, start:stop]
+                            X[:, :, start:stop] = np.max([Y[:, :, start:stop], noise[:, :, start:stop]])
                         else:
                             X[:, :, start:stop] = Y[:, :, start:stop]
 
