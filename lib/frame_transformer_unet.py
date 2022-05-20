@@ -1,7 +1,6 @@
 import torch
 from torch import nn
 import torch.nn.functional as F
-import math
 from lib import spec_utils
 from lib.frame_transformer_common import FrameConv, FrameTransformerDecoder, FrameTransformerEncoder
 

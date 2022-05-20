@@ -280,8 +280,6 @@ def main():
 
     grad_scaler = torch.cuda.amp.grad_scaler.GradScaler() if args.mixed_precision else None 
 
-   #model.out.reset_parameters()
-
     groups = []
 
     if args.llrd:
