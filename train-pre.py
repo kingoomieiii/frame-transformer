@@ -155,9 +155,9 @@ def validate_epoch(dataloader, model, device, grad_scaler, include_phase=False):
 def main():
     p = argparse.ArgumentParser()
     p.add_argument('--id', type=str, default='')
-    p.add_argument('--channels', type=int, default=4)
-    p.add_argument('--num_stages', type=int, default=6)
-    p.add_argument('--num_transformer_blocks', type=int, default=2)    
+    p.add_argument('--channels', type=int, default=2)
+    p.add_argument('--num_stages', type=int, default=7)
+    p.add_argument('--num_transformer_blocks', type=int, default=2)
     p.add_argument('--num_bands', type=int, default=8)
     p.add_argument('--feedforward_dim', type=int, default=4096)
     p.add_argument('--bias', type=str, default='true')
@@ -175,8 +175,6 @@ def main():
     p.add_argument('--weight_decay', type=float, default=1e-2)
     p.add_argument('--optimizer', type=str.lower, choices=['adam', 'adamw'], default='adamw')
     p.add_argument('--lr_scheduler_decay_target', type=int, default=1e-7)
-    #p.add_argument('--lr_scheduler_warmup_steps', '-LW', type=int, default=32000) # controlled by args.warmup_epoch now
-    #p.add_argument('--lr_scheduler_decay_steps', type=int, default=128000) # controlled by args.epoch now
     p.add_argument('--lr_scheduler_decay_power', type=float, default=1.0)
     p.add_argument('--lr_scheduler_current_step', type=int, default=0)
     p.add_argument('--cropsize', '-C', type=int, default=512)

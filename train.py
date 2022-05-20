@@ -142,8 +142,8 @@ def validate_epoch(dataloader, model, device, grad_scaler, include_phase=False):
 def main():
     p = argparse.ArgumentParser()
     p.add_argument('--id', type=str, default='')
-    p.add_argument('--channels', type=int, default=4)
-    p.add_argument('--num_stages', type=int, default=6)
+    p.add_argument('--channels', type=int, default=2)
+    p.add_argument('--num_stages', type=int, default=7)
     p.add_argument('--num_transformer_blocks', type=int, default=2)    
     p.add_argument('--num_bands', type=int, default=8)
     p.add_argument('--feedforward_dim', type=int, default=4096)
