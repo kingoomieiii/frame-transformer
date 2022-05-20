@@ -16,7 +16,7 @@ from lib import dataset
 from lib import spec_utils
 from tqdm import tqdm
 
-from lib.frame_transformer_unet import FrameTransformerUNet
+from lib.frame_transformer_unet import FrameTransformer
 from lib.lr_scheduler_linear_warmup import LinearWarmupScheduler
 from lib.lr_scheduler_polynomial_decay import PolynomialDecayScheduler
 
@@ -155,11 +155,11 @@ def validate_epoch(dataloader, model, device, grad_scaler, include_phase=False):
 def main():
     p = argparse.ArgumentParser()
     p.add_argument('--id', type=str, default='')
-    p.add_argument('--channels', type=int, default=2)
-    p.add_argument('--num_encoders', type=int, default=24)
-    p.add_argument('--num_decoders', type=int, default=2)
-    p.add_argument('--num_bands', type=int, default=16)
-    p.add_argument('--feedforward_dim', type=int, default=2048)
+    p.add_argument('--channels', type=int, default=4)
+    p.add_argument('--num_stages', type=int, default=6)
+    p.add_argument('--num_transformer_blocks', type=int, default=2)    
+    p.add_argument('--num_bands', type=int, default=8)
+    p.add_argument('--feedforward_dim', type=int, default=4096)
     p.add_argument('--bias', type=str, default='true')
     p.add_argument('--amsgrad', type=str, default='false')
     p.add_argument('--batchsize', '-B', type=int, default=1)
@@ -206,7 +206,7 @@ def main():
     p.add_argument('--model_dir', type=str, default='E://')
     p.add_argument('--debug', action='store_true')
     p.add_argument('--dropout', type=float, default=0.1)
-    p.add_argument('--mask_rate', type=float, default=0.5)
+    p.add_argument('--mask_rate', type=float, default=0.15)
     p.add_argument('--next_frame_chunk_size', type=int, default=512)
     args = p.parse_args()
 
@@ -287,7 +287,7 @@ def main():
         logger.info('{} {} {}'.format(i + 1, os.path.basename(X_fname), os.path.basename(y_fname)))
 
     device = torch.device('cpu')
-    model = FrameTransformerUNet(channels=args.channels, n_fft=args.n_fft, num_decoders=args.num_encoders, num_encoders=args.num_encoders, num_bands=args.num_bands, feedforward_dim=args.feedforward_dim, bias=args.bias, cropsize=args.cropsize + args.next_frame_chunk_size, out_activate=nn.Sigmoid())
+    model = FrameTransformer(channels=args.channels, n_fft=args.n_fft, num_stages=args.num_stages, num_transformer_blocks=args.num_transformer_blocks ,num_bands=args.num_bands, feedforward_dim=args.feedforward_dim, bias=args.bias, cropsize=args.cropsize + args.next_frame_chunk_size)
 
     if args.pretrained_model is not None:
         model.load_state_dict(torch.load(args.pretrained_model, map_location=device))

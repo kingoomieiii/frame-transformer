@@ -142,11 +142,11 @@ def validate_epoch(dataloader, model, device, grad_scaler, include_phase=False):
 def main():
     p = argparse.ArgumentParser()
     p.add_argument('--id', type=str, default='')
-    p.add_argument('--channels', type=int, default=2)
-    p.add_argument('--num_encoders', type=int, default=2)
-    p.add_argument('--num_decoders', type=int, default=2)
+    p.add_argument('--channels', type=int, default=4)
+    p.add_argument('--num_stages', type=int, default=6)
+    p.add_argument('--num_transformer_blocks', type=int, default=2)    
     p.add_argument('--num_bands', type=int, default=8)
-    p.add_argument('--feedforward_dim', type=int, default=3072)
+    p.add_argument('--feedforward_dim', type=int, default=4096)
     p.add_argument('--bias', type=str, default='true')
     p.add_argument('--amsgrad', type=str, default='false')
     p.add_argument('--vocal_recurse_prob', type=float, default=0.5)
@@ -272,7 +272,7 @@ def main():
         logger.info('{} {} {}'.format(i + 1, os.path.basename(X_fname), os.path.basename(y_fname)))
 
     device = torch.device('cpu')
-    model = FrameTransformer(n_fft=args.n_fft, num_stages=6, num_transformer_blocks=args.num_encoders,num_bands=args.num_bands, feedforward_dim=args.feedforward_dim, bias=args.bias, cropsize=args.cropsize)
+    model = FrameTransformer(channels=args.channels, n_fft=args.n_fft, num_stages=args.num_stages, num_transformer_blocks=args.num_transformer_blocks ,num_bands=args.num_bands, feedforward_dim=args.feedforward_dim, bias=args.bias, cropsize=args.cropsize)
 
     if args.pretrained_model is not None:
         model.load_state_dict(torch.load(args.pretrained_model, map_location=device))

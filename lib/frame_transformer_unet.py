@@ -14,13 +14,13 @@ class FrameTransformer(nn.Module):
 
         self.num_stages = num_stages
         self.encoder = [FrameEncoder(in_channels, channels, kernel_size=3, padding=1, stride=1)]
-        self.decoder = [FrameDecoder(channels + num_transformer_blocks, in_channels, kernel_size=1, padding=0)]
+        self.decoder = [FrameDecoder(channels + num_transformer_blocks, channels, kernel_size=1, padding=0)]
         self.transformer_encoder = [nn.ModuleList([FrameTransformerEncoder(channels + i, num_bands=num_bands, cropsize=cropsize, n_fft=n_fft, downsamples=0, feedforward_dim=feedforward_dim, bias=bias) for i in range(num_transformer_blocks)])]
         self.transformer_decoder = [nn.ModuleList([FrameTransformerDecoder(channels + i, channels + num_transformer_blocks, num_bands=num_bands, cropsize=cropsize, n_fft=n_fft, downsamples=0, feedforward_dim=feedforward_dim, bias=bias) for i in range(num_transformer_blocks)])]
 
         for i in range(num_stages - 1):
             self.encoder.append(FrameEncoder(channels * (i + 1) + num_transformer_blocks, channels * (i + 2), stride=2))
-            self.decoder.append(FrameDecoder(channels * (((2 * i + 3)) + num_transformer_blocks) + (num_transformer_blocks if i == num_stages - 2 else 0), channels * (i + 1)))
+            self.decoder.append(FrameDecoder(channels * (i + 2) + num_transformer_blocks + channels * (i + 1) + num_transformer_blocks + (num_transformer_blocks if i == num_stages - 2 else 0), channels * (i + 1)))
             self.transformer_encoder.append(nn.ModuleList([FrameTransformerEncoder(channels * (i + 2) + j, num_bands=num_bands, cropsize=cropsize, n_fft=n_fft, downsamples=i+1, feedforward_dim=feedforward_dim, bias=bias) for j in range(num_transformer_blocks)]))
             self.transformer_decoder.append(nn.ModuleList([FrameTransformerDecoder(channels * (i + 2) + j + (num_transformer_blocks if i == num_stages - 2 else 0), channels * (i + 2) + num_transformer_blocks, num_bands=num_bands, cropsize=cropsize, n_fft=n_fft, downsamples=i+1, feedforward_dim=feedforward_dim, bias=bias) for j in range(num_transformer_blocks)]))
 
