@@ -54,7 +54,7 @@ class FrameTransformerEncoder(nn.Module):
         self.cropsize = cropsize
         self.num_bands = num_bands
 
-        self.in_project = nn.Conv2d(channels, 1, kernel_size=(9,1), padding=(4,0), bias=bias)
+        self.in_project = nn.Linear(channels, 1, bias=bias)
 
         self.relu = nn.ReLU(inplace=True)
 
@@ -65,12 +65,16 @@ class FrameTransformerEncoder(nn.Module):
         self.dropout1 = nn.Dropout(dropout) if dropout > 0 else nn.Identity()
 
         self.norm2 = nn.LayerNorm(bins)
-        self.conv1L = nn.Linear(bins, feedforward_dim, bias=bias)
-        self.conv1R = nn.Conv1d(bins, bins, kernel_size=3, padding=1, bias=bias)
-        self.norm3 = nn.LayerNorm(feedforward_dim)
-        self.conv1M = nn.Sequential(
-            nn.Conv1d(feedforward_dim, feedforward_dim, kernel_size=9, padding=4, groups=feedforward_dim, bias=bias),
-            nn.Conv1d(feedforward_dim, bins, kernel_size=1, padding=0, bias=bias))
+        self.conv1L = nn.Sequential(
+            nn.Conv1d(bins, bins, kernel_size=11, padding=5, groups=bins, bias=bias),
+            nn.Conv1d(bins, feedforward_dim // 2, kernel_size=1, padding=0, bias=bias))
+        self.conv1R = nn.Sequential(
+            nn.Conv1d(bins, bins, kernel_size=7, padding=3, groups=bins, bias=bias),
+            nn.Conv1d(bins, feedforward_dim // 4, kernel_size=1, padding=0, bias=bias))
+        self.norm3 = nn.LayerNorm(feedforward_dim // 2)
+        self.conv2 = nn.Sequential(
+            nn.Conv1d(feedforward_dim // 2, feedforward_dim // 2, kernel_size=7, padding=3, groups=feedforward_dim // 2, bias=bias),
+            nn.Conv1d(feedforward_dim // 2, bins, kernel_size=1, padding=0, bias=bias))
         self.dropout2 = nn.Dropout(dropout) if dropout > 0 else nn.Identity()
 
         self.norm4 = nn.LayerNorm(bins)
@@ -78,30 +82,30 @@ class FrameTransformerEncoder(nn.Module):
         self.dropout3 = nn.Dropout(dropout) if dropout > 0 else nn.Identity()
 
         self.norm5 = nn.LayerNorm(bins)
-        self.conv2 = nn.Linear(bins, feedforward_dim, bias=bias)
-        self.conv3 = nn.Linear(feedforward_dim, bins, bias=bias)
+        self.conv3 = nn.Linear(bins, feedforward_dim, bias=bias)
+        self.conv4 = nn.Linear(feedforward_dim, bins, bias=bias)
         self.dropout4 = nn.Dropout(dropout) if dropout > 0 else nn.Identity()
 
     def __call__(self, x):
-        x = self.in_project(x).transpose(1,3).squeeze(-1)
+        x = self.in_project(x.transpose(1,3)).squeeze(-1)
 
         h = self.norm1(x)
         h = self.glu(h)
         x = x + self.dropout1(h)
 
         h = self.norm2(x)
-        hL = self.relu(self.conv1L(h))
-        hR = self.relu(self.conv1R(h.transpose(1,2))).transpose(1,2)
+        hL = self.relu(self.conv1L(h.transpose(1,2)).transpose(1,2))
+        hR = self.conv1R(h.transpose(1,2)).transpose(1,2)
         h = self.norm3(hL + F.pad(hR, (0, hL.shape[2]-hR.shape[2])))
-        h = self.conv1M(h.transpose(1,2)).transpose(1,2)
-        x = x + self.dropout2(h)
+        h = self.dropout2(self.conv2(h.transpose(1,2)).transpose(1,2))
+        x = x + h
 
         h = self.norm4(x)
         h = self.attn(h)
         x = x + self.dropout3(h)
 
         h = self.norm5(x)
-        h = self.conv3(torch.square(self.relu(self.conv2(h))))
+        h = self.conv4(torch.square(self.relu(self.conv3(h))))
         x = x + self.dropout4(h)
 
         return x.transpose(1,2).unsqueeze(1)
@@ -119,8 +123,8 @@ class FrameTransformerDecoder(nn.Module):
         self.cropsize = cropsize
         self.num_bands = num_bands
 
-        self.in_project = nn.Conv2d(channels, 1, kernel_size=(9,1), padding=(4,0), bias=bias)
-        self.skip_project = nn.Conv2d(skip_channels, 1, kernel_size=(9,1), padding=(4,0), bias=bias)
+        self.in_project = nn.Linear(channels, 1, bias=bias)
+        self.skip_project = nn.Linear(skip_channels, 1, bias=bias)
 
         self.relu = nn.ReLU(inplace=True)        
 
@@ -158,8 +162,8 @@ class FrameTransformerDecoder(nn.Module):
         self.dropout5 = nn.Dropout(dropout) if dropout > 0 else nn.Identity()
 
     def __call__(self, x, skip, mask=None):
-        x = self.in_project(x).transpose(1,3).squeeze(-1)
-        skip = self.skip_project(skip).transpose(1,3).squeeze(-1)
+        x = self.in_project(x.transpose(1,3)).squeeze(-1)
+        skip = self.skip_project(skip.transpose(1,3)).squeeze(-1)
 
         h = self.norm1(x)
         hs = self.self_attn1(h, mask=mask)
@@ -169,7 +173,6 @@ class FrameTransformerDecoder(nn.Module):
         h = self.norm2(x)
         hL = self.relu(self.conv1L(h.transpose(1,2)).transpose(1,2))
         hR = self.conv1R(h.transpose(1,2)).transpose(1,2)
-
         h = self.norm3(hL + F.pad(hR, (0, hL.shape[2]-hR.shape[2])))
         h = self.dropout2(self.conv2(h.transpose(1,2)).transpose(1,2))
         x = x + h

@@ -16,7 +16,7 @@ from lib import dataset
 from lib import spec_utils
 from tqdm import tqdm
 
-from lib.evl_frame_transformer import FrameTransformer
+from lib.frame_transformer_unet import FrameTransformer
 from lib.lr_scheduler_linear_warmup import LinearWarmupScheduler
 from lib.lr_scheduler_polynomial_decay import PolynomialDecayScheduler
 
@@ -272,7 +272,7 @@ def main():
         logger.info('{} {} {}'.format(i + 1, os.path.basename(X_fname), os.path.basename(y_fname)))
 
     device = torch.device('cpu')
-    model = FrameTransformer(n_fft=args.n_fft, num_encoders=args.num_encoders, num_bands=args.num_bands, feedforward_dim=args.feedforward_dim, bias=args.bias, cropsize=args.cropsize, out_activate=nn.Sigmoid())
+    model = FrameTransformer(n_fft=args.n_fft, num_stages=6, num_transformer_blocks=args.num_encoders,num_bands=args.num_bands, feedforward_dim=args.feedforward_dim, bias=args.bias, cropsize=args.cropsize)
 
     if args.pretrained_model is not None:
         model.load_state_dict(torch.load(args.pretrained_model, map_location=device))
@@ -286,7 +286,7 @@ def main():
 
     grad_scaler = torch.cuda.amp.grad_scaler.GradScaler() if args.mixed_precision else None 
 
-    model.out.reset_parameters()
+   #model.out.reset_parameters()
 
     groups = []
 
