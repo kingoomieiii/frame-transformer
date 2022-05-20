@@ -11,9 +11,8 @@ class FrameTransformerUnet(nn.Module):
         self.max_bin = n_fft // 2
         self.output_bin = n_fft // 2 + 1
 
-        self.depth = depth
         self.encoder = [FrameEncoder(in_channels, channels, kernel_size=3, padding=1, stride=1)]
-        self.decoder = [FrameDecoder(channels + num_transformer_blocks, channels, kernel_size=1, padding=0)]
+        self.decoder = [FrameConv(channels + num_transformer_blocks, in_channels, kernel_size=1, padding=0, norm=False, activate=None)]
         self.transformer_encoder = [nn.ModuleList([FrameTransformerEncoder(channels + i, num_bands=num_bands, cropsize=cropsize, n_fft=n_fft, downsamples=0, feedforward_dim=feedforward_dim, bias=bias, dropout=dropout) for i in range(num_transformer_blocks)])]
         self.transformer_decoder = [nn.ModuleList([FrameTransformerDecoder(channels + i, channels + num_transformer_blocks, num_bands=num_bands, cropsize=cropsize, n_fft=n_fft, downsamples=0, feedforward_dim=feedforward_dim, bias=bias, dropout=dropout) for i in range(num_transformer_blocks)])]
 
@@ -29,7 +28,6 @@ class FrameTransformerUnet(nn.Module):
         self.decoder = nn.ModuleList(self.decoder[::-1])
         self.transformer_decoder = nn.ModuleList(self.transformer_decoder[::-1])
 
-        self.out = nn.Linear(channels, in_channels, bias=False)        
         self.is_next = nn.Sequential(
             nn.Linear(channels * (i + 2) + num_transformer_blocks, 2, bias=bias),
             nn.LogSoftmax(dim=-1))
@@ -53,10 +51,10 @@ class FrameTransformerUnet(nn.Module):
             for transformer_decoder in self.transformer_decoder[i]:
                 x = torch.cat((x, transformer_decoder(x, skip=skips[i])), dim=1)
 
-            x = decoder(x, skips[i+1] if i < len(self.decoder) - 1 else None)
+            x = decoder(x, skips[i+1]) if i < len(self.decoder) - 1 else decoder(x)
 
         return F.pad(
-            input=torch.sigmoid(self.out(x.transpose(1,3)).transpose(1,3)),
+            input=torch.sigmoid(x),
             pad=(0, 0, 0, self.output_bin - self.max_bin),
             mode='replicate'
         ), is_next
@@ -65,12 +63,12 @@ class FrameEncoder(nn.Module):
     def __init__(self, in_channels, out_channels, kernel_size=3, stride=1, padding=1, activ=nn.LeakyReLU):
         super(FrameEncoder, self).__init__()
 
-        self.idnt = FrameConv(in_channels, out_channels, kernel_size=1, padding=0, stride=stride, activate=None, norm=False)
+        self.idnt = FrameConv(in_channels, out_channels, kernel_size=1, padding=0, stride=stride, activate=None, norm=False) if (in_channels != out_channels or stride != 1) else None
         self.conv1 = FrameConv(in_channels, out_channels, kernel_size, 1, padding, activate=activ)
         self.conv2 = FrameConv(out_channels, out_channels, kernel_size, stride, padding, activate=activ)
 
     def __call__(self, x):
-        idnt = self.idnt(x)
+        idnt = self.idnt(x) if self.idnt is not None else x
         h = self.conv1(x)
         h = self.conv2(h)
         x = idnt + h
