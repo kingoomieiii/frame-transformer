@@ -262,12 +262,6 @@ def main():
         with open(args.val_filelist, 'r', encoding='utf8') as f:
             val_filelist = json.load(f)
 
-    if args.debug:
-        logger.info('### DEBUG MODE')
-    elif args.val_filelist is None and args.split_mode == 'random':
-        with open('val_{}.json'.format(timestamp), 'w', encoding='utf8') as f:
-            json.dump(val_filelist, f, ensure_ascii=False)
-
     for i, (X_fname, y_fname) in enumerate(val_filelist):
         logger.info('{} {} {}'.format(i + 1, os.path.basename(X_fname), os.path.basename(y_fname)))
 
