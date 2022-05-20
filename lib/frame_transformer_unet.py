@@ -4,24 +4,24 @@ import torch.nn.functional as F
 from lib import spec_utils
 from lib.frame_transformer_common import FrameConv, FrameTransformerDecoder, FrameTransformerEncoder
 
-class FrameTransformer(nn.Module):
-    def __init__(self, in_channels=2, channels=2, num_stages=6, num_transformer_blocks=2, num_bridge_encoders=8, channel_heads=1, feature_heads=1, dropout=0.3, out=False, activate=nn.PReLU, n_fft=2048, cropsize=1024, num_bands=8, feedforward_dim=2048, bias=True):
-        super(FrameTransformer, self).__init__()
+class FrameTransformerUnet(nn.Module):
+    def __init__(self, in_channels=2, channels=2, depth=6, num_transformer_blocks=2, dropout=0.1, n_fft=2048, cropsize=1024, num_bands=8, feedforward_dim=2048, bias=True):
+        super(FrameTransformerUnet, self).__init__()
 
         self.max_bin = n_fft // 2
         self.output_bin = n_fft // 2 + 1
 
-        self.num_stages = num_stages
+        self.depth = depth
         self.encoder = [FrameEncoder(in_channels, channels, kernel_size=3, padding=1, stride=1)]
         self.decoder = [FrameDecoder(channels + num_transformer_blocks, channels, kernel_size=1, padding=0)]
-        self.transformer_encoder = [nn.ModuleList([FrameTransformerEncoder(channels + i, num_bands=num_bands, cropsize=cropsize, n_fft=n_fft, downsamples=0, feedforward_dim=feedforward_dim, bias=bias) for i in range(num_transformer_blocks)])]
-        self.transformer_decoder = [nn.ModuleList([FrameTransformerDecoder(channels + i, channels + num_transformer_blocks, num_bands=num_bands, cropsize=cropsize, n_fft=n_fft, downsamples=0, feedforward_dim=feedforward_dim, bias=bias) for i in range(num_transformer_blocks)])]
+        self.transformer_encoder = [nn.ModuleList([FrameTransformerEncoder(channels + i, num_bands=num_bands, cropsize=cropsize, n_fft=n_fft, downsamples=0, feedforward_dim=feedforward_dim, bias=bias, dropout=dropout) for i in range(num_transformer_blocks)])]
+        self.transformer_decoder = [nn.ModuleList([FrameTransformerDecoder(channels + i, channels + num_transformer_blocks, num_bands=num_bands, cropsize=cropsize, n_fft=n_fft, downsamples=0, feedforward_dim=feedforward_dim, bias=bias, dropout=dropout) for i in range(num_transformer_blocks)])]
 
-        for i in range(num_stages - 1):
+        for i in range(depth - 1):
             self.encoder.append(FrameEncoder(channels * (i + 1) + num_transformer_blocks, channels * (i + 2), stride=2))
-            self.decoder.append(FrameDecoder(channels * (2 * i + 3) + 2 * num_transformer_blocks + (num_transformer_blocks if i == num_stages - 2 else 0), channels * (i + 1)))
-            self.transformer_encoder.append(nn.ModuleList([FrameTransformerEncoder(channels * (i + 2) + j, num_bands=num_bands, cropsize=cropsize, n_fft=n_fft, downsamples=i+1, feedforward_dim=feedforward_dim, bias=bias) for j in range(num_transformer_blocks)]))
-            self.transformer_decoder.append(nn.ModuleList([FrameTransformerDecoder(channels * (i + 2) + j + (num_transformer_blocks if i == num_stages - 2 else 0), channels * (i + 2) + num_transformer_blocks, num_bands=num_bands, cropsize=cropsize, n_fft=n_fft, downsamples=i+1, feedforward_dim=feedforward_dim, bias=bias) for j in range(num_transformer_blocks)]))
+            self.decoder.append(FrameDecoder(channels * (2 * i + 3) + 2 * num_transformer_blocks + (num_transformer_blocks if i == depth - 2 else 0), channels * (i + 1)))
+            self.transformer_encoder.append(nn.ModuleList([FrameTransformerEncoder(channels * (i + 2) + j, num_bands=num_bands, cropsize=cropsize, n_fft=n_fft, downsamples=i+1, feedforward_dim=feedforward_dim, bias=bias, dropout=dropout) for j in range(num_transformer_blocks)]))
+            self.transformer_decoder.append(nn.ModuleList([FrameTransformerDecoder(channels * (i + 2) + j + (num_transformer_blocks if i == depth - 2 else 0), channels * (i + 2) + num_transformer_blocks, num_bands=num_bands, cropsize=cropsize, n_fft=n_fft, downsamples=i+1, feedforward_dim=feedforward_dim, bias=bias, dropout=dropout) for j in range(num_transformer_blocks)]))
 
         self.encoder = nn.ModuleList(self.encoder)
         self.transformer_encoder = nn.ModuleList(self.transformer_encoder)

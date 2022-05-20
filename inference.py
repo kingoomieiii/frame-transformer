@@ -15,10 +15,12 @@ from lib import spec_utils
 from lib import utils
 
 import torch.nn.functional as F
+import torch.nn as nn
 
 import json
 
 from lib.frame_transformer import FrameTransformer
+from lib.frame_transformer_unet import FrameTransformerUnet as FrameTransformerUnet
 
 class Separator(object):
 
@@ -123,7 +125,7 @@ class Separator(object):
                 X_batch = X_dataset[i: i + self.batchsize]
                 X_batch = torch.from_numpy(X_batch).to(self.device)
 
-                pred = self.model(X_batch)
+                pred, _ = self.model(X_batch)
 
                 pred = pred.detach().cpu().numpy()
                 pred = np.concatenate(pred, axis=2)
@@ -156,10 +158,7 @@ class Separator(object):
         X_mag_pad = np.pad(X_mag, ((0, 0), (0, 0), (pad_l, pad_r)), mode='constant')
         X_mag_pad /= X_mag_pad.max()
 
-        if not sliding:
-            mask = self._separate(X_mag_pad, roi_size)
-        else:
-            mask = self._separate_sliding(X_mag_pad, roi_size)
+        mask = self._separate(X_mag_pad, roi_size)
 
         mask = mask[:, :, :n_frame]
         y_spec, v_spec = self._postprocess(mask, X_mag, X_phase)
@@ -189,33 +188,34 @@ class Separator(object):
 
         return y_spec, v_spec
 
-
 def main():
     p = argparse.ArgumentParser()
     p.add_argument('--gpu', '-g', type=int, default=-1)
-    p.add_argument('--pretrained_model', '-P', type=str, default='models/model_iter0.pth')
+    p.add_argument('--pretrained_model', '-P', type=str, default='E://models/model_iter0.pth')
     p.add_argument('--input', '-i', required=True)
     p.add_argument('--output', '-o', type=str, default="")
     p.add_argument('--sr', '-r', type=int, default=44100)
     p.add_argument('--n_fft', '-f', type=int, default=2048)
     p.add_argument('--hop_length', '-H', type=int, default=1024)
-    p.add_argument('--batchsize', '-B', type=int, default=8)
+    p.add_argument('--batchsize', '-B', type=int, default=1)
     p.add_argument('--cropsize', '-c', type=int, default=1024)
     p.add_argument('--output_image', '-I', action='store_true')
     p.add_argument('--postprocess', '-p', action='store_true')
-    p.add_argument('--channels', type=int, default=8)
     p.add_argument('--num_encoders', type=int, default=2)
-    p.add_argument('--num_decoders', type=int, default=2)
-    p.add_argument('--num_bands', type=int, default=8)
-    p.add_argument('--feedforward_dim', type=int, default=3072)
-    p.add_argument('--bias', type=str, default='true')
+    p.add_argument('--num_decoders', type=int, default=13)
     p.add_argument('--tta', '-t', action='store_true')
     p.add_argument('--sliding_tta', '-st', action='store_true')
+    p.add_argument('--channels', type=int, default=2)
+    p.add_argument('--depth', type=int, default=7)
+    p.add_argument('--num_transformer_blocks', type=int, default=2)    
+    p.add_argument('--num_bands', type=int, default=8)
+    p.add_argument('--feedforward_dim', type=int, default=4096)
+    p.add_argument('--bias', type=str, default='true')
     args = p.parse_args()
 
     print('loading model...', end=' ')
     device = torch.device('cpu')    
-    model = FrameTransformer(channels=args.channels, n_fft=args.n_fft, num_encoders=args.num_encoders, num_decoders=args.num_decoders, num_bands=args.num_bands, feedforward_dim=args.feedforward_dim, bias=args.bias, cropsize=args.cropsize)
+    model = FrameTransformerUnet(channels=args.channels, n_fft=args.n_fft, depth=args.depth, num_transformer_blocks=args.num_transformer_blocks ,num_bands=args.num_bands, feedforward_dim=args.feedforward_dim, bias=args.bias, cropsize=args.cropsize)
     model.load_state_dict(torch.load(args.pretrained_model, map_location=device))
     if torch.cuda.is_available() and args.gpu >= 0:
         device = torch.device('cuda:{}'.format(args.gpu))
@@ -263,10 +263,10 @@ def main():
 
             sp = Separator(model, device, args.batchsize, args.cropsize, args.postprocess)
 
-            if args.tta and not args.sliding_tta:
+            if args.tta:
                 y_spec, v_spec = sp.separate_tta(X_spec)
             else:
-                y_spec, v_spec = sp.separate(X_spec, False)
+                y_spec, v_spec = sp.separate(X_spec, args.sliding_tta)
 
             print('inverse stft of instruments...', end=' ')
             wave = spec_utils.spectrogram_to_wave(y_spec, hop_length=args.hop_length)
