@@ -5,9 +5,10 @@ from lib import spec_utils
 from lib.frame_transformer_common import FrameConv, FrameTransformerDecoder, FrameTransformerEncoder
 
 class FrameTransformerUnet(nn.Module):
-    def __init__(self, in_channels=2, channels=2, depth=6, num_transformer_blocks=2, dropout=0.1, n_fft=2048, cropsize=1024, num_bands=8, feedforward_dim=2048, bias=True):
+    def __init__(self, in_channels=2, channels=2, depth=6, num_transformer_blocks=2, dropout=0.1, n_fft=2048, cropsize=1024, num_bands=8, feedforward_dim=2048, bias=True, pretraining=True):
         super(FrameTransformerUnet, self).__init__()
 
+        self.pretraining = pretraining
         self.max_bin = n_fft // 2
         self.output_bin = n_fft // 2 + 1
 
@@ -44,7 +45,7 @@ class FrameTransformerUnet(nn.Module):
 
             skips.append(x)
 
-        is_next = F.adaptive_avg_pool2d(self.is_next(x.transpose(1,3)).transpose(1,3), (1,1)).squeeze(-1).squeeze(-1)
+        is_next = F.adaptive_avg_pool2d(self.is_next(x.transpose(1,3)).transpose(1,3), (1,1)).squeeze(-1).squeeze(-1) if self.pretraining else None
 
         skips = skips[::-1]
         for i, decoder in enumerate(self.decoder):

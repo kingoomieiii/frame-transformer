@@ -52,13 +52,11 @@ def mixup(X, Y, alpha=1):
     Y = Y * lam + Y2 * inv_lam
     return X, Y
 
-def train_epoch(dataloader, model, device, optimizer, accumulation_steps, grad_scaler, progress_bar, mixup_rate, mixup_alpha, lr_warmup=None, include_phase=False):
+def train_epoch(dataloader, model, device, optimizer, accumulation_steps, grad_scaler, progress_bar, mixup_rate, mixup_alpha, lr_warmup=None):
     model.train()
     sum_loss = 0
     crit = nn.L1Loss()
     batch_loss = 0
-    batch_mag_loss = 0
-    batch_phase_loss = 0
 
     pbar = tqdm(dataloader) if progress_bar else dataloader
     for itr, (X_batch, y_batch) in enumerate(pbar):
@@ -79,10 +77,7 @@ def train_epoch(dataloader, model, device, optimizer, accumulation_steps, grad_s
 
         if (itr + 1) % accumulation_steps == 0:
             if progress_bar:
-                if include_phase:
-                    pbar.set_description(f'{str(batch_mag_loss.item())} - {str(batch_phase_loss.item())}')
-                else:
-                    pbar.set_description(f'{str(batch_loss.item())}')
+                pbar.set_description(f'{str(batch_loss.item())}')
 
             if grad_scaler is not None:
                 grad_scaler.unscale_(optimizer)
@@ -98,7 +93,6 @@ def train_epoch(dataloader, model, device, optimizer, accumulation_steps, grad_s
             model.zero_grad()
             batch_loss = 0
             batch_mag_loss = 0
-            batch_phase_loss = 0
 
         sum_loss += accum_loss.item() * len(X_batch) * accumulation_steps
 
@@ -112,13 +106,12 @@ def train_epoch(dataloader, model, device, optimizer, accumulation_steps, grad_s
 
     return sum_loss / len(dataloader.dataset)
 
-def validate_epoch(dataloader, model, device, grad_scaler, include_phase=False):
+def validate_epoch(dataloader, model, device, grad_scaler):
     model.eval()
     sum_loss = 0
     crit = nn.L1Loss()
     
     mag_sum = 0
-    phase_sum = 0
 
     with torch.no_grad():
         for X_batch, y_batch in dataloader:
@@ -137,7 +130,7 @@ def validate_epoch(dataloader, model, device, grad_scaler, include_phase=False):
             else:
                 mag_sum += mag_loss.item() * len(X_batch)
 
-    return mag_sum / len(dataloader.dataset), phase_sum / len(dataloader.dataset)
+    return mag_sum / len(dataloader.dataset)
 
 def main():
     p = argparse.ArgumentParser()
@@ -148,12 +141,9 @@ def main():
     p.add_argument('--num_bands', type=int, default=8)
     p.add_argument('--feedforward_dim', type=int, default=4096)
     p.add_argument('--bias', type=str, default='true')
-    p.add_argument('--amsgrad', type=str, default='false')
-    p.add_argument('--vocal_recurse_prob', type=float, default=0.5)
-    p.add_argument('--vocal_recurse_prob_decay', type=float, default=0.5)
-    p.add_argument('--vocal_noise_prob', type=float, default=0.5)
-    p.add_argument('--vocal_noise_magnitude', type=float, default=0.5)
-    p.add_argument('--vocal_pan_prob', type=float, default=0.5)
+    p.add_argument('--weight_decay', type=float, default=1e-2)
+    p.add_argument('--optimizer', type=str.lower, choices=['adam', 'adamw'], default='adamw')
+    p.add_argument('--amsgrad', type=str, default='true')
     p.add_argument('--batchsize', '-B', type=int, default=1)
     p.add_argument('--accumulation_steps', '-A', type=int, default=4)
     p.add_argument('--gpu', '-g', type=int, default=-1)
@@ -162,15 +152,6 @@ def main():
     p.add_argument('--hop_length', '-H', type=int, default=1024)
     p.add_argument('--n_fft', '-f', type=int, default=2048)
     p.add_argument('--dataset', '-d', required=False)
-    p.add_argument('--split_mode', '-S', type=str, choices=['random', 'subdirs'], default='random')
-    p.add_argument('--learning_rate', '-l', type=float, default=1e-3)
-    p.add_argument('--weight_decay', type=float, default=0)
-    p.add_argument('--optimizer', type=str.lower, choices=['adam', 'adamw'], default='adam')
-    p.add_argument('--lr_scheduler_decay_target', type=int, default=1e-7)
-    #p.add_argument('--lr_scheduler_warmup_steps', '-LW', type=int, default=32000) # controlled by args.warmup_epoch now
-    #p.add_argument('--lr_scheduler_decay_steps', type=int, default=128000) # controlled by args.epoch now
-    p.add_argument('--lr_scheduler_decay_power', type=float, default=1.0)
-    p.add_argument('--lr_scheduler_current_step', type=int, default=0)
     p.add_argument('--cropsize', '-C', type=int, default=1024)
     p.add_argument('--patches', '-p', type=int, default=16)
     p.add_argument('--val_rate', '-v', type=float, default=0.2)
@@ -181,15 +162,13 @@ def main():
     p.add_argument('--warmup_epoch', type=int, default=3)
     p.add_argument('--epoch', '-E', type=int, default=42)
     p.add_argument('--epoch_size', type=int, default=None)
-    p.add_argument('--reduction_rate', '-R', type=float, default=0.0)
-    p.add_argument('--reduction_level', '-L', type=float, default=0.2)
-    p.add_argument('--fake_data_prob', type=float, default=math.nan)
+    p.add_argument('--learning_rate', '-l', type=float, default=1e-3)
+    p.add_argument('--lr_scheduler_decay_target', type=int, default=1e-7)
+    p.add_argument('--lr_scheduler_decay_power', type=float, default=1.0)
+    p.add_argument('--lr_scheduler_current_step', type=int, default=0)
     p.add_argument('--mixup_rate', '-M', type=float, default=0.5)
     p.add_argument('--mixup_alpha', '-a', type=float, default=0.4)
-    p.add_argument('--phase_in', type=str, default='false')
-    p.add_argument('--phase_out', type=str, default='false')
     p.add_argument('--pretrained_model', '-P', type=str, default=None)
-    p.add_argument('--pretrained_model_scheduler', type=str, default=None)
     p.add_argument('--progress_bar', '-pb', type=str, default='true')
     p.add_argument('--mixed_precision', type=str, default='true')
     p.add_argument('--force_voxaug', type=str, default='false')
@@ -204,8 +183,6 @@ def main():
     args.bias = str.lower(args.bias) == 'true'
     args.mixed_precision = str.lower(args.mixed_precision) == 'true'
     args.save_all = str.lower(args.save_all) == 'true'
-    args.phase_in = str.lower(args.phase_in) == 'true'
-    args.phase_out = str.lower(args.phase_out) == 'true'
     args.force_voxaug = str.lower(args.force_voxaug) == 'true'
     args.llrd = str.lower(args.llrd) == 'true'
 
@@ -334,23 +311,17 @@ def main():
         train_dataset.rebuild()
 
         logger.info('# epoch {}'.format(epoch))
-        train_loss = train_epoch(train_dataloader, model, device, optimizer, args.accumulation_steps, grad_scaler, args.progress_bar, args.mixup_rate, args.mixup_alpha, lr_warmup=scheduler, include_phase=args.phase_out)
-        val_loss_mag, val_loss_phase = validate_epoch(val_dataloader, model, device, grad_scaler, include_phase=args.phase_out)
+        train_loss = train_epoch(train_dataloader, model, device, optimizer, args.accumulation_steps, grad_scaler, args.progress_bar, args.mixup_rate, args.mixup_alpha, lr_warmup=scheduler)
+        val_loss_mag = validate_epoch(val_dataloader, model, device, grad_scaler)
 
-        if args.phase_out:
-            logger.info(
-                '  * training loss = {:.6f}, validation loss mag = {:.6f}, validation loss phase = {:.6f}'
-                .format(train_loss, val_loss_mag, val_loss_phase)
-            )
-        else:
-            logger.info(
-                '  * training loss = {:.6f}, validation loss mag = {:.6f}'
-                .format(train_loss, val_loss_mag)
-            )
+        logger.info(
+            '  * training loss = {:.6f}, validation loss mag = {:.6f}'
+            .format(train_loss, val_loss_mag)
+        )
 
-        if (val_loss_mag + val_loss_phase) < best_loss or args.save_all:
-            if (val_loss_mag + val_loss_phase) < best_loss:
-                best_loss = val_loss_mag + val_loss_phase
+        if (val_loss_mag) < best_loss or args.save_all:
+            if (val_loss_mag) < best_loss:
+                best_loss = val_loss_mag
                 logger.info('  * best validation loss')
 
             model_path = f'{args.model_dir}models/model_iter{epoch}.pth'
@@ -358,7 +329,7 @@ def main():
             torch.save(model.state_dict(), model_path)
             torch.save(scheduler.state_dict(), scheduler_path)
 
-        log.append([1, val_loss_mag, val_loss_phase])
+        log.append([train_loss, val_loss_mag])
         with open('loss_{}.json'.format(timestamp), 'w', encoding='utf8') as f:
             json.dump(log, f, ensure_ascii=False)
 

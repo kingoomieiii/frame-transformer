@@ -121,7 +121,7 @@ def train_epoch(dataloader, model, device, optimizer, accumulation_steps, grad_s
 
     return sum_mask_loss / len(dataloader.dataset), sum_nxt_loss / len(dataloader.dataset)
 
-def validate_epoch(dataloader, model, device, grad_scaler, include_phase=False):
+def validate_epoch(dataloader, model, device, grad_scaler):
     model.eval()
 
     sum_mask_loss = 0
@@ -193,8 +193,6 @@ def main():
     p.add_argument('--fake_data_prob', type=float, default=math.nan)
     p.add_argument('--mixup_rate', '-M', type=float, default=0.25)
     p.add_argument('--mixup_alpha', '-a', type=float, default=0.4)
-    p.add_argument('--phase_in', type=str, default='false')
-    p.add_argument('--phase_out', type=str, default='false')
     p.add_argument('--pretrained_model', '-P', type=str, default=None)
     p.add_argument('--pretrained_model_scheduler', type=str, default=None)
     p.add_argument('--progress_bar', '-pb', type=str, default='true')
@@ -213,8 +211,6 @@ def main():
     args.bias = str.lower(args.bias) == 'true'
     args.mixed_precision = str.lower(args.mixed_precision) == 'true'
     args.save_all = str.lower(args.save_all) == 'true'
-    args.phase_in = str.lower(args.phase_in) == 'true'
-    args.phase_out = str.lower(args.phase_out) == 'true'
     args.force_voxaug = str.lower(args.force_voxaug) == 'true'
 
     logger.info(args)

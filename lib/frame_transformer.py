@@ -6,9 +6,10 @@ import math
 from lib.frame_transformer_common import FrameTransformerEncoder
 
 class FrameTransformer(nn.Module):
-    def __init__(self, channels=2, n_fft=2048, feedforward_dim=512, num_bands=4, num_encoders=1, cropsize=1024, bias=False, out_activate=nn.Sigmoid(), dropout=0.1):
+    def __init__(self, channels=2, n_fft=2048, feedforward_dim=512, num_bands=4, num_encoders=1, cropsize=1024, bias=False, out_activate=nn.Sigmoid(), dropout=0.1, pretraining=True):
         super(FrameTransformer, self).__init__()
         
+        self.pretraining = pretraining
         self.max_bin = n_fft // 2
         self.output_bin = n_fft // 2 + 1
         self.cropsize = cropsize
@@ -33,4 +34,4 @@ class FrameTransformer(nn.Module):
             input=self.activate(self.out(src.transpose(1,3)).transpose(1,3)),
             pad=(0, 0, 0, self.output_bin - self.max_bin),
             mode='replicate'
-        ), F.adaptive_avg_pool2d(self.is_next(src.transpose(1,3)).transpose(1,3), (1,1)).squeeze(-1).squeeze(-1)
+        ), F.adaptive_avg_pool2d(self.is_next(src.transpose(1,3)).transpose(1,3), (1,1)).squeeze(-1).squeeze(-1) if self.pretraining else None
