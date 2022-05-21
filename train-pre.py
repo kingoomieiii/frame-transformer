@@ -185,7 +185,7 @@ def main():
     p.add_argument('--val_cropsize', '-c', type=int, default=1024)
     p.add_argument('--num_workers', '-w', type=int, default=4)
     p.add_argument('--curr_warmup_epoch', type=int, default=0)
-    p.add_argument('--token_warmup_epoch', type=int, default=2)
+    p.add_argument('--token_warmup_epoch', type=int, default=3)
     p.add_argument('--warmup_epoch', type=int, default=3)
     p.add_argument('--epoch', '-E', type=int, default=30)
     p.add_argument('--epoch_size', type=int, default=None)
@@ -205,7 +205,7 @@ def main():
     p.add_argument('--token_size', type=int, default=32)
     p.add_argument('--mask_rate', type=float, default=0.15)
     p.add_argument('--next_frame_chunk_size', type=int, default=512)
-    p.add_argument('--prefetch_factor', type=int, default=3)
+    p.add_argument('--prefetch_factor', type=int, default=4)
     args = p.parse_args()
 
     args.amsgrad = str.lower(args.amsgrad) == 'true'
@@ -246,7 +246,8 @@ def main():
         batch_size=args.batchsize,
         shuffle=True,
         num_workers=args.num_workers,
-        prefetch_factor=args.prefetch_factor
+        prefetch_factor=args.prefetch_factor,
+        persistent_workers=True
     )
     
     val_dataset = dataset.MaskedPretrainingDataset(
