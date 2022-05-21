@@ -168,7 +168,7 @@ class VocalAutoregressiveDataset(torch.utils.data.Dataset):
         return X, Y
 
 class MaskedPretrainingDataset(torch.utils.data.Dataset):
-    def __init__(self, path, extra_path=None, pair_path=None, mix_path=None, mix_path2=None, mix_path3=None, vocal_path="", is_validation=False, mul=1, downsamples=0, epoch_size=None, pair_mul=1, slide=True, cropsize=256, mixup_rate=0, mixup_alpha=1, mask_rate=0.15, next_frame_chunk_size=16):
+    def __init__(self, path, extra_path=None, pair_path=None, mix_path=None, mix_path2=None, mix_path3=None, vocal_path="", is_validation=False, mul=1, downsamples=0, epoch_size=None, pair_mul=1, slide=True, cropsize=256, mixup_rate=0, mixup_alpha=1, mask_rate=0.15, next_frame_chunk_size=16, token_size=16, current_step=0, num_steps=16000):
         self.epoch_size = epoch_size
         self.slide = slide
         self.mul = mul
@@ -178,8 +178,12 @@ class MaskedPretrainingDataset(torch.utils.data.Dataset):
         self.mixup_alpha = mixup_alpha
         self.mask_rate = mask_rate
         self.next_frame_chunk_size = next_frame_chunk_size
-        self.token_size = 16
         pair_list = []
+
+        self.token_size = 0
+        self.warmup_steps = num_steps
+        self.target_token_size = token_size
+        self.current_step = current_step
 
         if pair_path is not None and pair_mul > 0:
             pairs = [os.path.join(pair_path, f) for f in os.listdir(pair_path) if os.path.isfile(os.path.join(pair_path, f))]
@@ -345,26 +349,28 @@ class MaskedPretrainingDataset(torch.utils.data.Dataset):
                 X[:, :, -self.next_frame_chunk_size:] = NX[:, :, start:stop]
                 Y[:, :, -self.next_frame_chunk_size:] = NX[:, :, start:stop]
 
+            self.current_step = self.current_step + 1
+            token_size = min(self.target_token_size, math.ceil((self.current_step) * (self.target_token_size / self.warmup_steps)))
             noise = np.random.uniform(0, 1, X.shape)
-            num_tokens = (self.cropsize + self.next_frame_chunk_size) // self.token_size
+            num_tokens = (self.cropsize + self.next_frame_chunk_size) // token_size
 
             for token in range(num_tokens):
                 if np.random.uniform() < self.mask_rate:
-                    start = token * self.token_size
-                    stop = start + self.token_size
+                    start = token * token_size
+                    stop = start + token_size
             
                     X[:, :, start:stop] = 1.0
 
                     if np.random.uniform() < 0.2:
                         if np.random.uniform() < 0.5:
-                            X[:, :, start:stop] = np.max([Y[:, :, start:stop], noise[:, :, start:stop]])
+                            X[:, :, start:stop] = Y[:, :, start:stop] + noise[:, :, start:stop]
                         else:
                             X[:, :, start:stop] = Y[:, :, start:stop]
 
             separator_token = np.ones(X.shape)
             separator_token[:, 1::2, :] = 0
-            X[:, :, -self.next_frame_chunk_size-(self.token_size//2):-self.next_frame_chunk_size+(self.token_size//2)] = separator_token[:, :, -self.next_frame_chunk_size-(self.token_size//2):-self.next_frame_chunk_size+(self.token_size//2)]
-            Y[:, :, -self.next_frame_chunk_size-(self.token_size//2):-self.next_frame_chunk_size+(self.token_size//2)] = separator_token[:, :, -self.next_frame_chunk_size-(self.token_size//2):-self.next_frame_chunk_size+(self.token_size//2)]
+            X[:, :, -self.next_frame_chunk_size-(self.target_token_size//2):-self.next_frame_chunk_size+(self.target_token_size//2)] = separator_token[:, :, -self.next_frame_chunk_size-(self.target_token_size//2):-self.next_frame_chunk_size+(self.target_token_size//2)]
+            Y[:, :, -self.next_frame_chunk_size-(self.target_token_size//2):-self.next_frame_chunk_size+(self.target_token_size//2)] = separator_token[:, :, -self.next_frame_chunk_size-(self.target_token_size//2):-self.next_frame_chunk_size+(self.target_token_size//2)]
 
         X = np.clip(np.abs(X) / c, 0, 1)
         Y = np.clip(np.abs(Y) / c, 0, 1)

@@ -185,13 +185,13 @@ def main():
     p.add_argument('--val_cropsize', '-c', type=int, default=1024)
     p.add_argument('--num_workers', '-w', type=int, default=4)
     p.add_argument('--curr_warmup_epoch', type=int, default=0)
-    p.add_argument('--warmup_epoch', type=int, default=2)
+    p.add_argument('--token_warmup_epoch', type=int, default=2)
+    p.add_argument('--warmup_epoch', type=int, default=3)
     p.add_argument('--epoch', '-E', type=int, default=30)
     p.add_argument('--epoch_size', type=int, default=None)
     p.add_argument('--reduction_rate', '-R', type=float, default=0.0)
     p.add_argument('--reduction_level', '-L', type=float, default=0.2)
-    p.add_argument('--fake_data_prob', type=float, default=math.nan)
-    p.add_argument('--mixup_rate', '-M', type=float, default=0.25)
+    p.add_argument('--mixup_rate', '-M', type=float, default=0)
     p.add_argument('--mixup_alpha', '-a', type=float, default=0.4)
     p.add_argument('--pretrained_model', '-P', type=str, default=None)
     p.add_argument('--pretrained_model_scheduler', type=str, default=None)
@@ -202,8 +202,10 @@ def main():
     p.add_argument('--model_dir', type=str, default='E://')
     p.add_argument('--debug', action='store_true')
     p.add_argument('--dropout', type=float, default=0.1)
+    p.add_argument('--token_size', type=int, default=32)
     p.add_argument('--mask_rate', type=float, default=0.15)
     p.add_argument('--next_frame_chunk_size', type=int, default=512)
+    p.add_argument('--prefetch_factor', type=int, default=3)
     args = p.parse_args()
 
     args.amsgrad = str.lower(args.amsgrad) == 'true'
@@ -234,14 +236,17 @@ def main():
         mixup_alpha=args.mixup_alpha,
         pair_mul=1,
         mask_rate=args.mask_rate,
-        next_frame_chunk_size=args.next_frame_chunk_size
+        next_frame_chunk_size=args.next_frame_chunk_size,
+        token_size=args.token_size,
+        num_steps=0
     )
 
     train_dataloader = torch.utils.data.DataLoader(
         dataset=train_dataset,
         batch_size=args.batchsize,
         shuffle=True,
-        num_workers=args.num_workers
+        num_workers=args.num_workers,
+        prefetch_factor=args.prefetch_factor
     )
     
     val_dataset = dataset.MaskedPretrainingDataset(
@@ -313,11 +318,14 @@ def main():
     steps = len(train_dataset) // (args.batchsize * args.accumulation_steps)
     warmup_steps = steps * args.warmup_epoch
     decay_steps = steps * args.epoch
+    token_steps = steps * args.token_warmup_epoch
 
     scheduler = torch.optim.lr_scheduler.ChainedScheduler([
         LinearWarmupScheduler(optimizer, target_lr=args.learning_rate, num_steps=warmup_steps, current_step=(steps * args.curr_warmup_epoch)),
         PolynomialDecayScheduler(optimizer, target=args.lr_scheduler_decay_target, power=args.lr_scheduler_decay_power, num_decay_steps=decay_steps, start_step=warmup_steps, current_step=(steps * args.curr_warmup_epoch))
     ])
+
+    train_dataset.warmup_steps = token_steps
 
     if args.pretrained_model_scheduler is not None:
         scheduler.load_state_dict(torch.load(args.pretrained_model_scheduler))
