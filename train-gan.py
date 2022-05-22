@@ -17,6 +17,7 @@ from lib import spec_utils
 from tqdm import tqdm
 
 from lib.frame_transformer_unet import FrameTransformerUnet
+from lib.conv_discriminator import FrameTransformerDiscriminator
 from lib.lr_scheduler_linear_warmup import LinearWarmupScheduler
 from lib.lr_scheduler_polynomial_decay import PolynomialDecayScheduler
 
@@ -54,15 +55,13 @@ def mixup(X, Y, alpha=1):
     Y = Y * lam + Y2 * inv_lam
     return X, Y
 
-def train_epoch(dataloader, model, discriminator, device, optimizer, accumulation_steps, grad_scaler, progress_bar, mixup_rate, mixup_alpha, lr_warmup=None):
+def train_epoch(dataloader, model, discriminator, device, optimizer, disc_optimizer, accumulation_steps, grad_scaler, disc_scaler, progress_bar, mixup_rate, mixup_alpha, lr_warmup=None, lr_warmup_disc=None, lam=10):
     model.train()
-    sum_loss = 0
 
     sum_mask_loss = 0
     sum_nxt_loss = 0
-
-    batch_mask_loss = 0
-    batch_nxt_loss = 0
+    sum_gen_loss = 0
+    sum_disc_loss = 0
 
     mask_crit = nn.L1Loss()
     next_crit = nn.CrossEntropyLoss()
@@ -75,42 +74,47 @@ def train_epoch(dataloader, model, discriminator, device, optimizer, accumulatio
         is_next = is_next.to(device).type(torch.long)
 
         with torch.cuda.amp.autocast_mode.autocast(enabled=grad_scaler is not None):
-            pred, nxt = model(src)
+            mask, nxt = model(src)
+            real = discriminator(src, tgt)
+            real_loss = bce_crit(real, torch.ones_like(real))
+            fake = discriminator(src, src * mask.detach())
+            fake_loss = bce_crit(fake, torch.zeros_like(fake))
+            disc_loss = (real_loss + fake_loss) / 2
             
-        mask_loss = mask_crit(src * pred, tgt)
-        nxt_loss = next_crit(nxt, is_next)
-        loss = mask_loss + nxt_loss
-        accum_loss = loss / accumulation_steps
+        discriminator.zero_grad()
+        disc_scaler.scale(disc_loss).backward()
+        disc_scaler.unscale_(disc_optimizer)
+        clip_grad_norm_(discriminator.parameters(), 0.5)
+        disc_scaler.step(disc_optimizer)
+        disc_scaler.update()
 
-        batch_mask_loss = batch_mask_loss + (mask_loss / accumulation_steps)
-        batch_nxt_loss = batch_nxt_loss + (nxt_loss / accumulation_steps)
+        if lr_warmup_disc is not None:
+            lr_warmup_disc.step()
 
-        if grad_scaler is not None:
-            grad_scaler.scale(accum_loss).backward()
-        else:
-            accum_loss.backward()
+        with torch.cuda.amp.autocast_mode.autocast(enabled=grad_scaler is not None):
+            fake = discriminator(src, src * mask)
+            fake_loss = bce_crit(fake, torch.ones_like(fake))
+            mask_loss = mask_crit(src * mask, tgt)
+            nxt_loss = next_crit(nxt, is_next)
+            loss = (fake_loss + mask_loss * lam + nxt_loss)
 
-        if (itr + 1) % accumulation_steps == 0:
-            if progress_bar:
-                pbar.set_description(f'{str(batch_mask_loss.item())}|{str(batch_nxt_loss.item())}')
+        model.zero_grad()
+        grad_scaler.scale(loss).backward()
+        grad_scaler.unscale_(optimizer)
+        clip_grad_norm_(model.parameters(), 0.5)
+        grad_scaler.step(optimizer)
+        grad_scaler.update()
 
-            if grad_scaler is not None:
-                grad_scaler.unscale_(optimizer)
-                clip_grad_norm_(model.parameters(), 0.5)
-                grad_scaler.step(optimizer)
-                grad_scaler.update()
-            else:
-                optimizer.step()
+        if lr_warmup is not None:
+            lr_warmup.step()
 
-            if lr_warmup is not None:
-                lr_warmup.step()
-
-            model.zero_grad()
-            batch_mask_loss = 0
-            batch_nxt_loss = 0
+        if progress_bar:
+            pbar.set_description(f'{str(mask_loss.item())}|{str(fake_loss.item())}|{str(disc_loss.item())}')
 
         sum_mask_loss += mask_loss.item() * len(src)
         sum_nxt_loss += nxt_loss.item() * len(src)
+        sum_disc_loss += disc_loss.item() * len(src)
+        sum_gen_loss += loss.item() * len(src)
 
     # the rest batch
     if (itr + 1) % accumulation_steps != 0:
@@ -120,7 +124,7 @@ def train_epoch(dataloader, model, discriminator, device, optimizer, accumulatio
         grad_scaler.update()
         model.zero_grad()
 
-    return sum_mask_loss / len(dataloader.dataset), sum_nxt_loss / len(dataloader.dataset)
+    return sum_mask_loss / len(dataloader.dataset), sum_nxt_loss / len(dataloader.dataset), sum_gen_loss / len(dataloader.dataset), sum_disc_loss / len(dataloader.dataset)
 
 def validate_epoch(dataloader, model, device, grad_scaler):
     model.eval()
@@ -195,6 +199,7 @@ def main():
     p.add_argument('--mixup_rate', '-M', type=float, default=0)
     p.add_argument('--mixup_alpha', '-a', type=float, default=0.4)
     p.add_argument('--pretrained_model', '-P', type=str, default=None)
+    p.add_argument('--pretrained_disc', type=str, default=None)
     p.add_argument('--pretrained_model_scheduler', type=str, default=None)
     p.add_argument('--progress_bar', '-pb', type=str, default='true')
     p.add_argument('--mixed_precision', type=str, default='true')
@@ -289,14 +294,19 @@ def main():
 
     device = torch.device('cpu')
     model = FrameTransformerUnet(channels=args.channels, n_fft=args.n_fft, depth=args.depth, num_transformer_blocks=args.num_transformer_blocks ,num_bands=args.num_bands, feedforward_dim=args.feedforward_dim, bias=args.bias, cropsize=args.cropsize + args.next_frame_chunk_size)
+    discriminator = FrameTransformerDiscriminator(channels=args.channels*2, n_fft=args.n_fft, depth=args.depth, num_transformer_blocks=args.num_transformer_blocks, num_bands=args.num_bands, feedforward_dim=args.feedforward_dim, bias=args.bias, cropsize=args.cropsize + args.next_frame_chunk_size)
 
     if args.pretrained_model is not None:
         model.load_state_dict(torch.load(args.pretrained_model, map_location=device))
+    if args.pretrained_disc is not None:
+        discriminator.load_state_dict(torch.load(args.pretrained_disc, map_location=device))
     if torch.cuda.is_available() and args.gpu >= 0:
         device = torch.device('cuda:{}'.format(args.gpu))
-        model.to(device)    
+        model.to(device)
+        discriminator.to(device)
     
     grad_scaler = torch.cuda.amp.grad_scaler.GradScaler() if args.mixed_precision else None
+    disc_scaler = torch.cuda.amp.grad_scaler.GradScaler() if args.mixed_precision else None
     
     model_parameters = filter(lambda p: p.requires_grad, model.parameters())
     params = sum([np.prod(p.size()) for p in model_parameters])
@@ -309,9 +319,23 @@ def main():
             amsgrad=args.amsgrad,
             weight_decay=args.weight_decay
         )
+
+        disc_optimizer = torch.optim.Adam(
+            filter(lambda p: p.requires_grad, discriminator.parameters()),
+            lr=args.learning_rate,
+            amsgrad=args.amsgrad,
+            weight_decay=args.weight_decay
+        )
     else:
         optimizer = torch.optim.AdamW(
             filter(lambda p: p.requires_grad, model.parameters()),
+            lr=args.learning_rate,
+            amsgrad=args.amsgrad,
+            weight_decay=args.weight_decay
+        )
+
+        disc_optimizer = torch.optim.AdamW(
+            filter(lambda p: p.requires_grad, discriminator.parameters()),
             lr=args.learning_rate,
             amsgrad=args.amsgrad,
             weight_decay=args.weight_decay
@@ -327,10 +351,12 @@ def main():
         PolynomialDecayScheduler(optimizer, target=args.lr_scheduler_decay_target, power=args.lr_scheduler_decay_power, num_decay_steps=decay_steps, start_step=warmup_steps, current_step=(steps * args.curr_warmup_epoch))
     ])
 
-    train_dataset.warmup_steps = token_steps
+    disc_scheduler = torch.optim.lr_scheduler.ChainedScheduler([
+        LinearWarmupScheduler(disc_optimizer, target_lr=args.learning_rate, num_steps=warmup_steps, current_step=(steps * args.curr_warmup_epoch)),
+        PolynomialDecayScheduler(disc_optimizer, target=args.lr_scheduler_decay_target, power=args.lr_scheduler_decay_power, num_decay_steps=decay_steps, start_step=warmup_steps, current_step=(steps * args.curr_warmup_epoch))
+    ])
 
-    if args.pretrained_model_scheduler is not None:
-        scheduler.load_state_dict(torch.load(args.pretrained_model_scheduler))
+    train_dataset.warmup_steps = token_steps
 
     log = []
     best_loss = np.inf
@@ -338,7 +364,7 @@ def main():
         train_dataset.rebuild()
 
         logger.info('# epoch {}'.format(epoch))
-        train_loss_mask, train_loss_nxt = train_epoch(train_dataloader, model, device, optimizer, args.accumulation_steps, grad_scaler, args.progress_bar, args.mixup_rate, args.mixup_alpha, lr_warmup=scheduler)
+        train_loss_mask, train_loss_nxt, gen_loss, disc_loss = train_epoch(train_dataloader, model, discriminator, device, optimizer, disc_optimizer, args.accumulation_steps, grad_scaler, disc_scaler, args.progress_bar, args.mixup_rate, args.mixup_alpha, lr_warmup=scheduler, lr_warmup_disc=disc_scheduler)
 
         val_loss_mask1, val_loss_nxt1 = validate_epoch(val_dataloader, model, device, grad_scaler)
         val_loss_mask2, val_loss_nxt2 = validate_epoch(val_dataloader, model, device, grad_scaler)
@@ -349,8 +375,8 @@ def main():
         val_loss_nxt = (val_loss_nxt1 + val_loss_nxt2 + val_loss_nxt3 + val_loss_nxt4) / 4
 
         logger.info(
-            '  * training loss mask = {:.6f}, train loss next = {:.6f}'
-            .format(train_loss_mask, train_loss_nxt)
+            '  * training loss mask = {:.6f}, train loss next = {:.6f}, train loss gen = {:6f}, train loss disc = {:6f}'
+            .format(train_loss_mask, train_loss_nxt, gen_loss, disc_loss)
         )
 
         logger.info(

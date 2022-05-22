@@ -122,10 +122,10 @@ class FrameTransformerDecoder(nn.Module):
         self.in_project = nn.Linear(channels, 1, bias=bias)
         self.skip_project = nn.Linear(skip_channels, 1, bias=bias)
 
-        self.relu = nn.ReLU(inplace=True)        
+        self.relu = nn.ReLU(inplace=True)
 
         self.norm1 = nn.LayerNorm(bins)
-        self.self_attn1 = MultibandFrameAttention(num_bands * 2, bins, cropsize)
+        self.self_attn1 = MultibandFrameAttention(num_bands, bins, cropsize)
         self.skip_attn1 = MultibandFrameAttention(num_bands, bins, cropsize)
         self.dropout1 = nn.Dropout(dropout) if dropout > 0 else nn.Identity()
 
