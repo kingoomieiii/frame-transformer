@@ -338,7 +338,7 @@ class MaskedPretrainingDataset(torch.utils.data.Dataset):
                 if np.random.uniform() < 0.5:
                     nidx = np.random.randint(len(self))
                 else:
-                    nidx = np.random.randint(1, 4)
+                    nidx = np.random.randint(1, 5)
 
                     if np.random.uniform() < 0.5:
                         nidx = (idx + nidx) % len(self)
