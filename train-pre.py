@@ -185,7 +185,7 @@ def main():
     p.add_argument('--val_cropsize', '-c', type=int, default=1024)
     p.add_argument('--num_workers', '-w', type=int, default=4)
     p.add_argument('--curr_warmup_epoch', type=int, default=0)
-    p.add_argument('--token_warmup_epoch', type=int, default=3)
+    p.add_argument('--token_warmup_epoch', type=int, default=4)
     p.add_argument('--warmup_epoch', type=int, default=3)
     p.add_argument('--epoch', '-E', type=int, default=30)
     p.add_argument('--epoch_size', type=int, default=None)
@@ -265,7 +265,7 @@ def main():
         dataset=val_dataset,
         batch_size=args.val_batchsize,
         shuffle=False,
-        num_workers=args.num_workers
+        num_workers=2
     )
 
     random.seed(args.seed)

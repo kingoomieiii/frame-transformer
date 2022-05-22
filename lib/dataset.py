@@ -335,7 +335,15 @@ class MaskedPretrainingDataset(torch.utils.data.Dataset):
             Y = X.copy()
 
             if np.random.uniform() < 0.5:
-                nidx = np.random.randint(len(self))
+                if np.random.uniform() < 0.5:
+                    nidx = np.random.randint(len(self))
+                else:
+                    nidx = np.random.randint(1, 4)
+
+                    if np.random.uniform() < 0.5:
+                        nidx = (idx + nidx) % len(self)
+                    else:
+                        nidx = (idx - nidx) % len(self)
 
                 while nidx == idx:
                     nidx = np.random.randint(len(self))
