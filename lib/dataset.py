@@ -168,7 +168,7 @@ class VocalAutoregressiveDataset(torch.utils.data.Dataset):
         return X, Y
 
 class MaskedPretrainingDataset(torch.utils.data.Dataset):
-    def __init__(self, path, extra_path=None, pair_path=None, mix_path=None, mix_path2=None, mix_path3=None, vocal_path="", is_validation=False, mul=1, downsamples=0, epoch_size=None, pair_mul=1, slide=True, cropsize=256, mixup_rate=0, mixup_alpha=1, mask_rate=0.15, next_frame_chunk_size=16, token_size=16, current_step=0, num_steps=16000):
+    def __init__(self, path, extra_path=None, pair_path=None, mix_path=[], vocal_path=None, is_validation=False, mul=1, downsamples=0, epoch_size=None, pair_mul=1, slide=True, cropsize=256, mixup_rate=0, mixup_alpha=1, mask_rate=0.15, next_frame_chunk_size=16, token_size=16, current_step=0, num_steps=16000):
         self.epoch_size = epoch_size
         self.slide = slide
         self.mul = mul
@@ -196,30 +196,8 @@ class MaskedPretrainingDataset(torch.utils.data.Dataset):
                     if np.random.uniform() < pair_mul:
                         pair_list.append(p)
 
-        if mix_path is not None:
-            mixes = [os.path.join(mix_path, f) for f in os.listdir(mix_path) if os.path.isfile(os.path.join(mix_path, f))]
-
-            for m in mixes:
-                if pair_mul > 1:
-                    for _ in range(pair_mul):
-                        pair_list.append(m)
-                else:
-                    if np.random.uniform() < pair_mul:
-                        pair_list.append(m)
-
-        if mix_path2 is not None:
-            mixes = [os.path.join(mix_path2, f) for f in os.listdir(mix_path2) if os.path.isfile(os.path.join(mix_path2, f))]
-
-            for m in mixes:
-                if pair_mul > 1:
-                    for _ in range(pair_mul):
-                        pair_list.append(m)
-                else:
-                    if np.random.uniform() < pair_mul:
-                        pair_list.append(m)
-
-        if mix_path3 is not None:
-            mixes = [os.path.join(mix_path3, f) for f in os.listdir(mix_path3) if os.path.isfile(os.path.join(mix_path3, f))]
+        for mp in mix_path:
+            mixes = [os.path.join(mp, f) for f in os.listdir(mp) if os.path.isfile(os.path.join(mp, f))]
 
             for m in mixes:
                 if pair_mul > 1:
@@ -235,8 +213,10 @@ class MaskedPretrainingDataset(torch.utils.data.Dataset):
             for f in extra_list:
                 patch_list.append(f) 
         
-        if not is_validation and vocal_path != "":
+        if not is_validation and vocal_path is not None:
             self.vocal_list = [os.path.join(vocal_path, f) for f in os.listdir(vocal_path) if os.path.isfile(os.path.join(vocal_path, f))]
+        else:
+            self.vocal_list = None
 
         self.is_validation = is_validation
 
@@ -255,8 +235,9 @@ class MaskedPretrainingDataset(torch.utils.data.Dataset):
             self.rebuild()
 
     def rebuild(self):
-        self.vidx = 0
-        random.shuffle(self.vocal_list)
+        if self.vocal_list is not None:
+            self.vidx = 0
+            random.shuffle(self.vocal_list)
 
         if self.epoch_size is not None:
             random.shuffle(self.full_list)
@@ -264,36 +245,6 @@ class MaskedPretrainingDataset(torch.utils.data.Dataset):
 
     def __len__(self):
         return len(self.curr_list) * self.mul
-
-    def _get_vocals(self, root=True):
-        vidx = np.random.randint(len(self.vocal_list))                
-        vpath = self.vocal_list[vidx]
-        vdata = np.load(str(vpath))
-        V, Vc = vdata['X'], vdata['c']
-
-        if np.random.uniform() < 0.5:
-            V = V[::-1]
-
-        if np.random.uniform() < 0.025:
-            if np.random.uniform() < 0.5:
-                V[0] = V[0] * 0
-            else:
-                V[1] = V[1] * 0
-
-        if self.slide:
-            start = np.random.randint(0, V.shape[2] - self.cropsize - 1 - self.next_frame_chunk_size)
-            stop = start + self.cropsize + self.next_frame_chunk_size
-            V = V[:,:,start:stop]
-
-        if np.random.uniform() < 0.5 and root:
-            V2, Vc2 = self._get_vocals(root=False)
-            a = np.random.beta(1, 1)
-            inv = 1 - a
-
-            Vc = (Vc * a) + (Vc2 * inv)
-            V = (V * a) + (V2 * inv)
-
-        return V, Vc
 
     def __getitem__(self, idx, root=True):
         path = self.curr_list[idx % len(self.curr_list)]

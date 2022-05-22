@@ -212,7 +212,7 @@ def main():
     p.add_argument('--token_size', type=int, default=32)
     p.add_argument('--mask_rate', type=float, default=0.15)
     p.add_argument('--next_frame_chunk_size', type=int, default=512)
-    p.add_argument('--prefetch_factor', type=int, default=4)
+    p.add_argument('--prefetch_factor', type=int, default=8)
     p.add_argument('--conv_discriminator', type=str, default='true')
     args = p.parse_args()
 
@@ -233,11 +233,11 @@ def main():
     train_dataset = dataset.MaskedPretrainingDataset(
         path="C://cs2048_sr44100_hl1024_nf2048_of0",
         extra_path="D://cs2048_sr44100_hl1024_nf2048_of0",
-        pair_path=None,#"G://cs2048_sr44100_hl1024_nf2048_of0_PAIRS",
-        mix_path="D://cs2048_sr44100_hl1024_nf2048_of0_MIXES",
-        mix_path2="C://cs2048_sr44100_hl1024_nf2048_of0_MIXES",
-        mix_path3="E://cs2048_sr44100_hl1024_nf2048_of0_MIXES",
-        vocal_path="D://cs2048_sr44100_hl1024_nf2048_of0_VOCALS",
+        mix_path=[
+            "D://cs2048_sr44100_hl1024_nf2048_of0_MIXES",
+            "C://cs2048_sr44100_hl1024_nf2048_of0_MIXES",
+            "E://cs2048_sr44100_hl1024_nf2048_of0_MIXES",
+            "G://cs2048_sr44100_hl1024_nf2048_of0_MIXES"],
         is_validation=False,
         epoch_size=args.epoch_size,
         cropsize=args.cropsize,
