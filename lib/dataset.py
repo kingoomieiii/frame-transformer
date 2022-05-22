@@ -309,7 +309,7 @@ class MaskedPretrainingDataset(torch.utils.data.Dataset):
                 Y[:, :, -self.next_frame_chunk_size:] = NX[:, :, start:stop]
 
             self.current_step = self.current_step + 1
-            token_size = min(self.target_token_size, math.ceil((self.current_step) * (self.target_token_size / self.warmup_steps)))
+            token_size = self.target_token_size
             noise = np.random.uniform(0, 1, X.shape)
             num_tokens = (self.cropsize + self.next_frame_chunk_size) // token_size
 

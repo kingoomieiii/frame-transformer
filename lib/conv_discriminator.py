@@ -19,7 +19,7 @@ class ConvDiscriminator(nn.Module):
             m = 2 * m
 
         self.encoder = nn.ModuleList(self.encoder)
-        self.out = FrameConv(channels * m, 1, kernel_size=3, padding=1, norm=False, activate=None)
+        self.out = nn.Conv2d(channels * m, 1, kernel_size=3, padding=1)
 
     def forward(self, masked, unmasked):
         x = torch.cat((masked, unmasked), dim=1)
@@ -35,6 +35,8 @@ class Encoder(nn.Module):
     def __init__(self, in_channels, out_channels, kernel_size=3, stride=1, padding=1, activ=nn.LeakyReLU):
         super(Encoder, self).__init__()
 
+        self.identity = nn.Conv2d(in_channels, out_channels, kernel_size=1, padding=0, stride=stride)
+
         self.body = nn.Sequential(
             nn.Conv2d(in_channels, out_channels, kernel_size=kernel_size, padding=padding, stride=1, bias=False),
             nn.InstanceNorm2d(out_channels, affine=True), 
@@ -44,4 +46,5 @@ class Encoder(nn.Module):
             nn.LeakyReLU(inplace=True))
 
     def __call__(self, x):
-        return self.body(x)
+        identity = self.identity(x)
+        return self.body(x) + identity

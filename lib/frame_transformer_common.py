@@ -2,6 +2,7 @@ import torch
 from torch import log_softmax, nn
 import torch.nn.functional as F
 import math
+import lib.spec_utils as spec_utils
 
 class MultibandFrameAttention(nn.Module):
     def __init__(self, num_bands, bins, cropsize, kernel_size=3, padding=1):
@@ -222,5 +223,40 @@ class FrameConv(nn.Module):
 
         if self.activate is not None:
             h = self.activate(h)
+
+        return h
+        
+class FrameEncoder(nn.Module):
+    def __init__(self, in_channels, out_channels, kernel_size=3, stride=1, padding=1, activ=nn.LeakyReLU, cropsize=1024):
+        super(FrameEncoder, self).__init__()
+
+        self.conv1 = FrameConv(in_channels, out_channels, kernel_size, 1, padding, activate=activ, cropsize=cropsize)
+        self.conv2 = FrameConv(out_channels, out_channels, kernel_size, stride, padding, activate=activ, cropsize=cropsize)
+
+    def __call__(self, x):
+        h = self.conv1(x)
+        h = self.conv2(h)
+
+        return h
+
+class FrameDecoder(nn.Module):
+    def __init__(self, in_channels, out_channels, kernel_size=3, padding=1, activ=nn.LeakyReLU, norm=True, dropout=False, cropsize=1024):
+        super(FrameDecoder, self).__init__()
+
+        self.conv1 = FrameConv(in_channels, out_channels, kernel_size=kernel_size, padding=padding, activate=activ, norm=norm, cropsize=cropsize)
+        self.conv2 = FrameConv(out_channels, out_channels, kernel_size=kernel_size, padding=padding, activate=activ, norm=norm, cropsize=cropsize)
+        self.dropout = nn.Dropout2d(0.1) if dropout else None
+
+    def __call__(self, x, skip=None):
+        if skip is not None:
+            x = F.interpolate(x, size=(skip.shape[2],skip.shape[3]), mode='bilinear', align_corners=True)
+            skip = spec_utils.crop_center(skip, x)
+            x = torch.cat([x, skip], dim=1)
+
+        h = self.conv1(x)
+        h = self.conv2(h)
+
+        if self.dropout is not None:
+            h = self.dropout(h)
 
         return h

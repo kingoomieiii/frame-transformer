@@ -193,6 +193,7 @@ def main():
     p.add_argument('--curr_warmup_epoch', type=int, default=0)
     p.add_argument('--token_warmup_epoch', type=int, default=4)
     p.add_argument('--warmup_epoch', type=int, default=3)
+    p.add_argument('--warmup_epoch_disc', type=int, default=3)
     p.add_argument('--epoch', '-E', type=int, default=30)
     p.add_argument('--epoch_size', type=int, default=None)
     p.add_argument('--reduction_rate', '-R', type=float, default=0.0)
@@ -209,10 +210,10 @@ def main():
     p.add_argument('--model_dir', type=str, default='E://')
     p.add_argument('--debug', action='store_true')
     p.add_argument('--dropout', type=float, default=0.1)
-    p.add_argument('--token_size', type=int, default=32)
+    p.add_argument('--token_size', type=int, default=16)
     p.add_argument('--mask_rate', type=float, default=0.15)
     p.add_argument('--next_frame_chunk_size', type=int, default=512)
-    p.add_argument('--prefetch_factor', type=int, default=8)
+    p.add_argument('--prefetch_factor', type=int, default=16)
     p.add_argument('--conv_discriminator', type=str, default='true')
     args = p.parse_args()
 
@@ -350,6 +351,8 @@ def main():
 
     steps = len(train_dataset) // (args.batchsize * args.accumulation_steps)
     warmup_steps = steps * args.warmup_epoch
+    warmup_steps_disc = steps * args.warmup_epoch_disc
+    decay_steps_disc = steps * args.epoch + warmup_steps_disc
     decay_steps = steps * args.epoch + warmup_steps
     token_steps = steps * args.token_warmup_epoch
 
@@ -359,8 +362,8 @@ def main():
     ])
 
     disc_scheduler = torch.optim.lr_scheduler.ChainedScheduler([
-        LinearWarmupScheduler(disc_optimizer, target_lr=args.learning_rate, num_steps=warmup_steps, current_step=(steps * args.curr_warmup_epoch)),
-        PolynomialDecayScheduler(disc_optimizer, target=args.lr_scheduler_decay_target, power=args.lr_scheduler_decay_power, num_decay_steps=decay_steps, start_step=warmup_steps, current_step=(steps * args.curr_warmup_epoch))
+        LinearWarmupScheduler(disc_optimizer, target_lr=args.learning_rate, num_steps=warmup_steps_disc, current_step=(steps * args.curr_warmup_epoch)),
+        PolynomialDecayScheduler(disc_optimizer, target=args.lr_scheduler_decay_target, power=args.lr_scheduler_decay_power, num_decay_steps=decay_steps_disc, start_step=warmup_steps_disc, current_step=(steps * args.curr_warmup_epoch))
     ])
 
     train_dataset.warmup_steps = token_steps
