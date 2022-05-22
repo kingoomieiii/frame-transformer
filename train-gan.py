@@ -193,7 +193,7 @@ def main():
     p.add_argument('--curr_warmup_epoch', type=int, default=0)
     p.add_argument('--token_warmup_epoch', type=int, default=4)
     p.add_argument('--warmup_epoch', type=int, default=3)
-    p.add_argument('--warmup_epoch_disc', type=int, default=3)
+    p.add_argument('--warmup_epoch_disc', type=int, default=5)
     p.add_argument('--epoch', '-E', type=int, default=30)
     p.add_argument('--epoch_size', type=int, default=None)
     p.add_argument('--reduction_rate', '-R', type=float, default=0.0)
