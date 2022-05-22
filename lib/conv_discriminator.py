@@ -4,23 +4,21 @@ import torch.nn.functional as F
 from lib import spec_utils
 from lib.frame_transformer_common import FrameConv, FrameTransformerDecoder, FrameTransformerEncoder
 
-class FrameTransformerDiscriminator(nn.Module):
-    def __init__(self, in_channels=4, channels=4, depth=6, num_transformer_blocks=2, dropout=0.1, n_fft=2048, cropsize=1024, num_bands=8, feedforward_dim=2048, bias=True, pretraining=True):
-        super(FrameTransformerDiscriminator, self).__init__()
+class ConvDiscriminator(nn.Module):
+    def __init__(self, in_channels=4, channels=4, depth=6, n_fft=2048):
+        super(ConvDiscriminator, self).__init__()
 
-        self.pretraining = pretraining
         self.max_bin = n_fft // 2
         self.output_bin = n_fft // 2 + 1
 
-        self.encoder = [Encoder(in_channels, channels, kernel_size=3, padding=1, stride=1, cropsize=cropsize)]
+        self.encoder = [Encoder(in_channels, channels, kernel_size=3, padding=1, stride=1)]
 
         m = 1
         for i in range(depth - 1):
-            self.encoder.append(Encoder(channels * m, channels * 2 * m, stride=2, cropsize=cropsize))
+            self.encoder.append(Encoder(channels * m, channels * 2 * m, stride=2))
             m = 2 * m
 
         self.encoder = nn.ModuleList(self.encoder)
-
         self.out = FrameConv(channels * m, 1, kernel_size=3, padding=1, norm=False, activate=None)
 
     def forward(self, masked, unmasked):
@@ -28,13 +26,13 @@ class FrameTransformerDiscriminator(nn.Module):
 
         x = x[:, :, :self.max_bin]
 
-        for i, encoder in enumerate(self.encoder):
+        for encoder in self.encoder:
             x = encoder(x)
 
         return self.out(x)
         
 class Encoder(nn.Module):
-    def __init__(self, in_channels, out_channels, kernel_size=3, stride=1, padding=1, activ=nn.LeakyReLU, cropsize=1024):
+    def __init__(self, in_channels, out_channels, kernel_size=3, stride=1, padding=1, activ=nn.LeakyReLU):
         super(Encoder, self).__init__()
 
         self.body = nn.Sequential(

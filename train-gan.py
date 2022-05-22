@@ -17,7 +17,8 @@ from lib import spec_utils
 from tqdm import tqdm
 
 from lib.frame_transformer_unet import FrameTransformerUnet
-from lib.conv_discriminator import FrameTransformerDiscriminator
+from lib.conv_discriminator import ConvDiscriminator
+from lib.frame_transformer_discriminator import FrameTransformerDiscriminator
 from lib.lr_scheduler_linear_warmup import LinearWarmupScheduler
 from lib.lr_scheduler_polynomial_decay import PolynomialDecayScheduler
 
@@ -212,6 +213,7 @@ def main():
     p.add_argument('--mask_rate', type=float, default=0.15)
     p.add_argument('--next_frame_chunk_size', type=int, default=512)
     p.add_argument('--prefetch_factor', type=int, default=4)
+    p.add_argument('--conv_discriminator', type=str, default='true')
     args = p.parse_args()
 
     args.amsgrad = str.lower(args.amsgrad) == 'true'
@@ -220,6 +222,7 @@ def main():
     args.mixed_precision = str.lower(args.mixed_precision) == 'true'
     args.save_all = str.lower(args.save_all) == 'true'
     args.force_voxaug = str.lower(args.force_voxaug) == 'true'
+    args.conv_discriminator = str.lower(args.conv_discriminator) == 'true'
 
     logger.info(args)
 
@@ -294,7 +297,11 @@ def main():
 
     device = torch.device('cpu')
     model = FrameTransformerUnet(channels=args.channels, n_fft=args.n_fft, depth=args.depth, num_transformer_blocks=args.num_transformer_blocks ,num_bands=args.num_bands, feedforward_dim=args.feedforward_dim, bias=args.bias, cropsize=args.cropsize + args.next_frame_chunk_size)
-    discriminator = FrameTransformerDiscriminator(channels=args.channels*2, n_fft=args.n_fft, depth=args.depth, num_transformer_blocks=args.num_transformer_blocks, num_bands=args.num_bands, feedforward_dim=args.feedforward_dim, bias=args.bias, cropsize=args.cropsize + args.next_frame_chunk_size)
+    
+    if args.conv_discriminator:
+        discriminator = ConvDiscriminator(channels=args.channels*2, n_fft=args.n_fft, depth=args.depth)
+    else:
+        discriminator = FrameTransformerDiscriminator(channels=args.channels*2, n_fft=args.n_fft, depth=args.depth, num_transformer_blocks=args.num_transformer_blocks, num_bands=args.num_bands, feedforward_dim=args.feedforward_dim, bias=args.bias, cropsize=args.cropsize + args.next_frame_chunk_size)
 
     if args.pretrained_model is not None:
         model.load_state_dict(torch.load(args.pretrained_model, map_location=device))
