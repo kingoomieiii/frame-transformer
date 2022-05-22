@@ -81,13 +81,15 @@ def train_epoch(dataloader, model, discriminator, device, optimizer, disc_optimi
             fake = discriminator(src, src * mask.detach())
             fake_loss = bce_crit(fake, torch.zeros_like(fake))
             disc_loss = (real_loss + fake_loss) / 2
-            
+
         discriminator.zero_grad()
-        disc_scaler.scale(disc_loss).backward()
-        disc_scaler.unscale_(disc_optimizer)
-        clip_grad_norm_(discriminator.parameters(), 0.5)
-        disc_scaler.step(disc_optimizer)
-        disc_scaler.update()
+        
+        if itr % 2 == 0:
+            disc_scaler.scale(disc_loss).backward()
+            disc_scaler.unscale_(disc_optimizer)
+            clip_grad_norm_(discriminator.parameters(), 0.5)
+            disc_scaler.step(disc_optimizer)
+            disc_scaler.update()
 
         if lr_warmup_disc is not None:
             lr_warmup_disc.step()
@@ -97,7 +99,7 @@ def train_epoch(dataloader, model, discriminator, device, optimizer, disc_optimi
             fake_loss = bce_crit(fake, torch.ones_like(fake))
             mask_loss = mask_crit(src * mask, tgt)
             nxt_loss = next_crit(nxt, is_next)
-            loss = (fake_loss + mask_loss * lam + nxt_loss)
+            loss = (fake_loss + mask_loss * 10 + nxt_loss * 0.1)
 
         model.zero_grad()
         grad_scaler.scale(loss).backward()
@@ -193,7 +195,7 @@ def main():
     p.add_argument('--curr_warmup_epoch', type=int, default=0)
     p.add_argument('--token_warmup_epoch', type=int, default=4)
     p.add_argument('--warmup_epoch', type=int, default=3)
-    p.add_argument('--warmup_epoch_disc', type=int, default=5)
+    p.add_argument('--warmup_epoch_disc', type=int, default=3)
     p.add_argument('--epoch', '-E', type=int, default=30)
     p.add_argument('--epoch_size', type=int, default=None)
     p.add_argument('--reduction_rate', '-R', type=float, default=0.0)
