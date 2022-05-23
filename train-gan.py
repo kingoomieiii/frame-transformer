@@ -56,7 +56,7 @@ def mixup(X, Y, alpha=1):
     Y = Y * lam + Y2 * inv_lam
     return X, Y
 
-def train_epoch(dataloader, model, discriminator, device, optimizer, disc_optimizer, accumulation_steps, grad_scaler, disc_scaler, progress_bar, mixup_rate, mixup_alpha, lr_warmup=None, lr_warmup_disc=None, lam=10):
+def train_epoch(dataloader, model, discriminator, device, optimizer, disc_optimizer, accumulation_steps, grad_scaler, disc_scaler, progress_bar, mixup_rate, mixup_alpha, lr_warmup=None, lr_warmup_disc=None, lam=10, disc_skip_steps=2):
     model.train()
 
     sum_mask_loss = 0
@@ -68,6 +68,8 @@ def train_epoch(dataloader, model, discriminator, device, optimizer, disc_optimi
     next_crit = nn.CrossEntropyLoss()
     bce_crit = nn.BCEWithLogitsLoss()
 
+    disc_loss = 0
+
     pbar = tqdm(dataloader) if progress_bar else dataloader
     for itr, (src, tgt, is_next) in enumerate(pbar):
         src = src.to(device)
@@ -76,23 +78,26 @@ def train_epoch(dataloader, model, discriminator, device, optimizer, disc_optimi
 
         with torch.cuda.amp.autocast_mode.autocast(enabled=grad_scaler is not None):
             mask, nxt = model(src)
-            real = discriminator(src, tgt)
-            real_loss = bce_crit(real, torch.ones_like(real))
             fake = discriminator(src, src * mask.detach())
             fake_loss = bce_crit(fake, torch.zeros_like(fake))
-            disc_loss = (real_loss + fake_loss) / 2
+
+        if itr % disc_skip_steps == 0:
+            with torch.cuda.amp.autocast_mode.autocast(enabled=grad_scaler is not None):
+                real = discriminator(src, tgt)
+                real_loss = bce_crit(real, torch.ones_like(real))
+                disc_loss = (real_loss + fake_loss) / 2
 
         discriminator.zero_grad()
-        
-        if itr % 2 == 0:
+
+        if itr % disc_skip_steps == 0:
             disc_scaler.scale(disc_loss).backward()
             disc_scaler.unscale_(disc_optimizer)
             clip_grad_norm_(discriminator.parameters(), 0.5)
             disc_scaler.step(disc_optimizer)
             disc_scaler.update()
 
-        if lr_warmup_disc is not None:
-            lr_warmup_disc.step()
+            if lr_warmup_disc is not None:
+                lr_warmup_disc.step()
 
         with torch.cuda.amp.autocast_mode.autocast(enabled=grad_scaler is not None):
             fake = discriminator(src, src * mask)
@@ -118,14 +123,6 @@ def train_epoch(dataloader, model, discriminator, device, optimizer, disc_optimi
         sum_nxt_loss += nxt_loss.item() * len(src)
         sum_disc_loss += disc_loss.item() * len(src)
         sum_gen_loss += loss.item() * len(src)
-
-    # the rest batch
-    if (itr + 1) % accumulation_steps != 0:
-        grad_scaler.unscale_(optimizer)
-        clip_grad_norm_(model.parameters(), 0.5)
-        grad_scaler.step(optimizer)
-        grad_scaler.update()
-        model.zero_grad()
 
     return sum_mask_loss / len(dataloader.dataset), sum_nxt_loss / len(dataloader.dataset), sum_gen_loss / len(dataloader.dataset), sum_disc_loss / len(dataloader.dataset)
 
@@ -163,6 +160,11 @@ def validate_epoch(dataloader, model, device, grad_scaler):
 def main():
     p = argparse.ArgumentParser()
     p.add_argument('--id', type=str, default='')
+    p.add_argument('--curr_warmup_epoch', type=int, default=0)
+    p.add_argument('--warmup_epoch', type=int, default=3)
+    p.add_argument('--epoch', '-E', type=int, default=30)
+    p.add_argument('--epoch_size', type=int, default=None)
+    p.add_argument('--disc_skip_steps', type=int, default=2)
     p.add_argument('--channels', type=int, default=2)
     p.add_argument('--depth', type=int, default=7)
     p.add_argument('--num_transformer_blocks', type=int, default=2)
@@ -192,12 +194,7 @@ def main():
     p.add_argument('--val_batchsize', '-b', type=int, default=1)
     p.add_argument('--val_cropsize', '-c', type=int, default=1024)
     p.add_argument('--num_workers', '-w', type=int, default=4)
-    p.add_argument('--curr_warmup_epoch', type=int, default=0)
     p.add_argument('--token_warmup_epoch', type=int, default=4)
-    p.add_argument('--warmup_epoch', type=int, default=3)
-    p.add_argument('--warmup_epoch_disc', type=int, default=3)
-    p.add_argument('--epoch', '-E', type=int, default=30)
-    p.add_argument('--epoch_size', type=int, default=None)
     p.add_argument('--reduction_rate', '-R', type=float, default=0.0)
     p.add_argument('--reduction_level', '-L', type=float, default=0.2)
     p.add_argument('--mixup_rate', '-M', type=float, default=0)
@@ -353,8 +350,6 @@ def main():
 
     steps = len(train_dataset) // (args.batchsize * args.accumulation_steps)
     warmup_steps = steps * args.warmup_epoch
-    warmup_steps_disc = steps * args.warmup_epoch_disc
-    decay_steps_disc = steps * args.epoch + warmup_steps_disc
     decay_steps = steps * args.epoch + warmup_steps
     token_steps = steps * args.token_warmup_epoch
 
@@ -364,8 +359,8 @@ def main():
     ])
 
     disc_scheduler = torch.optim.lr_scheduler.ChainedScheduler([
-        LinearWarmupScheduler(disc_optimizer, target_lr=args.learning_rate, num_steps=warmup_steps_disc, current_step=(steps * args.curr_warmup_epoch)),
-        PolynomialDecayScheduler(disc_optimizer, target=args.lr_scheduler_decay_target, power=args.lr_scheduler_decay_power, num_decay_steps=decay_steps_disc, start_step=warmup_steps_disc, current_step=(steps * args.curr_warmup_epoch))
+        LinearWarmupScheduler(disc_optimizer, target_lr=args.learning_rate, num_steps=warmup_steps, current_step=(steps * args.curr_warmup_epoch)),
+        PolynomialDecayScheduler(disc_optimizer, target=args.lr_scheduler_decay_target, power=args.lr_scheduler_decay_power, num_decay_steps=decay_steps, start_step=warmup_steps, current_step=(steps * args.curr_warmup_epoch))
     ])
 
     train_dataset.warmup_steps = token_steps
@@ -376,7 +371,7 @@ def main():
         train_dataset.rebuild()
 
         logger.info('# epoch {}'.format(epoch))
-        train_loss_mask, train_loss_nxt, gen_loss, disc_loss = train_epoch(train_dataloader, model, discriminator, device, optimizer, disc_optimizer, args.accumulation_steps, grad_scaler, disc_scaler, args.progress_bar, args.mixup_rate, args.mixup_alpha, lr_warmup=scheduler, lr_warmup_disc=disc_scheduler)
+        train_loss_mask, train_loss_nxt, gen_loss, disc_loss = train_epoch(train_dataloader, model, discriminator, device, optimizer, disc_optimizer, args.accumulation_steps, grad_scaler, disc_scaler, args.progress_bar, args.mixup_rate, args.mixup_alpha, lr_warmup=scheduler, lr_warmup_disc=disc_scheduler, disc_skip_steps=args.disc_skip_steps)
 
         val_loss_mask1, val_loss_nxt1 = validate_epoch(val_dataloader, model, device, grad_scaler)
         val_loss_mask2, val_loss_nxt2 = validate_epoch(val_dataloader, model, device, grad_scaler)
