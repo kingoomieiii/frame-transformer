@@ -111,7 +111,7 @@ def train_epoch(dataloader, model, discriminator, device, optimizer, disc_optimi
                 token_loss = token_loss + curr_loss if token_loss is not None else curr_loss
 
             total_loss = mask_crit(src * mask, tgt)
-            nxt_loss = next_crit(nxt, is_next)
+            #nxt_loss = next_crit(nxt, is_next)
             loss = (fake_loss + (token_loss * 10) if token_loss is not None else 0)
 
         model.zero_grad()
@@ -172,7 +172,7 @@ def main():
     p.add_argument('--warmup_epoch', type=int, default=3)
     p.add_argument('--epoch', '-E', type=int, default=30)
     p.add_argument('--epoch_size', type=int, default=None)
-    p.add_argument('--disc_skip_steps', type=int, default=4)
+    p.add_argument('--disc_skip_steps', type=int, default=12)
     p.add_argument('--channels', type=int, default=2)
     p.add_argument('--depth', type=int, default=7)
     p.add_argument('--num_transformer_blocks', type=int, default=2)
@@ -332,28 +332,32 @@ def main():
             filter(lambda p: p.requires_grad, model.parameters()),
             lr=args.learning_rate,
             amsgrad=args.amsgrad,
-            weight_decay=args.weight_decay
+            weight_decay=args.weight_decay,
+            betas=(0.5, 0.999)
         )
 
         disc_optimizer = torch.optim.Adam(
             filter(lambda p: p.requires_grad, discriminator.parameters()),
             lr=args.learning_rate,
             amsgrad=args.amsgrad,
-            weight_decay=args.weight_decay
+            weight_decay=args.weight_decay,
+            betas=(0.5, 0.999)
         )
     else:
         optimizer = torch.optim.AdamW(
             filter(lambda p: p.requires_grad, model.parameters()),
             lr=args.learning_rate,
             amsgrad=args.amsgrad,
-            weight_decay=args.weight_decay
+            weight_decay=args.weight_decay,
+            betas=(0.5, 0.999)
         )
 
         disc_optimizer = torch.optim.AdamW(
             filter(lambda p: p.requires_grad, discriminator.parameters()),
             lr=args.learning_rate,
             amsgrad=args.amsgrad,
-            weight_decay=args.weight_decay
+            weight_decay=args.weight_decay,
+            betas=(0.5, 0.999)
         )
 
     steps = len(train_dataset) // (args.batchsize * args.accumulation_steps)
