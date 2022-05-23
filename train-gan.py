@@ -71,11 +71,11 @@ def train_epoch(dataloader, model, discriminator, device, optimizer, disc_optimi
     disc_loss = 0
 
     pbar = tqdm(dataloader) if progress_bar else dataloader
-    for itr, (src, tgt, is_next) in enumerate(pbar):
+    for itr, (src, tgt, is_next, tokens) in enumerate(pbar):
         src = src.to(device)
         tgt = tgt.to(device)
         is_next = is_next.to(device).type(torch.long)
-
+        
         with torch.cuda.amp.autocast_mode.autocast(enabled=grad_scaler is not None):
             mask, nxt = model(src)
             fake = discriminator(src, src * mask.detach())
@@ -85,7 +85,7 @@ def train_epoch(dataloader, model, discriminator, device, optimizer, disc_optimi
             with torch.cuda.amp.autocast_mode.autocast(enabled=grad_scaler is not None):
                 real = discriminator(src, tgt)
                 real_loss = bce_crit(real, torch.ones_like(real))
-                disc_loss = (real_loss + fake_loss) / 2
+                disc_loss = (real_loss + fake_loss)
 
         discriminator.zero_grad()
 
@@ -96,15 +96,23 @@ def train_epoch(dataloader, model, discriminator, device, optimizer, disc_optimi
             disc_scaler.step(disc_optimizer)
             disc_scaler.update()
 
-            if lr_warmup_disc is not None:
-                lr_warmup_disc.step()
+        if lr_warmup_disc is not None:
+            lr_warmup_disc.step()
 
         with torch.cuda.amp.autocast_mode.autocast(enabled=grad_scaler is not None):
             fake = discriminator(src, src * mask)
             fake_loss = bce_crit(fake, torch.ones_like(fake))
-            mask_loss = mask_crit(src * mask, tgt)
+
+            token_loss = None
+            for t in tokens:
+                src_token = (src * mask)[:, :, :, t:t+dataloader.dataset.target_token_size]
+                tgt_token = tgt[:, :, :, t:t+dataloader.dataset.target_token_size]
+                curr_loss = mask_crit(src_token, tgt_token)
+                token_loss = token_loss + curr_loss if token_loss is not None else curr_loss
+
+            total_loss = mask_crit(src * mask, tgt)
             nxt_loss = next_crit(nxt, is_next)
-            loss = (fake_loss + mask_loss * 10 + nxt_loss * 0.1)
+            loss = (fake_loss + (token_loss * 10) if token_loss is not None else 0)
 
         model.zero_grad()
         grad_scaler.scale(loss).backward()
@@ -117,10 +125,10 @@ def train_epoch(dataloader, model, discriminator, device, optimizer, disc_optimi
             lr_warmup.step()
 
         if progress_bar:
-            pbar.set_description(f'{str(mask_loss.item())}|{str(fake_loss.item())}|{str(disc_loss.item())}')
+            pbar.set_description(f'{str(total_loss.item())}|{str(fake_loss.item())}|{str(disc_loss.item() * 0.5)}')
 
-        sum_mask_loss += mask_loss.item() * len(src)
-        sum_nxt_loss += nxt_loss.item() * len(src)
+        sum_mask_loss += total_loss.item() * len(src)
+        #sum_nxt_loss += nxt_loss.item() * len(src)
         sum_disc_loss += disc_loss.item() * len(src)
         sum_gen_loss += loss.item() * len(src)
 
@@ -136,7 +144,7 @@ def validate_epoch(dataloader, model, device, grad_scaler):
     next_crit = nn.CrossEntropyLoss()
 
     with torch.no_grad():
-        for src, tgt, is_next in tqdm(dataloader):
+        for src, tgt, is_next, tokens in tqdm(dataloader):
             src = src.to(device)
             tgt = tgt.to(device)
             is_next = is_next.to(device).type(torch.long)
@@ -164,7 +172,7 @@ def main():
     p.add_argument('--warmup_epoch', type=int, default=3)
     p.add_argument('--epoch', '-E', type=int, default=30)
     p.add_argument('--epoch_size', type=int, default=None)
-    p.add_argument('--disc_skip_steps', type=int, default=2)
+    p.add_argument('--disc_skip_steps', type=int, default=4)
     p.add_argument('--channels', type=int, default=2)
     p.add_argument('--depth', type=int, default=7)
     p.add_argument('--num_transformer_blocks', type=int, default=2)
@@ -181,10 +189,10 @@ def main():
     p.add_argument('--n_fft', '-f', type=int, default=2048)
     p.add_argument('--dataset', '-d', required=False)
     p.add_argument('--split_mode', '-S', type=str, choices=['random', 'subdirs'], default='random')
-    p.add_argument('--learning_rate', '-l', type=float, default=1e-4)
+    p.add_argument('--learning_rate', '-l', type=float, default=1e-5)
     p.add_argument('--weight_decay', type=float, default=1e-2)
     p.add_argument('--optimizer', type=str.lower, choices=['adam', 'adamw'], default='adamw')
-    p.add_argument('--lr_scheduler_decay_target', type=int, default=1e-7)
+    p.add_argument('--lr_scheduler_decay_target', type=int, default=1e-8)
     p.add_argument('--lr_scheduler_decay_power', type=float, default=1.0)
     p.add_argument('--lr_scheduler_current_step', type=int, default=0)
     p.add_argument('--cropsize', '-C', type=int, default=512)
@@ -210,7 +218,7 @@ def main():
     p.add_argument('--debug', action='store_true')
     p.add_argument('--dropout', type=float, default=0.1)
     p.add_argument('--token_size', type=int, default=16)
-    p.add_argument('--mask_rate', type=float, default=0.15)
+    p.add_argument('--mask_rate', type=float, default=0.25)
     p.add_argument('--next_frame_chunk_size', type=int, default=512)
     p.add_argument('--prefetch_factor', type=int, default=16)
     p.add_argument('--conv_discriminator', type=str, default='true')

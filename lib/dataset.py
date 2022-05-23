@@ -276,17 +276,18 @@ class MaskedPretrainingDataset(torch.utils.data.Dataset):
                 X = Y[:,:,start:stop]
 
         if np.random.uniform() < self.mixup_rate and root and not self.is_validation:
-            MX, _, _ = self.__getitem__(np.random.randint(len(self)), root=False)
+            MX, _, _, _ = self.__getitem__(np.random.randint(len(self)), root=False)
             a = np.random.beta(self.mixup_alpha, self.mixup_alpha)
             X = X * a + (1 - a) * MX
         
-        is_next = 1
-        
+        is_next = 1        
+        tokens = []
+
         if root:
             Y = X.copy()
 
             if np.random.uniform() < 0.5:
-                if np.random.uniform() < 0.5:
+                if np.random.uniform() < 0.67:
                     nidx = np.random.randint(len(self))
                 else:
                     nidx = np.random.randint(1, 5)
@@ -299,7 +300,7 @@ class MaskedPretrainingDataset(torch.utils.data.Dataset):
                 while nidx == idx:
                     nidx = np.random.randint(len(self))
 
-                NX, _, _ = self.__getitem__(nidx, root=False)
+                NX, _, _, _ = self.__getitem__(nidx, root=False)
 
                 start = np.random.randint(0, NX.shape[2] - self.next_frame_chunk_size)
                 stop = start + self.next_frame_chunk_size
@@ -317,12 +318,14 @@ class MaskedPretrainingDataset(torch.utils.data.Dataset):
                 if np.random.uniform() < self.mask_rate:
                     start = token * token_size
                     stop = start + token_size
+
+                    tokens.append(token)
             
                     X[:, :, start:stop] = 1.0
 
                     if np.random.uniform() < 0.2:
                         if np.random.uniform() < 0.5:
-                            X[:, :, start:stop] = Y[:, :, start:stop] + noise[:, :, start:stop]
+                            X[:, :, start:stop] = np.maximum(Y[:, :, start:stop], noise[:, :, start:stop])
                         else:
                             X[:, :, start:stop] = Y[:, :, start:stop]
 
@@ -334,7 +337,7 @@ class MaskedPretrainingDataset(torch.utils.data.Dataset):
         X = np.clip(np.abs(X) / c, 0, 1)
         Y = np.clip(np.abs(Y) / c, 0, 1)
       
-        return X, Y, is_next
+        return X, Y, is_next, tokens
 
 class VocalAugmentationDataset(torch.utils.data.Dataset):
     def __init__(self, path, extra_path=None, pair_path=None, vocal_path="", is_validation=False, mul=1, downsamples=0, epoch_size=None, pair_mul=1, slide=True, cropsize=256, mixup_rate=0, mixup_alpha=1, include_phase=False, force_voxaug=False):
