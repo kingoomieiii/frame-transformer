@@ -87,15 +87,21 @@ def train_epoch(dataloader, model, discriminator, device, optimizer, disc_optimi
 
             next = next.detach()
 
+            fake_segments = torch.ones_like(fake)            
+            for start in starts:
+                fake_segments[:, start:start+dataloader.dataset.token_size] = 0
+            fake_segments[:, -dataloader.dataset.next_frame_chunk_size-dataloader.dataset.separator_size:-dataloader.dataset.next_frame_chunk_size+dataloader.dataset.separator_size] = 1
+            full_detection_loss = bce_crit(fake, fake_segments)
+
             fake_detection_loss = None
             for start in starts:
                 segment = fake[:, start:start+dataloader.dataset.target_token_size]
                 truth = torch.zeros_like(segment)
                 truth[:, -dataloader.dataset.next_frame_chunk_size-dataloader.dataset.separator_size:-dataloader.dataset.next_frame_chunk_size+dataloader.dataset.separator_size] = 1
-                fake_detection_loss = bce_crit(segment, truth) * 10 if fake_detection_loss is None else fake_detection_loss + bce_crit(segment, truth) * 10
+                fake_detection_loss = bce_crit(segment, truth) if fake_detection_loss is None else fake_detection_loss + bce_crit(segment, truth)
 
             real_detection_loss = bce_crit(real, torch.ones_like(real))
-            disc_loss = (fake_detection_loss + real_detection_loss)
+            disc_loss = (fake_detection_loss + real_detection_loss + full_detection_loss)
 
         discriminator.zero_grad()
         disc_scaler.scale(disc_loss).backward()
@@ -117,7 +123,7 @@ def train_epoch(dataloader, model, discriminator, device, optimizer, disc_optimi
 
             next_loss = bce_crit(next, is_next)
             token_loss = mask_crit(src * mask, tgt)
-            loss = (fake_loss + (token_loss + next_loss) * lam if token_loss is not None else 0)
+            loss = (fake_loss + next_loss + token_loss * lam if token_loss is not None else 0)
 
         model.zero_grad()
         grad_scaler.scale(loss).backward()
@@ -130,7 +136,7 @@ def train_epoch(dataloader, model, discriminator, device, optimizer, disc_optimi
             lr_warmup.step()
 
         if progress_bar:
-            pbar.set_description(f'{str(token_loss.item())}|{str(next_loss.item())}|{str(fake_loss.item())}|{str(((fake_detection_loss + real_detection_loss) * 0.5).item())}')
+            pbar.set_description(f'{str(token_loss.item())}|{str(next_loss.item())}|{str(fake_loss.item())}|{str(disc_loss.item())}')
 
         sum_mask_loss += token_loss.item() * len(src)
         sum_disc_loss += disc_loss.item() * len(src)
