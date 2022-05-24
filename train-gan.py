@@ -86,14 +86,14 @@ def train_epoch(dataloader, model, discriminator, device, optimizer, disc_optimi
             real = discriminator(tgt)
 
             next = next.detach()
-            
-            fake_segments = torch.ones_like(fake)            
+
+            fake_detection_loss = None
             for start in starts:
-                fake_segments[:, start:start+dataloader.dataset.token_size] = 0
+                segment = fake[:, start:start+dataloader.dataset.target_token_size]
+                truth = torch.zeros_like(segment)
+                truth[:, -dataloader.dataset.next_frame_chunk_size-dataloader.dataset.separator_size:-dataloader.dataset.next_frame_chunk_size+dataloader.dataset.separator_size] = 1
+                fake_detection_loss = bce_crit(segment, truth) * 10 if fake_detection_loss is None else fake_detection_loss + bce_crit(segment, truth) * 10
 
-            fake_segments[:, -dataloader.dataset.next_frame_chunk_size-dataloader.dataset.separator_size:-dataloader.dataset.next_frame_chunk_size+dataloader.dataset.separator_size] = 1
-
-            fake_detection_loss = bce_crit(fake, fake_segments)
             real_detection_loss = bce_crit(real, torch.ones_like(real))
             disc_loss = (fake_detection_loss + real_detection_loss)
 
@@ -109,10 +109,15 @@ def train_epoch(dataloader, model, discriminator, device, optimizer, disc_optimi
 
         with torch.cuda.amp.autocast_mode.autocast(enabled=grad_scaler is not None):
             fake = discriminator(src * mask)
-            fake_loss = bce_crit(fake, torch.ones_like(fake))
+
+            fake_loss = None
+            for start in starts:
+                segment = fake[:, start:start+dataloader.dataset.target_token_size]
+                fake_loss = bce_crit(segment, torch.ones_like(segment)) if fake_loss is None else fake_loss + bce_crit(segment, torch.ones_like(segment))
+
             next_loss = bce_crit(next, is_next)
             token_loss = mask_crit(src * mask, tgt)
-            loss = (fake_loss + next_loss + (token_loss * lam) if token_loss is not None else 0)
+            loss = (fake_loss + (token_loss + next_loss) * lam if token_loss is not None else 0)
 
         model.zero_grad()
         grad_scaler.scale(loss).backward()
@@ -125,7 +130,7 @@ def train_epoch(dataloader, model, discriminator, device, optimizer, disc_optimi
             lr_warmup.step()
 
         if progress_bar:
-            pbar.set_description(f'{str(token_loss.item())}|{str(next_loss.item())}|{str(fake_loss.item() * 100000)}|{str(((fake_detection_loss + real_detection_loss) * 0.5).item() * 100000)}')
+            pbar.set_description(f'{str(token_loss.item())}|{str(next_loss.item())}|{str(fake_loss.item())}|{str(((fake_detection_loss + real_detection_loss) * 0.5).item())}')
 
         sum_mask_loss += token_loss.item() * len(src)
         sum_disc_loss += disc_loss.item() * len(src)
@@ -148,7 +153,7 @@ def validate_epoch(dataloader, model, device, grad_scaler):
             is_next = is_next.to(device)
 
             with torch.cuda.amp.autocast_mode.autocast(enabled=grad_scaler is not None):
-                pred = model(src)
+                pred, _ = model(src)
  
             mask_loss = mask_crit(src * pred, tgt)
             loss = mask_loss
@@ -217,7 +222,7 @@ def main():
     p.add_argument('--debug', action='store_true')
     p.add_argument('--dropout', type=float, default=0.1)
     p.add_argument('--token_size', type=int, default=16)
-    p.add_argument('--mask_rate', type=float, default=0.25)
+    p.add_argument('--mask_rate', type=float, default=0.3)
     p.add_argument('--next_frame_chunk_size', type=int, default=512)
     p.add_argument('--prefetch_factor', type=int, default=16)
     p.add_argument('--conv_discriminator', type=str, default='true')
@@ -378,6 +383,9 @@ def main():
         LinearWarmupScheduler(disc_optimizer, target_lr=args.learning_rate, num_steps=warmup_steps, current_step=(steps * args.curr_warmup_epoch)),
         PolynomialDecayScheduler(disc_optimizer, target=args.lr_scheduler_decay_target, power=args.lr_scheduler_decay_power, num_decay_steps=decay_steps, start_step=warmup_steps, current_step=(steps * args.curr_warmup_epoch))
     ])
+
+    scheduler = None
+    disc_scheduler = None
 
     train_dataset.warmup_steps = token_steps
 
