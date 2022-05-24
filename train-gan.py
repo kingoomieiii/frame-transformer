@@ -86,22 +86,26 @@ def train_epoch(dataloader, model, discriminator, device, optimizer, disc_optimi
             real = discriminator(tgt)
 
             next = next.detach()
+     
+            # full_detection_loss = bce_crit(fake, fake_segments)
 
-            fake_segments = torch.ones_like(fake)            
+            fake_segments = torch.ones_like(fake)
             for start in starts:
-                fake_segments[:, start:start+dataloader.dataset.token_size] = 0
+                fake_segments[:, start:start+dataloader.dataset.target_token_size] = 0
             fake_segments[:, -dataloader.dataset.next_frame_chunk_size-dataloader.dataset.separator_size:-dataloader.dataset.next_frame_chunk_size+dataloader.dataset.separator_size] = 1
-            full_detection_loss = bce_crit(fake, fake_segments)
 
             fake_detection_loss = None
             for start in starts:
-                segment = fake[:, start:start+dataloader.dataset.target_token_size]
-                truth = torch.zeros_like(segment)
-                truth[:, -dataloader.dataset.next_frame_chunk_size-dataloader.dataset.separator_size:-dataloader.dataset.next_frame_chunk_size+dataloader.dataset.separator_size] = 1
-                fake_detection_loss = bce_crit(segment, truth) if fake_detection_loss is None else fake_detection_loss + bce_crit(segment, truth)
+                fake_segment = fake[:, start:start+dataloader.dataset.target_token_size]
+                segment = fake_segments[:, start:start+dataloader.dataset.target_token_size]
+                fake_detection_loss = bce_crit(fake_segment, segment) if fake_detection_loss is None else fake_detection_loss + bce_crit(fake_segment, segment)
 
-            real_detection_loss = bce_crit(real, torch.ones_like(real))
-            disc_loss = (fake_detection_loss + real_detection_loss + full_detection_loss)
+            real_detection_loss = None
+            for start in starts:
+                real_segment = real[:, start:start+dataloader.dataset.target_token_size]
+                real_detection_loss = bce_crit(real_segment, torch.ones_like(real_segment)) if real_detection_loss is None else real_detection_loss + bce_crit(real_segment, torch.ones_like(real_segment))
+
+            disc_loss = (fake_detection_loss + real_detection_loss)
 
         discriminator.zero_grad()
         disc_scaler.scale(disc_loss).backward()
@@ -121,6 +125,7 @@ def train_epoch(dataloader, model, discriminator, device, optimizer, disc_optimi
                 segment = fake[:, start:start+dataloader.dataset.target_token_size]
                 fake_loss = bce_crit(segment, torch.ones_like(segment)) if fake_loss is None else fake_loss + bce_crit(segment, torch.ones_like(segment))
 
+            #full_loss = bce_crit(fake, torch.ones_like(fake))
             next_loss = bce_crit(next, is_next)
             token_loss = mask_crit(src * mask, tgt)
             loss = (fake_loss + next_loss + token_loss * lam if token_loss is not None else 0)
@@ -179,7 +184,7 @@ def main():
     p.add_argument('--disc_type', type=str.lower, choices=['conv', 'unet', 'vanilla'])
     p.add_argument('--curr_warmup_epoch', type=int, default=0)
     p.add_argument('--l1_lambda', type=float, default=0.1)
-    p.add_argument('--warmup_epoch', type=int, default=3)
+    p.add_argument('--warmup_epoch', type=int, default=0)
     p.add_argument('--epoch', '-E', type=int, default=30)
     p.add_argument('--epoch_size', type=int, default=None)
     p.add_argument('--disc_skip_steps', type=int, default=12)
@@ -377,6 +382,7 @@ def main():
 
     steps = len(train_dataset) // (args.batchsize * args.accumulation_steps)
     warmup_steps = steps * args.warmup_epoch
+    disc_warmup_steps = steps * (args.warmup_epoch)
     decay_steps = steps * args.epoch + warmup_steps
     token_steps = steps * args.token_warmup_epoch
 
@@ -386,8 +392,8 @@ def main():
     ])
 
     disc_scheduler = torch.optim.lr_scheduler.ChainedScheduler([
-        LinearWarmupScheduler(disc_optimizer, target_lr=args.learning_rate, num_steps=warmup_steps, current_step=(steps * args.curr_warmup_epoch)),
-        PolynomialDecayScheduler(disc_optimizer, target=args.lr_scheduler_decay_target, power=args.lr_scheduler_decay_power, num_decay_steps=decay_steps, start_step=warmup_steps, current_step=(steps * args.curr_warmup_epoch))
+        LinearWarmupScheduler(disc_optimizer, target_lr=args.learning_rate, num_steps=disc_warmup_steps, current_step=(steps * args.curr_warmup_epoch)),
+        PolynomialDecayScheduler(disc_optimizer, target=args.lr_scheduler_decay_target, power=args.lr_scheduler_decay_power, num_decay_steps=decay_steps, start_step=disc_warmup_steps, current_step=(steps * args.curr_warmup_epoch))
     ])
 
     scheduler = None
