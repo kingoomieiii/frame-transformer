@@ -75,15 +75,24 @@ def train_epoch(dataloader, model, discriminator, device, optimizer, disc_optimi
     for itr, (src, tgt, is_next, starts) in enumerate(pbar):
         src = src.to(device)
         tgt = tgt.to(device)
-        is_next = is_next.to(device).type(torch.long)
+        is_next = is_next.to(device)
+
+        if len(is_next.shape) == 1:
+            is_next = is_next.unsqueeze(-1)
         
         with torch.cuda.amp.autocast_mode.autocast(enabled=grad_scaler is not None):
             mask = model(src)
-            fake = discriminator(src, src * mask.detach())
-            fake_loss = bce_crit(fake, torch.zeros_like(fake))
-            real = discriminator(src, tgt)
+            fake, next = discriminator(src, src * mask.detach())
+            
+            fake_segments = torch.ones_like(fake)            
+            for start in starts:
+                fake_segments[:, start:start+dataloader.dataset.token_size] = 0
+
+            fake_loss = bce_crit(fake, fake_segments)
+            real, _ = discriminator(src, tgt)
             real_loss = bce_crit(real, torch.ones_like(real))
-            disc_loss = (real_loss + fake_loss)
+            next_loss = bce_crit(next, is_next)
+            disc_loss = (real_loss + fake_loss + next_loss)
 
         discriminator.zero_grad()
         disc_scaler.scale(disc_loss).backward()
@@ -96,17 +105,9 @@ def train_epoch(dataloader, model, discriminator, device, optimizer, disc_optimi
             lr_warmup_disc.step()
 
         with torch.cuda.amp.autocast_mode.autocast(enabled=grad_scaler is not None):
-            fake = discriminator(src, src * mask)
+            fake, _ = discriminator(src, src * mask)
             fake_loss = bce_crit(fake, torch.ones_like(fake))
-
-            token_loss = None
-            for t in starts:
-                src_token = (src * mask)[:, :, :, t:t+dataloader.dataset.target_token_size]
-                tgt_token = tgt[:, :, :, t:t+dataloader.dataset.target_token_size]
-                curr_loss = mask_crit(src_token, tgt_token)
-                token_loss = token_loss + curr_loss if token_loss is not None else curr_loss
-
-            total_loss = mask_crit(src * mask, tgt)
+            token_loss = mask_crit(src * mask, tgt)
             loss = (fake_loss + (token_loss * lam) if token_loss is not None else 0)
 
         model.zero_grad()
@@ -120,9 +121,9 @@ def train_epoch(dataloader, model, discriminator, device, optimizer, disc_optimi
             lr_warmup.step()
 
         if progress_bar:
-            pbar.set_description(f'{str(total_loss.item())}|{str(fake_loss.item())}|{str(disc_loss.item() * 0.5)}')
+            pbar.set_description(f'{str(token_loss.item())}|{str(fake_loss.item())}|{str((real_loss + fake_loss).item())}')
 
-        sum_mask_loss += total_loss.item() * len(src)
+        sum_mask_loss += token_loss.item() * len(src)
         #sum_nxt_loss += nxt_loss.item() * len(src)
         sum_disc_loss += disc_loss.item() * len(src)
         sum_gen_loss += loss.item() * len(src)
@@ -136,13 +137,12 @@ def validate_epoch(dataloader, model, device, grad_scaler):
     sum_nxt_loss = 0
 
     mask_crit = nn.L1Loss()
-    next_crit = nn.CrossEntropyLoss()
 
     with torch.no_grad():
         for src, tgt, is_next, tokens in tqdm(dataloader):
             src = src.to(device)
             tgt = tgt.to(device)
-            is_next = is_next.to(device).type(torch.long)
+            is_next = is_next.to(device)
 
             with torch.cuda.amp.autocast_mode.autocast(enabled=grad_scaler is not None):
                 pred = model(src)
@@ -185,7 +185,7 @@ def main():
     p.add_argument('--n_fft', '-f', type=int, default=2048)
     p.add_argument('--dataset', '-d', required=False)
     p.add_argument('--split_mode', '-S', type=str, choices=['random', 'subdirs'], default='random')
-    p.add_argument('--learning_rate', '-l', type=float, default=1e-5)
+    p.add_argument('--learning_rate', '-l', type=float, default=1e-4)
     p.add_argument('--weight_decay', type=float, default=1e-2)
     p.add_argument('--optimizer', type=str.lower, choices=['adam', 'adamw'], default='adamw')
     p.add_argument('--lr_scheduler_decay_target', type=int, default=1e-8)
