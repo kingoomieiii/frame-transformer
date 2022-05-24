@@ -16,9 +16,11 @@ from lib import dataset
 from lib import spec_utils
 from tqdm import tqdm
 
+from lib.frame_transformer import FrameTransformer, FrameTransformerDiscriminator
+
 from lib.frame_transformer_unet import FrameTransformerUnet
 from lib.conv_discriminator import ConvDiscriminator
-from lib.frame_transformer_discriminator import FrameTransformerDiscriminator
+from lib.frame_transformer_discriminator import FrameTransformerDiscriminator as FrameTransformerUnetDiscriminator
 from lib.lr_scheduler_linear_warmup import LinearWarmupScheduler
 from lib.lr_scheduler_polynomial_decay import PolynomialDecayScheduler
 
@@ -56,7 +58,7 @@ def mixup(X, Y, alpha=1):
     Y = Y * lam + Y2 * inv_lam
     return X, Y
 
-def train_epoch(dataloader, model, discriminator, device, optimizer, disc_optimizer, accumulation_steps, grad_scaler, disc_scaler, progress_bar, mixup_rate, mixup_alpha, lr_warmup=None, lr_warmup_disc=None, lam=10, disc_skip_steps=2):
+def train_epoch(dataloader, model, discriminator, device, optimizer, disc_optimizer, grad_scaler, disc_scaler, progress_bar, lr_warmup=None, lr_warmup_disc=None, lam=100):
     model.train()
 
     sum_mask_loss = 0
@@ -65,36 +67,30 @@ def train_epoch(dataloader, model, discriminator, device, optimizer, disc_optimi
     sum_disc_loss = 0
 
     mask_crit = nn.L1Loss()
-    next_crit = nn.CrossEntropyLoss()
     bce_crit = nn.BCEWithLogitsLoss()
 
     disc_loss = 0
 
     pbar = tqdm(dataloader) if progress_bar else dataloader
-    for itr, (src, tgt, is_next, tokens) in enumerate(pbar):
+    for itr, (src, tgt, is_next, starts) in enumerate(pbar):
         src = src.to(device)
         tgt = tgt.to(device)
         is_next = is_next.to(device).type(torch.long)
         
         with torch.cuda.amp.autocast_mode.autocast(enabled=grad_scaler is not None):
-            mask, nxt = model(src)
+            mask = model(src)
             fake = discriminator(src, src * mask.detach())
             fake_loss = bce_crit(fake, torch.zeros_like(fake))
-
-        if itr % disc_skip_steps == 0:
-            with torch.cuda.amp.autocast_mode.autocast(enabled=grad_scaler is not None):
-                real = discriminator(src, tgt)
-                real_loss = bce_crit(real, torch.ones_like(real))
-                disc_loss = (real_loss + fake_loss)
+            real = discriminator(src, tgt)
+            real_loss = bce_crit(real, torch.ones_like(real))
+            disc_loss = (real_loss + fake_loss)
 
         discriminator.zero_grad()
-
-        if itr % disc_skip_steps == 0:
-            disc_scaler.scale(disc_loss).backward()
-            disc_scaler.unscale_(disc_optimizer)
-            clip_grad_norm_(discriminator.parameters(), 0.5)
-            disc_scaler.step(disc_optimizer)
-            disc_scaler.update()
+        disc_scaler.scale(disc_loss).backward()
+        disc_scaler.unscale_(disc_optimizer)
+        clip_grad_norm_(discriminator.parameters(), 0.5)
+        disc_scaler.step(disc_optimizer)
+        disc_scaler.update()
 
         if lr_warmup_disc is not None:
             lr_warmup_disc.step()
@@ -104,15 +100,14 @@ def train_epoch(dataloader, model, discriminator, device, optimizer, disc_optimi
             fake_loss = bce_crit(fake, torch.ones_like(fake))
 
             token_loss = None
-            for t in tokens:
+            for t in starts:
                 src_token = (src * mask)[:, :, :, t:t+dataloader.dataset.target_token_size]
                 tgt_token = tgt[:, :, :, t:t+dataloader.dataset.target_token_size]
                 curr_loss = mask_crit(src_token, tgt_token)
                 token_loss = token_loss + curr_loss if token_loss is not None else curr_loss
 
             total_loss = mask_crit(src * mask, tgt)
-            #nxt_loss = next_crit(nxt, is_next)
-            loss = (fake_loss + (token_loss * 10) if token_loss is not None else 0)
+            loss = (fake_loss + (token_loss * lam) if token_loss is not None else 0)
 
         model.zero_grad()
         grad_scaler.scale(loss).backward()
@@ -150,25 +145,26 @@ def validate_epoch(dataloader, model, device, grad_scaler):
             is_next = is_next.to(device).type(torch.long)
 
             with torch.cuda.amp.autocast_mode.autocast(enabled=grad_scaler is not None):
-                pred, nxt = model(src)
+                pred = model(src)
  
             mask_loss = mask_crit(src * pred, tgt)
-            nxt_loss = next_crit(nxt, is_next)
-            loss = mask_loss + nxt_loss
+            loss = mask_loss
     
             if torch.logical_or(loss.isnan(), loss.isinf()):
                 print('non-finite or nan validation loss; aborting')
                 quit()
             else:
                 sum_mask_loss += mask_loss.item() * len(src)
-                sum_nxt_loss += nxt_loss.item() * len(src)
 
     return sum_mask_loss / len(dataloader.dataset), sum_nxt_loss / len(dataloader.dataset)
 
 def main():
     p = argparse.ArgumentParser()
     p.add_argument('--id', type=str, default='')
+    p.add_argument('--gen_type', type=str.lower, choices=['unet', 'vanilla'])
+    p.add_argument('--disc_type', type=str.lower, choices=['conv', 'unet', 'vanilla'])
     p.add_argument('--curr_warmup_epoch', type=int, default=0)
+    p.add_argument('--l1_lambda', type=float, default=100.0)
     p.add_argument('--warmup_epoch', type=int, default=3)
     p.add_argument('--epoch', '-E', type=int, default=30)
     p.add_argument('--epoch_size', type=int, default=None)
@@ -304,12 +300,18 @@ def main():
         logger.info('{} {} {}'.format(i + 1, os.path.basename(X_fname), os.path.basename(y_fname)))
 
     device = torch.device('cpu')
-    model = FrameTransformerUnet(channels=args.channels, n_fft=args.n_fft, depth=args.depth, num_transformer_blocks=args.num_transformer_blocks ,num_bands=args.num_bands, feedforward_dim=args.feedforward_dim, bias=args.bias, cropsize=args.cropsize + args.next_frame_chunk_size)
-    
-    if args.conv_discriminator:
-        discriminator = ConvDiscriminator(channels=args.channels*2, n_fft=args.n_fft, depth=args.depth)
+
+    if args.gen_type == 'unet':
+        model = FrameTransformerUnet(channels=args.channels, n_fft=args.n_fft, depth=args.depth, num_transformer_blocks=args.num_transformer_blocks ,num_bands=args.num_bands, feedforward_dim=args.feedforward_dim, bias=args.bias, cropsize=args.cropsize + args.next_frame_chunk_size)
     else:
-        discriminator = FrameTransformerDiscriminator(channels=args.channels*2, n_fft=args.n_fft, depth=args.depth, num_transformer_blocks=args.num_transformer_blocks, num_bands=args.num_bands, feedforward_dim=args.feedforward_dim, bias=args.bias, cropsize=args.cropsize + args.next_frame_chunk_size)
+        model = FrameTransformer(channels=args.channels, n_fft=args.n_fft, num_transformer_blocks=args.num_transformer_blocks, num_bands=args.num_bands, feedforward_dim=args.feedforward_dim, bias=args.bias, cropsize=args.cropsize + args.next_frame_chunk_size)
+
+    if args.disc_type == 'conv':
+        discriminator = ConvDiscriminator(channels=args.channels*2, n_fft=args.n_fft, depth=args.depth)
+    elif args.disc_type == 'unet':
+        discriminator = FrameTransformerUnetDiscriminator(channels=args.channels*2, n_fft=args.n_fft, depth=args.depth, num_transformer_blocks=args.num_transformer_blocks, num_bands=args.num_bands, feedforward_dim=args.feedforward_dim, bias=args.bias, cropsize=args.cropsize + args.next_frame_chunk_size)
+    elif args.disc_type == 'vanilla':
+        discriminator = FrameTransformerDiscriminator(channels=args.channels*2, n_fft=args.n_fft, num_transformer_blocks=args.num_transformer_blocks, num_bands=args.num_bands, feedforward_dim=args.feedforward_dim, bias=args.bias, cropsize=args.cropsize + args.next_frame_chunk_size)
 
     if args.pretrained_model is not None:
         model.load_state_dict(torch.load(args.pretrained_model, map_location=device))
@@ -383,7 +385,7 @@ def main():
         train_dataset.rebuild()
 
         logger.info('# epoch {}'.format(epoch))
-        train_loss_mask, train_loss_nxt, gen_loss, disc_loss = train_epoch(train_dataloader, model, discriminator, device, optimizer, disc_optimizer, args.accumulation_steps, grad_scaler, disc_scaler, args.progress_bar, args.mixup_rate, args.mixup_alpha, lr_warmup=scheduler, lr_warmup_disc=disc_scheduler, disc_skip_steps=args.disc_skip_steps)
+        train_loss_mask, train_loss_nxt, gen_loss, disc_loss = train_epoch(train_dataloader, model, discriminator, device, optimizer, disc_optimizer, grad_scaler, disc_scaler, args.progress_bar, lr_warmup=scheduler, lr_warmup_disc=disc_scheduler, lam=args.l1_lambda)
 
         val_loss_mask1, val_loss_nxt1 = validate_epoch(val_dataloader, model, device, grad_scaler)
         val_loss_mask2, val_loss_nxt2 = validate_epoch(val_dataloader, model, device, grad_scaler)

@@ -198,7 +198,7 @@ class FrameNorm(nn.Module):
         return self.norm(x.transpose(1,3)).transpose(1,3)
 
 class FrameConv(nn.Module):
-    def __init__(self, in_channels, out_channels, kernel_size=3, stride=1, padding=1, dilation=1, groups=1, activate=nn.ReLU, norm=True, cropsize=1024):
+    def __init__(self, in_channels, out_channels, kernel_size=3, stride=1, padding=1, dilation=1, groups=1, activate=nn.ReLU, norm=True, cropsize=1024, dropout=None):
         super(FrameConv, self).__init__()
 
         self.weight = nn.Parameter(torch.empty(kernel_size))
@@ -245,7 +245,7 @@ class FrameDecoder(nn.Module):
 
         self.conv1 = FrameConv(in_channels, out_channels, kernel_size=kernel_size, padding=padding, activate=activ, norm=norm, cropsize=cropsize)
         self.conv2 = FrameConv(out_channels, out_channels, kernel_size=kernel_size, padding=padding, activate=activ, norm=norm, cropsize=cropsize)
-        self.dropout = nn.Dropout2d(0.1) if dropout else None
+        self.dropout = nn.Dropout2d(dropout) if dropout is not None else None
 
     def __call__(self, x, skip=None):
         if skip is not None:
