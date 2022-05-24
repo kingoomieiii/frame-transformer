@@ -45,10 +45,6 @@ class FrameTransformerDiscriminator(nn.Module):
         self.out_channels = nn.Linear(channels + num_transformer_blocks, 1)
         self.out = nn.Linear(self.max_bin, 1, bias=bias)
         
-        self.is_next_channels = nn.Linear(channels + num_transformer_blocks, 1)
-        self.is_next_bins = nn.Linear(self.max_bin, 1)
-        self.is_next_frames = nn.Linear(self.cropsize, 1)
-
         self.activate = out_activate if out_activate is not None else nn.Identity()
 
     def __call__(self, x):
@@ -60,8 +56,4 @@ class FrameTransformerDiscriminator(nn.Module):
 
         out = self.out(self.out_channels(x.transpose(1,3)).transpose(2,3)).squeeze(-1).squeeze(-1) # B,C,H,W -> B,W,H,1 -> B,W,C,H -> B,W,1,1
 
-        c = self.is_next_channels(x.transpose(1,3)) # B,C,H,W -> B,W,H,1
-        b = self.is_next_bins(c.transpose(2,3)).squeeze(-1).squeeze(-1) # B,W,H,1 -> B,W,1,H -> B,W,1,1
-        is_next = self.is_next_frames(b)
-
-        return out, is_next
+        return out

@@ -72,18 +72,14 @@ def train_epoch(dataloader, model, discriminator, device, optimizer, disc_optimi
     disc_loss = 0
 
     pbar = tqdm(dataloader) if progress_bar else dataloader
-    for itr, (src, tgt, is_next, starts) in enumerate(pbar):
+    for itr, (src, tgt, _, starts) in enumerate(pbar):
         src = src.to(device)
         tgt = tgt.to(device)
-        is_next = is_next.to(device)
-
-        if len(is_next.shape) == 1:
-            is_next = is_next.unsqueeze(-1)
         
         with torch.cuda.amp.autocast_mode.autocast(enabled=grad_scaler is not None):
             mask = model(src)
-            fake, next = discriminator(src * mask.detach())
-            real, _ = discriminator(tgt)
+            real = discriminator(tgt)
+            fake = discriminator(src * mask.detach())
             
             fake_segments = torch.ones_like(fake)            
             for start in starts:
@@ -91,8 +87,7 @@ def train_epoch(dataloader, model, discriminator, device, optimizer, disc_optimi
 
             fake_detection_loss = bce_crit(fake, fake_segments)
             real_detection_loss = bce_crit(real, torch.ones_like(real))
-            next_loss = bce_crit(next, is_next)
-            disc_loss = (fake_detection_loss + next_loss + real_detection_loss)
+            disc_loss = (fake_detection_loss + real_detection_loss)
 
         discriminator.zero_grad()
         disc_scaler.scale(disc_loss).backward()
@@ -105,7 +100,7 @@ def train_epoch(dataloader, model, discriminator, device, optimizer, disc_optimi
             lr_warmup_disc.step()
 
         with torch.cuda.amp.autocast_mode.autocast(enabled=grad_scaler is not None):
-            fake, _ = discriminator(src * mask)
+            fake = discriminator(src * mask)
             fake_loss = bce_crit(fake, torch.ones_like(fake))
             token_loss = mask_crit(src * mask, tgt)
             loss = (fake_loss + (token_loss * lam) if token_loss is not None else 0)
