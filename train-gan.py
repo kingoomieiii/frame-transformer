@@ -45,19 +45,6 @@ def setup_logger(name, logfile='LOGFILENAME.log', out_dir='logs'):
 
     return logger
 
-def mixup(X, Y, alpha=1):
-    indices = torch.randperm(X.size(0))
-    X2 = X[indices]
-    Y2 = Y[indices]
-    alpha = np.full((X.shape[0]), fill_value=alpha)
-    lam = torch.FloatTensor(np.random.beta(alpha, alpha))
-    inv_lam = torch.ones_like(lam) - lam
-    lam = lam.unsqueeze(1).unsqueeze(2).unsqueeze(3).to(X.device)
-    inv_lam = inv_lam.unsqueeze(1).unsqueeze(2).unsqueeze(3).to(X.device)
-    X = X * lam + X2 * inv_lam
-    Y = Y * lam + Y2 * inv_lam
-    return X, Y
-
 def train_epoch(dataloader, model, discriminator, device, optimizer, disc_optimizer, grad_scaler, disc_scaler, progress_bar, lr_warmup=None, lr_warmup_disc=None, lam=100):
     model.train()
 
@@ -98,15 +85,14 @@ def train_epoch(dataloader, model, discriminator, device, optimizer, disc_optimi
                 segment = fake_segments[:, start:start+dataloader.dataset.target_token_size]
                 fake_detection_loss = bce_crit(fake_segment, segment)/dataloader.dataset.target_token_size if fake_detection_loss is None else fake_detection_loss + bce_crit(fake_segment, segment)/dataloader.dataset.target_token_size
 
-            full_detection_loss = bce_crit(fake, fake_segments) / dataloader.dataset.cropsize
-            real_detection_loss = bce_crit(real, torch.ones_like(real)) / dataloader.dataset.cropsize
+            full_fake_detection_loss = bce_crit(fake, fake_segments) / dataloader.dataset.cropsize
 
             real_detection_loss = None
             for start in starts:
                 real_segment = real[:, start:start+dataloader.dataset.target_token_size]
                 real_detection_loss = bce_crit(real_segment, torch.ones_like(real_segment))/dataloader.dataset.target_token_size if real_detection_loss is None else real_detection_loss + bce_crit(real_segment, torch.ones_like(real_segment))/dataloader.dataset.target_token_size
 
-            disc_loss = (fake_detection_loss * 2 + real_detection_loss + full_detection_loss)
+            disc_loss = (2 * fake_detection_loss + full_fake_detection_loss + real_detection_loss)
 
         discriminator.zero_grad()
         disc_scaler.scale(disc_loss).backward()
@@ -126,11 +112,9 @@ def train_epoch(dataloader, model, discriminator, device, optimizer, disc_optimi
                 segment = fake[:, start:start+dataloader.dataset.target_token_size]
                 fake_loss = bce_crit(segment, torch.ones_like(segment))/dataloader.dataset.target_token_size if fake_loss is None else fake_loss + bce_crit(segment, torch.ones_like(segment))/dataloader.dataset.target_token_size
 
-            full_fake_loss = bce_crit(fake, torch.ones_like(fake))
-
             next_loss = bce_crit(next, is_next)
             token_loss = mask_crit(src * mask, tgt)
-            loss = (fake_loss * 2 + full_fake_loss + next_loss + token_loss * lam if token_loss is not None else 0)
+            loss = (2 * fake_loss + next_loss + token_loss * lam if token_loss is not None else 0)
 
         model.zero_grad()
         grad_scaler.scale(loss).backward()
@@ -143,7 +127,7 @@ def train_epoch(dataloader, model, discriminator, device, optimizer, disc_optimi
             lr_warmup.step()
 
         if progress_bar:
-            pbar.set_description(f'{str(token_loss.item())}|{str(next_loss.item())}|{str(fake_loss.item())}|{str(disc_loss.item())}')
+            pbar.set_description(f'{str(token_loss.item())}|{str(fake_loss.item())}|{str(disc_loss.item())}')
 
         sum_mask_loss += token_loss.item() * len(src)
         sum_disc_loss += disc_loss.item() * len(src)
