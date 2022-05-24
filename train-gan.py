@@ -72,18 +72,26 @@ def train_epoch(dataloader, model, discriminator, device, optimizer, disc_optimi
     disc_loss = 0
 
     pbar = tqdm(dataloader) if progress_bar else dataloader
-    for itr, (src, tgt, _, starts) in enumerate(pbar):
+    for itr, (src, tgt, is_next, starts) in enumerate(pbar):
         src = src.to(device)
         tgt = tgt.to(device)
+        is_next = is_next.to(device)
+
+        if len(is_next.shape) == 1:
+            is_next = is_next.unsqueeze(-1)
         
         with torch.cuda.amp.autocast_mode.autocast(enabled=grad_scaler is not None):
-            mask = model(src)
-            real = discriminator(tgt)
+            mask, next = model(src)
             fake = discriminator(src * mask.detach())
+            real = discriminator(tgt)
+
+            next = next.detach()
             
             fake_segments = torch.ones_like(fake)            
             for start in starts:
                 fake_segments[:, start:start+dataloader.dataset.token_size] = 0
+
+            fake_segments[:, -dataloader.dataset.next_frame_chunk_size-dataloader.dataset.separator_size:-dataloader.dataset.next_frame_chunk_size+dataloader.dataset.separator_size] = 1
 
             fake_detection_loss = bce_crit(fake, fake_segments)
             real_detection_loss = bce_crit(real, torch.ones_like(real))
@@ -102,8 +110,9 @@ def train_epoch(dataloader, model, discriminator, device, optimizer, disc_optimi
         with torch.cuda.amp.autocast_mode.autocast(enabled=grad_scaler is not None):
             fake = discriminator(src * mask)
             fake_loss = bce_crit(fake, torch.ones_like(fake))
+            next_loss = bce_crit(next, is_next)
             token_loss = mask_crit(src * mask, tgt)
-            loss = (fake_loss + (token_loss * lam) if token_loss is not None else 0)
+            loss = (fake_loss + next_loss + (token_loss * lam) if token_loss is not None else 0)
 
         model.zero_grad()
         grad_scaler.scale(loss).backward()
@@ -116,7 +125,7 @@ def train_epoch(dataloader, model, discriminator, device, optimizer, disc_optimi
             lr_warmup.step()
 
         if progress_bar:
-            pbar.set_description(f'{str(token_loss.item())}|{str(fake_loss.item() * 100000)}|{str(((fake_detection_loss + real_detection_loss) * 0.5).item() * 100000)}')
+            pbar.set_description(f'{str(token_loss.item())}|{str(next_loss.item())}|{str(fake_loss.item() * 100000)}|{str(((fake_detection_loss + real_detection_loss) * 0.5).item() * 100000)}')
 
         sum_mask_loss += token_loss.item() * len(src)
         sum_disc_loss += disc_loss.item() * len(src)
