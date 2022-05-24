@@ -86,9 +86,7 @@ def train_epoch(dataloader, model, discriminator, device, optimizer, disc_optimi
             real = discriminator(tgt)
 
             next = next.detach()
-     
-            # full_detection_loss = bce_crit(fake, fake_segments)
-
+    
             fake_segments = torch.ones_like(fake)
             for start in starts:
                 fake_segments[:, start:start+dataloader.dataset.target_token_size] = 0
@@ -98,14 +96,17 @@ def train_epoch(dataloader, model, discriminator, device, optimizer, disc_optimi
             for start in starts:
                 fake_segment = fake[:, start:start+dataloader.dataset.target_token_size]
                 segment = fake_segments[:, start:start+dataloader.dataset.target_token_size]
-                fake_detection_loss = bce_crit(fake_segment, segment) if fake_detection_loss is None else fake_detection_loss + bce_crit(fake_segment, segment)
+                fake_detection_loss = bce_crit(fake_segment, segment)/dataloader.dataset.target_token_size if fake_detection_loss is None else fake_detection_loss + bce_crit(fake_segment, segment)/dataloader.dataset.target_token_size
+
+            full_detection_loss = bce_crit(fake, fake_segments) / dataloader.dataset.cropsize
+            real_detection_loss = bce_crit(real, torch.ones_like(real)) / dataloader.dataset.cropsize
 
             real_detection_loss = None
             for start in starts:
                 real_segment = real[:, start:start+dataloader.dataset.target_token_size]
-                real_detection_loss = bce_crit(real_segment, torch.ones_like(real_segment)) if real_detection_loss is None else real_detection_loss + bce_crit(real_segment, torch.ones_like(real_segment))
+                real_detection_loss = bce_crit(real_segment, torch.ones_like(real_segment))/dataloader.dataset.target_token_size if real_detection_loss is None else real_detection_loss + bce_crit(real_segment, torch.ones_like(real_segment))/dataloader.dataset.target_token_size
 
-            disc_loss = (fake_detection_loss + real_detection_loss)
+            disc_loss = (fake_detection_loss * 2 + real_detection_loss + full_detection_loss)
 
         discriminator.zero_grad()
         disc_scaler.scale(disc_loss).backward()
@@ -123,12 +124,13 @@ def train_epoch(dataloader, model, discriminator, device, optimizer, disc_optimi
             fake_loss = None
             for start in starts:
                 segment = fake[:, start:start+dataloader.dataset.target_token_size]
-                fake_loss = bce_crit(segment, torch.ones_like(segment)) if fake_loss is None else fake_loss + bce_crit(segment, torch.ones_like(segment))
+                fake_loss = bce_crit(segment, torch.ones_like(segment))/dataloader.dataset.target_token_size if fake_loss is None else fake_loss + bce_crit(segment, torch.ones_like(segment))/dataloader.dataset.target_token_size
 
-            #full_loss = bce_crit(fake, torch.ones_like(fake))
+            full_fake_loss = bce_crit(fake, torch.ones_like(fake))
+
             next_loss = bce_crit(next, is_next)
             token_loss = mask_crit(src * mask, tgt)
-            loss = (fake_loss + next_loss + token_loss * lam if token_loss is not None else 0)
+            loss = (fake_loss * 2 + full_fake_loss + next_loss + token_loss * lam if token_loss is not None else 0)
 
         model.zero_grad()
         grad_scaler.scale(loss).backward()
