@@ -82,17 +82,17 @@ def train_epoch(dataloader, model, discriminator, device, optimizer, disc_optimi
         
         with torch.cuda.amp.autocast_mode.autocast(enabled=grad_scaler is not None):
             mask = model(src)
-            fake, next = discriminator(src, src * mask.detach())
+            fake, next = discriminator(src * mask.detach())
+            real, _ = discriminator(tgt)
             
             fake_segments = torch.ones_like(fake)            
             for start in starts:
                 fake_segments[:, start:start+dataloader.dataset.token_size] = 0
 
-            fake_loss = bce_crit(fake, fake_segments)
-            real, _ = discriminator(src, tgt)
-            real_loss = bce_crit(real, torch.ones_like(real))
+            fake_detection_loss = bce_crit(fake, fake_segments)
+            real_detection_loss = bce_crit(real, torch.ones_like(real))
             next_loss = bce_crit(next, is_next)
-            disc_loss = (real_loss + fake_loss + next_loss)
+            disc_loss = (fake_detection_loss + next_loss + real_detection_loss)
 
         discriminator.zero_grad()
         disc_scaler.scale(disc_loss).backward()
@@ -105,7 +105,7 @@ def train_epoch(dataloader, model, discriminator, device, optimizer, disc_optimi
             lr_warmup_disc.step()
 
         with torch.cuda.amp.autocast_mode.autocast(enabled=grad_scaler is not None):
-            fake, _ = discriminator(src, src * mask)
+            fake, _ = discriminator(src * mask)
             fake_loss = bce_crit(fake, torch.ones_like(fake))
             token_loss = mask_crit(src * mask, tgt)
             loss = (fake_loss + (token_loss * lam) if token_loss is not None else 0)
@@ -121,10 +121,9 @@ def train_epoch(dataloader, model, discriminator, device, optimizer, disc_optimi
             lr_warmup.step()
 
         if progress_bar:
-            pbar.set_description(f'{str(token_loss.item())}|{str(fake_loss.item())}|{str((real_loss + fake_loss).item())}')
+            pbar.set_description(f'{str(token_loss.item())}|{str(fake_loss.item() * 100000)}|{str(((fake_detection_loss + real_detection_loss) * 0.5).item() * 100000)}')
 
         sum_mask_loss += token_loss.item() * len(src)
-        #sum_nxt_loss += nxt_loss.item() * len(src)
         sum_disc_loss += disc_loss.item() * len(src)
         sum_gen_loss += loss.item() * len(src)
 
@@ -164,7 +163,7 @@ def main():
     p.add_argument('--gen_type', type=str.lower, choices=['unet', 'vanilla'])
     p.add_argument('--disc_type', type=str.lower, choices=['conv', 'unet', 'vanilla'])
     p.add_argument('--curr_warmup_epoch', type=int, default=0)
-    p.add_argument('--l1_lambda', type=float, default=100.0)
+    p.add_argument('--l1_lambda', type=float, default=0.1)
     p.add_argument('--warmup_epoch', type=int, default=3)
     p.add_argument('--epoch', '-E', type=int, default=30)
     p.add_argument('--epoch_size', type=int, default=None)
@@ -240,8 +239,7 @@ def main():
         mix_path=[
             "D://cs2048_sr44100_hl1024_nf2048_of0_MIXES",
             "C://cs2048_sr44100_hl1024_nf2048_of0_MIXES",
-            "E://cs2048_sr44100_hl1024_nf2048_of0_MIXES",
-            "G://cs2048_sr44100_hl1024_nf2048_of0_MIXES"],
+            "E://cs2048_sr44100_hl1024_nf2048_of0_MIXES"],
         is_validation=False,
         epoch_size=args.epoch_size,
         cropsize=args.cropsize,
@@ -311,7 +309,7 @@ def main():
     elif args.disc_type == 'unet':
         discriminator = FrameTransformerUnetDiscriminator(channels=args.channels*2, n_fft=args.n_fft, depth=args.depth, num_transformer_blocks=args.num_transformer_blocks, num_bands=args.num_bands, feedforward_dim=args.feedforward_dim, bias=args.bias, cropsize=args.cropsize + args.next_frame_chunk_size)
     elif args.disc_type == 'vanilla':
-        discriminator = FrameTransformerDiscriminator(channels=args.channels*2, n_fft=args.n_fft, num_transformer_blocks=args.num_transformer_blocks, num_bands=args.num_bands, feedforward_dim=args.feedforward_dim, bias=args.bias, cropsize=args.cropsize + args.next_frame_chunk_size)
+        discriminator = FrameTransformerDiscriminator(channels=args.channels, n_fft=args.n_fft, num_transformer_blocks=args.num_transformer_blocks, num_bands=args.num_bands, feedforward_dim=args.feedforward_dim, bias=args.bias, cropsize=args.cropsize + args.next_frame_chunk_size)
 
     if args.pretrained_model is not None:
         model.load_state_dict(torch.load(args.pretrained_model, map_location=device))

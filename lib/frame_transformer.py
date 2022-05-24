@@ -51,11 +51,8 @@ class FrameTransformerDiscriminator(nn.Module):
 
         self.activate = out_activate if out_activate is not None else nn.Identity()
 
-    def __call__(self, masked, unmasked):
-        masked = masked[:, :, :self.max_bin]
-        unmasked = unmasked[:, :, :self.max_bin]
-
-        x = torch.cat((masked, unmasked), dim=1)
+    def __call__(self, x):
+        x = x[:, :, :self.max_bin]
 
         for module in self.encoder:
             h = module(x)
