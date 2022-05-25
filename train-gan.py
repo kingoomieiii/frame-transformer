@@ -69,30 +69,30 @@ def train_epoch(dataloader, model, discriminator, device, optimizer, disc_optimi
         
         with torch.cuda.amp.autocast_mode.autocast(enabled=grad_scaler is not None):
             mask, next = model(src)
-            fake = discriminator(src * mask.detach())
             real = discriminator(tgt)
+            fake = discriminator(src * mask.detach())
 
             next = next.detach()
     
             fake_segments = torch.ones_like(fake)
             for start in starts:
-                fake_segments[:, start:start+dataloader.dataset.target_token_size] = 0
+                fake_segments[:, start:start+dataloader.dataset.token_size] = 0
             fake_segments[:, -dataloader.dataset.next_frame_chunk_size-dataloader.dataset.separator_size:-dataloader.dataset.next_frame_chunk_size+dataloader.dataset.separator_size] = 1
 
             fake_detection_loss = None
             for start in starts:
-                fake_segment = fake[:, start:start+dataloader.dataset.target_token_size]
-                segment = fake_segments[:, start:start+dataloader.dataset.target_token_size]
-                fake_detection_loss = bce_crit(fake_segment, segment)/dataloader.dataset.target_token_size if fake_detection_loss is None else fake_detection_loss + bce_crit(fake_segment, segment)/dataloader.dataset.target_token_size
+                fake_segment = fake[:, start:start+dataloader.dataset.token_size]
+                segment = fake_segments[:, start:start+dataloader.dataset.token_size]
+                fake_detection_loss = bce_crit(fake_segment, segment)/dataloader.dataset.token_size if fake_detection_loss is None else fake_detection_loss + bce_crit(fake_segment, segment)/dataloader.dataset.token_size
 
             full_fake_detection_loss = bce_crit(fake, fake_segments) / dataloader.dataset.cropsize
 
             real_detection_loss = None
             for start in starts:
-                real_segment = real[:, start:start+dataloader.dataset.target_token_size]
-                real_detection_loss = bce_crit(real_segment, torch.ones_like(real_segment))/dataloader.dataset.target_token_size if real_detection_loss is None else real_detection_loss + bce_crit(real_segment, torch.ones_like(real_segment))/dataloader.dataset.target_token_size
+                real_segment = real[:, start:start+dataloader.dataset.token_size]
+                real_detection_loss = bce_crit(real_segment, torch.ones_like(real_segment))/dataloader.dataset.token_size if real_detection_loss is None else real_detection_loss + bce_crit(real_segment, torch.ones_like(real_segment))/dataloader.dataset.token_size
 
-            disc_loss = (2 * fake_detection_loss + full_fake_detection_loss + real_detection_loss)
+            disc_loss = 2 * fake_detection_loss + real_detection_loss + full_fake_detection_loss
 
         discriminator.zero_grad()
         disc_scaler.scale(disc_loss).backward()
@@ -109,12 +109,12 @@ def train_epoch(dataloader, model, discriminator, device, optimizer, disc_optimi
 
             fake_loss = None
             for start in starts:
-                segment = fake[:, start:start+dataloader.dataset.target_token_size]
-                fake_loss = bce_crit(segment, torch.ones_like(segment))/dataloader.dataset.target_token_size if fake_loss is None else fake_loss + bce_crit(segment, torch.ones_like(segment))/dataloader.dataset.target_token_size
+                segment = fake[:, start:start+dataloader.dataset.token_size]
+                fake_loss = bce_crit(segment, torch.ones_like(segment))/dataloader.dataset.token_size if fake_loss is None else fake_loss + bce_crit(segment, torch.ones_like(segment))/dataloader.dataset.token_size
 
             next_loss = bce_crit(next, is_next)
             token_loss = mask_crit(src * mask, tgt)
-            loss = (2 * fake_loss + next_loss + token_loss * lam if token_loss is not None else 0)
+            loss = 2 * fake_loss + next_loss + token_loss * lam
 
         model.zero_grad()
         grad_scaler.scale(loss).backward()
@@ -127,7 +127,7 @@ def train_epoch(dataloader, model, discriminator, device, optimizer, disc_optimi
             lr_warmup.step()
 
         if progress_bar:
-            pbar.set_description(f'{str(token_loss.item())}|{str(fake_loss.item())}|{str(disc_loss.item())}')
+            pbar.set_description(f'{str(token_loss.item())}|{str(fake_loss.item() if fake_loss is not None else 0)}|{str(disc_loss.item())}')
 
         sum_mask_loss += token_loss.item() * len(src)
         sum_disc_loss += disc_loss.item() * len(src)
@@ -170,10 +170,9 @@ def main():
     p.add_argument('--disc_type', type=str.lower, choices=['conv', 'unet', 'vanilla'])
     p.add_argument('--curr_warmup_epoch', type=int, default=0)
     p.add_argument('--l1_lambda', type=float, default=0.1)
-    p.add_argument('--warmup_epoch', type=int, default=0)
+    p.add_argument('--warmup_epoch', type=int, default=1)
     p.add_argument('--epoch', '-E', type=int, default=30)
     p.add_argument('--epoch_size', type=int, default=None)
-    p.add_argument('--disc_skip_steps', type=int, default=12)
     p.add_argument('--channels', type=int, default=2)
     p.add_argument('--depth', type=int, default=7)
     p.add_argument('--num_transformer_blocks', type=int, default=2)
@@ -215,14 +214,13 @@ def main():
     p.add_argument('--mixed_precision', type=str, default='true')
     p.add_argument('--force_voxaug', type=str, default='false')
     p.add_argument('--save_all', type=str, default='true')
-    p.add_argument('--model_dir', type=str, default='E://')
+    p.add_argument('--model_dir', type=str, default='G://')
     p.add_argument('--debug', action='store_true')
-    p.add_argument('--dropout', type=float, default=0.1)
+    p.add_argument('--dropout', type=float, default=0.3)
     p.add_argument('--token_size', type=int, default=16)
-    p.add_argument('--mask_rate', type=float, default=0.3)
+    p.add_argument('--mask_rate', type=float, default=0.2)
     p.add_argument('--next_frame_chunk_size', type=int, default=512)
-    p.add_argument('--prefetch_factor', type=int, default=16)
-    p.add_argument('--conv_discriminator', type=str, default='true')
+    p.add_argument('--prefetch_factor', type=int, default=8)
     args = p.parse_args()
 
     args.amsgrad = str.lower(args.amsgrad) == 'true'
@@ -231,7 +229,6 @@ def main():
     args.mixed_precision = str.lower(args.mixed_precision) == 'true'
     args.save_all = str.lower(args.save_all) == 'true'
     args.force_voxaug = str.lower(args.force_voxaug) == 'true'
-    args.conv_discriminator = str.lower(args.conv_discriminator) == 'true'
 
     logger.info(args)
 
@@ -308,14 +305,14 @@ def main():
     if args.gen_type == 'unet':
         model = FrameTransformerUnet(channels=args.channels, n_fft=args.n_fft, depth=args.depth, num_transformer_blocks=args.num_transformer_blocks ,num_bands=args.num_bands, feedforward_dim=args.feedforward_dim, bias=args.bias, cropsize=args.cropsize + args.next_frame_chunk_size)
     else:
-        model = FrameTransformer(channels=args.channels, n_fft=args.n_fft, num_transformer_blocks=args.num_transformer_blocks, num_bands=args.num_bands, feedforward_dim=args.feedforward_dim, bias=args.bias, cropsize=args.cropsize + args.next_frame_chunk_size)
+        model = FrameTransformer(channels=args.channels, n_fft=args.n_fft, num_transformer_blocks=args.num_transformer_blocks, num_bands=args.num_bands, feedforward_dim=args.feedforward_dim, bias=args.bias, cropsize=args.cropsize + args.next_frame_chunk_size, dropout=args.dropout)
 
     if args.disc_type == 'conv':
         discriminator = ConvDiscriminator(channels=args.channels*2, n_fft=args.n_fft, depth=args.depth)
     elif args.disc_type == 'unet':
         discriminator = FrameTransformerUnetDiscriminator(channels=args.channels*2, n_fft=args.n_fft, depth=args.depth, num_transformer_blocks=args.num_transformer_blocks, num_bands=args.num_bands, feedforward_dim=args.feedforward_dim, bias=args.bias, cropsize=args.cropsize + args.next_frame_chunk_size)
     elif args.disc_type == 'vanilla':
-        discriminator = FrameTransformerDiscriminator(channels=args.channels, n_fft=args.n_fft, num_transformer_blocks=args.num_transformer_blocks, num_bands=args.num_bands, feedforward_dim=args.feedforward_dim, bias=args.bias, cropsize=args.cropsize + args.next_frame_chunk_size)
+        discriminator = FrameTransformerDiscriminator(channels=args.channels, n_fft=args.n_fft, num_transformer_blocks=args.num_transformer_blocks, num_bands=args.num_bands, feedforward_dim=args.feedforward_dim, bias=args.bias, cropsize=args.cropsize + args.next_frame_chunk_size, dropout=args.dropout)
 
     if args.pretrained_model is not None:
         model.load_state_dict(torch.load(args.pretrained_model, map_location=device))
@@ -338,37 +335,32 @@ def main():
             filter(lambda p: p.requires_grad, model.parameters()),
             lr=args.learning_rate,
             amsgrad=args.amsgrad,
-            weight_decay=args.weight_decay,
-            betas=(0.5, 0.999)
+            weight_decay=args.weight_decay
         )
 
         disc_optimizer = torch.optim.Adam(
             filter(lambda p: p.requires_grad, discriminator.parameters()),
             lr=args.learning_rate,
             amsgrad=args.amsgrad,
-            weight_decay=args.weight_decay,
-            betas=(0.5, 0.999)
+            weight_decay=args.weight_decay
         )
     else:
         optimizer = torch.optim.AdamW(
             filter(lambda p: p.requires_grad, model.parameters()),
             lr=args.learning_rate,
             amsgrad=args.amsgrad,
-            weight_decay=args.weight_decay,
-            betas=(0.5, 0.999)
+            weight_decay=args.weight_decay
         )
 
         disc_optimizer = torch.optim.AdamW(
             filter(lambda p: p.requires_grad, discriminator.parameters()),
             lr=args.learning_rate,
             amsgrad=args.amsgrad,
-            weight_decay=args.weight_decay,
-            betas=(0.5, 0.999)
+            weight_decay=args.weight_decay
         )
 
     steps = len(train_dataset) // (args.batchsize * args.accumulation_steps)
     warmup_steps = steps * args.warmup_epoch
-    disc_warmup_steps = steps * (args.warmup_epoch)
     decay_steps = steps * args.epoch + warmup_steps
     token_steps = steps * args.token_warmup_epoch
 
@@ -378,12 +370,9 @@ def main():
     ])
 
     disc_scheduler = torch.optim.lr_scheduler.ChainedScheduler([
-        LinearWarmupScheduler(disc_optimizer, target_lr=args.learning_rate, num_steps=disc_warmup_steps, current_step=(steps * args.curr_warmup_epoch)),
-        PolynomialDecayScheduler(disc_optimizer, target=args.lr_scheduler_decay_target, power=args.lr_scheduler_decay_power, num_decay_steps=decay_steps, start_step=disc_warmup_steps, current_step=(steps * args.curr_warmup_epoch))
+        LinearWarmupScheduler(disc_optimizer, target_lr=args.learning_rate, num_steps=warmup_steps, current_step=(steps * args.curr_warmup_epoch)),
+        PolynomialDecayScheduler(disc_optimizer, target=args.lr_scheduler_decay_target, power=args.lr_scheduler_decay_power, num_decay_steps=decay_steps, start_step=warmup_steps, current_step=(steps * args.curr_warmup_epoch))
     ])
-
-    scheduler = None
-    disc_scheduler = None
 
     train_dataset.warmup_steps = token_steps
 

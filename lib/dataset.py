@@ -180,9 +180,8 @@ class MaskedPretrainingDataset(torch.utils.data.Dataset):
         self.next_frame_chunk_size = next_frame_chunk_size
         pair_list = []
 
-        self.token_size = 0
         self.warmup_steps = num_steps
-        self.target_token_size = token_size
+        self.token_size = token_size
         self.separator_size = token_size // 4
         self.current_step = current_step
 
@@ -311,7 +310,7 @@ class MaskedPretrainingDataset(torch.utils.data.Dataset):
                 Y[:, :, -self.next_frame_chunk_size:] = NX[:, :, start:stop]
 
             self.current_step = self.current_step + 1
-            token_size = self.target_token_size
+            token_size = self.token_size
             noise = np.random.uniform(0, 1, X.shape)
             num_tokens = (self.cropsize + self.next_frame_chunk_size) // token_size
 
@@ -330,6 +329,17 @@ class MaskedPretrainingDataset(torch.utils.data.Dataset):
                             X[:, :, start:stop] = Y[:, :, start:stop]
                     else:
                         starts.append(start)
+
+            if len(starts) == 0:
+                start = np.random.randint(0, self.cropsize + self.next_frame_chunk_size - self.token_size - 1)
+                stop = start + token_size
+                starts.append(start)
+        
+                X[:, :, start:stop] = 1.0
+
+                if np.random.uniform() < 0.1:
+                    if np.random.uniform() < 0.5:
+                        X[:, :, start:stop] = np.maximum(Y[:, :, start:stop], noise[:, :, start:stop])
 
             separator_token = np.ones(X.shape)
             separator_token[:, 1::2, :] = 0
