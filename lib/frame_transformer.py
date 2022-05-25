@@ -40,9 +40,9 @@ class FrameTransformer(nn.Module):
             mode='replicate'
         ), is_next
 
-class FrameTransformerDiscriminator(nn.Module):
+class FrameTransformerCritic(nn.Module):
     def __init__(self, channels=2, n_fft=2048, feedforward_dim=512, num_bands=4, num_transformer_blocks=1, cropsize=1024, bias=False, out_activate=nn.Sigmoid(), dropout=0.1, pretraining=True):
-        super(FrameTransformerDiscriminator, self).__init__()
+        super(FrameTransformerCritic, self).__init__()
         
         self.pretraining = pretraining
         self.max_bin = n_fft // 2
