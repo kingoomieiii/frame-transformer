@@ -45,7 +45,7 @@ def setup_logger(name, logfile='LOGFILENAME.log', out_dir='logs'):
 
     return logger
 
-def train_epoch(dataloader, model, critic, device, optimizer, critic_optimizer, grad_scaler, critic_scaler, progress_bar, lr_warmup=None, lr_warmup_critic=None, lam=100):
+def train_epoch(dataloader, model, critic, device, optimizer, critic_optimizer, grad_scaler, critic_scaler, progress_bar, lr_warmup=None, lr_warmup_critic=None, lambda_l1=100, lambda_gen=2.0, lambda_critic=4.0):
     model.train()
 
     sum_mask_loss = 0
@@ -92,7 +92,7 @@ def train_epoch(dataloader, model, critic, device, optimizer, critic_optimizer, 
                 real_segment = real[:, start:start+dataloader.dataset.token_size]
                 real_detection_loss = bce_crit(real_segment, torch.ones_like(real_segment))/dataloader.dataset.token_size if real_detection_loss is None else real_detection_loss + bce_crit(real_segment, torch.ones_like(real_segment))/dataloader.dataset.token_size
 
-            critic_loss = 4 * fake_detection_loss + real_detection_loss + full_fake_detection_loss
+            critic_loss = lambda_critic * fake_detection_loss + real_detection_loss + full_fake_detection_loss
 
         critic.zero_grad()
         critic_scaler.scale(critic_loss).backward()
@@ -114,7 +114,7 @@ def train_epoch(dataloader, model, critic, device, optimizer, critic_optimizer, 
 
             next_loss = bce_crit(next, is_next)
             token_loss = mask_crit(src * mask, tgt)
-            loss = 2 * fake_loss + next_loss + token_loss * lam
+            loss = lambda_gen * fake_loss + next_loss + token_loss * lambda_l1
 
         model.zero_grad()
         grad_scaler.scale(loss).backward()
@@ -169,7 +169,9 @@ def main():
     p.add_argument('--gen_type', type=str.lower, choices=['unet', 'vanilla'])
     p.add_argument('--critic_type', type=str.lower, choices=['conv', 'unet', 'vanilla'])
     p.add_argument('--curr_warmup_epoch', type=int, default=0)
-    p.add_argument('--l1_lambda', type=float, default=0.1)
+    p.add_argument('--lambda_l1', type=float, default=100)
+    p.add_argument('--lambda_gen', type=float, default=2.0)
+    p.add_argument('--lambda_critic', type=float, default=4.0)
     p.add_argument('--warmup_epoch', type=int, default=1)
     p.add_argument('--epoch', '-E', type=int, default=30)
     p.add_argument('--epoch_size', type=int, default=None)
@@ -382,7 +384,7 @@ def main():
         train_dataset.rebuild()
 
         logger.info('# epoch {}'.format(epoch))
-        train_loss_mask, train_loss_nxt, gen_loss, critic_loss = train_epoch(train_dataloader, model, critic, device, optimizer, critic_optimizer, grad_scaler, critic_scaler, args.progress_bar, lr_warmup=scheduler, lr_warmup_critic=critic_scheduler, lam=args.l1_lambda)
+        train_loss_mask, train_loss_nxt, gen_loss, critic_loss = train_epoch(train_dataloader, model, critic, device, optimizer, critic_optimizer, grad_scaler, critic_scaler, args.progress_bar, lr_warmup=scheduler, lr_warmup_critic=critic_scheduler, lambda_l1=args.lambda_l1, lambda_gen=args.lambda_gen, lambda_critic=args.lambda_critic)
 
         val_loss_mask1, val_loss_nxt1 = validate_epoch(val_dataloader, model, device, grad_scaler)
         val_loss_mask2, val_loss_nxt2 = validate_epoch(val_dataloader, model, device, grad_scaler)
