@@ -15,20 +15,7 @@ class PolynomialDecayScheduler(_LRScheduler):
         self.target_lr = target
         self.current_lr = optimizer.param_groups
         
-        super().__init__(optimizer)    
-        
-    # def step(self, step=None):
-    #     if step is None:
-    #         step = self.last_step + 1
-    #     self.last_step = step if step != 0 else 1
-    #     for i, param_group in enumerate(self.optimizer.param_groups):
-    #         if self.last_step <= self.num_decay_steps:
-    #             decay_lrs = [(base_lr - self.target) * 
-    #                         ((1 - self.last_step / self.num_decay_steps) ** (self.power)) + 
-    #                         self.target for base_lr in self.base_lrs]
-    #             for param_group, lr in zip(self.optimizer.param_groups, decay_lrs):
-    #                 param_group['lr'] = lr
-    #                 print(lr)
+        super().__init__(optimizer)
 
     def step(self):
         if self.current_step > self.start_step and self.current_step < (self.start_step + self.num_decay_steps + 1):
