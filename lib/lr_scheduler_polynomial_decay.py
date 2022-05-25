@@ -10,7 +10,6 @@ class PolynomialDecayScheduler(_LRScheduler):
         self.num_decay_steps = num_decay_steps
         self.target = target
         self.power = power
-        self.last_step = 0
 
         self.target_lr = target
         self.current_lr = optimizer.param_groups
