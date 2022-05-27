@@ -284,35 +284,13 @@ class MaskedPretrainingDataset(torch.utils.data.Dataset):
         starts = []
 
         if root:
-            Y = X.copy()
-
-            if np.random.uniform() < 0.5:
-                if np.random.uniform() < 0.67:
-                    nidx = np.random.randint(len(self))
-                else:
-                    nidx = np.random.randint(1, 5)
-
-                    if np.random.uniform() < 0.5:
-                        nidx = (idx + nidx) % len(self)
-                    else:
-                        nidx = (idx - nidx) % len(self)
-
-                while nidx == idx:
-                    nidx = np.random.randint(len(self))
-
-                NX, _, _, _ = self.__getitem__(nidx, root=False)
-
-                start = np.random.randint(0, NX.shape[2] - self.next_frame_chunk_size)
-                stop = start + self.next_frame_chunk_size
-
-                is_next = 0.0
-                X[:, :, -self.next_frame_chunk_size:] = NX[:, :, start:stop]
-                Y[:, :, -self.next_frame_chunk_size:] = NX[:, :, start:stop]
-
             self.current_step = self.current_step + 1
             token_size = self.token_size
             noise = np.random.uniform(0, 1, X.shape)
             num_tokens = (self.cropsize + self.next_frame_chunk_size) // token_size
+                        
+            X = np.clip(np.abs(X) / c, 0, 1)
+            Y = np.clip(np.abs(Y) / c, 0, 1)
 
             for token in range(num_tokens):
                 if np.random.uniform() < self.mask_rate:
@@ -346,9 +324,6 @@ class MaskedPretrainingDataset(torch.utils.data.Dataset):
             X[:, :, -self.next_frame_chunk_size-self.separator_size:-self.next_frame_chunk_size+self.separator_size] = separator_token[:, :, -self.next_frame_chunk_size-self.separator_size:-self.next_frame_chunk_size+self.separator_size]
             Y[:, :, -self.next_frame_chunk_size-self.separator_size:-self.next_frame_chunk_size+self.separator_size] = separator_token[:, :, -self.next_frame_chunk_size-self.separator_size:-self.next_frame_chunk_size+self.separator_size]
 
-        X = np.clip(np.abs(X) / c, 0, 1)
-        Y = np.clip(np.abs(Y) / c, 0, 1)
-      
         return X, Y, is_next, starts
 
 class VocalAugmentationDataset(torch.utils.data.Dataset):

@@ -46,8 +46,8 @@ def setup_logger(name, logfile='LOGFILENAME.log', out_dir='logs'):
 
     return logger
 
-def train_epoch(dataloader, model, critic, device, optimizer, critic_optimizer, grad_scaler, critic_scaler, progress_bar, lr_warmup=None, lr_warmup_critic=None, lambda_l1=100, lambda_gen=2.0, lambda_critic=4.0, modeler_adversarial_start=1024):
-    model.train()
+def train_epoch(dataloader, modeler, critic, device, optimizer, critic_optimizer, grad_scaler, critic_scaler, progress_bar, lr_warmup=None, lr_warmup_critic=None, lambda_l1=100, lambda_gen=2.0, lambda_critic=4.0, modeler_adversarial_start=1024):
+    modeler.train()
 
     sum_mask_loss = 0
     sum_nxt_loss = 0
@@ -69,7 +69,7 @@ def train_epoch(dataloader, model, critic, device, optimizer, critic_optimizer, 
             is_next = is_next.unsqueeze(-1)
         
         with torch.cuda.amp.autocast_mode.autocast(enabled=grad_scaler is not None):
-            mask = model(src)
+            mask = modeler(src)
             real = critic(tgt)
             fake = critic(src * mask.detach())
             detection_truth = torch.zeros_like(fake)
@@ -106,10 +106,10 @@ def train_epoch(dataloader, model, critic, device, optimizer, critic_optimizer, 
 
             loss = token_loss * lambda_l1 + lambda_gen * fake_loss
 
-        model.zero_grad()
+        modeler.zero_grad()
         grad_scaler.scale(loss).backward()
         grad_scaler.unscale_(optimizer)
-        clip_grad_norm_(model.parameters(), 0.5)
+        clip_grad_norm_(modeler.parameters(), 0.5)
         grad_scaler.step(optimizer)
         grad_scaler.update()
 
