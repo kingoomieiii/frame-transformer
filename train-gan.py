@@ -70,17 +70,11 @@ def train_epoch(dataloader, modeler, critic, device, optimizer, critic_optimizer
         
         with torch.cuda.amp.autocast_mode.autocast(enabled=grad_scaler is not None):
             mask = modeler(src)
-            real = critic(tgt)
-            fake = critic(src * mask.detach())
-            detection_truth = torch.zeros_like(fake)
-    
-            for start in starts:
-                detection_truth[:, :, :, start:start+dataloader.dataset.token_size] = 1
-            detection_truth[:, -dataloader.dataset.next_frame_chunk_size-dataloader.dataset.separator_size:-dataloader.dataset.next_frame_chunk_size+dataloader.dataset.separator_size] = 0
-
-            fake_detection_loss = bce_crit(fake, detection_truth)
-            real_detection_loss = bce_crit(real, torch.zeros_like(real))
-            critic_loss = (real_detection_loss + fake_detection_loss) / 2
+            real = critic(torch.cat((src, tgt), dim=1))
+            fake = critic(torch.cat((src, src * mask.detach()), dim=1))
+            real_loss = bce_crit(real, torch.ones_like(real))
+            fake_loss = bce_crit(fake, torch.zeros_like(fake))
+            critic_loss = (real_loss + fake_loss) / 2
 
         critic.zero_grad()
         critic_scaler.scale(critic_loss).backward()
@@ -94,16 +88,9 @@ def train_epoch(dataloader, modeler, critic, device, optimizer, critic_optimizer
 
         with torch.cuda.amp.autocast_mode.autocast(enabled=grad_scaler is not None):
             token_loss = mask_crit(src * mask, tgt)
-            fake = critic(src * mask)
-
-            fake_loss = None
-            for start in starts:
-                segment = fake[:, :, :, start:start+dataloader.dataset.token_size]
-                l = bce_crit(segment, torch.zeros_like(segment))
-                fake_loss = fake_loss + l if fake_loss is not None else l
-
-            fake_loss = fake_loss / len(starts)
-            loss = token_loss * lambda_l1 + lambda_gen * (fake_loss / len(starts))
+            fake = critic(torch.cat((src, src * mask), dim=1))
+            fake_loss = bce_crit(fake, torch.ones_like(fake))
+            loss = token_loss * lambda_l1 + lambda_gen * fake_loss
 
         modeler.zero_grad()
         grad_scaler.scale(loss).backward()
@@ -302,13 +289,13 @@ def main():
         modeler = FrameTransformer(channels=args.channels, n_fft=args.n_fft, num_transformer_blocks=args.num_transformer_blocks, num_bands=args.num_bands, feedforward_dim=args.feedforward_dim, bias=args.bias, cropsize=args.cropsize + args.next_frame_chunk_size, dropout=args.dropout)
 
     if args.critic_type == 'conv':
-        critic = ConvDiscriminator(channels=args.channels, n_fft=args.n_fft, depth=args.depth)
+        critic = ConvDiscriminator(channels=args.channels*2, n_fft=args.n_fft, depth=args.depth)
     elif args.critic_type == 'primer':
-        critic = FramePrimerCritic(channels=args.channels, n_fft=args.n_fft, num_transformer_blocks=args.num_transformer_blocks, num_bands=args.num_bands, feedforward_dim=args.feedforward_dim, bias=args.bias, cropsize=args.cropsize + args.next_frame_chunk_size, dropout=args.dropout)
+        critic = FramePrimerCritic(channels=args.channels*2, n_fft=args.n_fft, num_transformer_blocks=args.num_transformer_blocks, num_bands=args.num_bands, feedforward_dim=args.feedforward_dim, bias=args.bias, cropsize=args.cropsize + args.next_frame_chunk_size, dropout=args.dropout)
     elif args.critic_type == 'unet':
-        critic = FrameTransformerUnetDiscriminator(channels=args.channels, n_fft=args.n_fft, depth=args.depth, num_transformer_blocks=args.num_transformer_blocks, num_bands=args.num_bands, feedforward_dim=args.feedforward_dim, bias=args.bias, cropsize=args.cropsize + args.next_frame_chunk_size)
+        critic = FrameTransformerUnetDiscriminator(channels=args.channels*2, n_fft=args.n_fft, depth=args.depth, num_transformer_blocks=args.num_transformer_blocks, num_bands=args.num_bands, feedforward_dim=args.feedforward_dim, bias=args.bias, cropsize=args.cropsize + args.next_frame_chunk_size)
     elif args.critic_type == 'vanilla':
-        critic = FrameTransformerCritic(channels=args.channels, n_fft=args.n_fft, num_transformer_blocks=args.num_transformer_blocks, num_bands=args.num_bands, feedforward_dim=args.feedforward_dim, bias=args.bias, cropsize=args.cropsize + args.next_frame_chunk_size, dropout=args.dropout)
+        critic = FrameTransformerCritic(channels=args.channels*2, n_fft=args.n_fft, num_transformer_blocks=args.num_transformer_blocks, num_bands=args.num_bands, feedforward_dim=args.feedforward_dim, bias=args.bias, cropsize=args.cropsize + args.next_frame_chunk_size, dropout=args.dropout)
 
     if args.pretrained_model is not None:
         modeler.load_state_dict(torch.load(args.pretrained_model, map_location=device))
