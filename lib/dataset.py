@@ -290,7 +290,7 @@ class MaskedPretrainingDataset(torch.utils.data.Dataset):
             num_tokens = (self.cropsize + self.next_frame_chunk_size) // token_size
                         
             X = np.clip(np.abs(X) / c, 0, 1)
-            Y = np.clip(np.abs(Y) / c, 0, 1)
+            Y = X.copy()
 
             for token in range(num_tokens):
                 if np.random.uniform() < self.mask_rate:
@@ -307,22 +307,6 @@ class MaskedPretrainingDataset(torch.utils.data.Dataset):
                             X[:, :, start:stop] = Y[:, :, start:stop]
                     else:
                         starts.append(start)
-
-            if len(starts) == 0:
-                start = np.random.randint(0, self.cropsize + self.next_frame_chunk_size - self.token_size - 1)
-                stop = start + token_size
-                starts.append(start)
-        
-                X[:, :, start:stop] = 1.0
-
-                if np.random.uniform() < 0.1:
-                    if np.random.uniform() < 0.5:
-                        X[:, :, start:stop] = np.maximum(Y[:, :, start:stop], noise[:, :, start:stop])
-
-            separator_token = np.ones(X.shape)
-            separator_token[:, 1::2, :] = 0
-            X[:, :, -self.next_frame_chunk_size-self.separator_size:-self.next_frame_chunk_size+self.separator_size] = separator_token[:, :, -self.next_frame_chunk_size-self.separator_size:-self.next_frame_chunk_size+self.separator_size]
-            Y[:, :, -self.next_frame_chunk_size-self.separator_size:-self.next_frame_chunk_size+self.separator_size] = separator_token[:, :, -self.next_frame_chunk_size-self.separator_size:-self.next_frame_chunk_size+self.separator_size]
 
         return X, Y, is_next, starts
 

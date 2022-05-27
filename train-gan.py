@@ -103,8 +103,7 @@ def train_epoch(dataloader, modeler, critic, device, optimizer, critic_optimizer
                 fake_loss = fake_loss + l if fake_loss is not None else l
 
             fake_loss = fake_loss / len(starts)
-
-            loss = token_loss * lambda_l1 + lambda_gen * fake_loss
+            loss = token_loss * lambda_l1 + lambda_gen * (fake_loss / len(starts))
 
         modeler.zero_grad()
         grad_scaler.scale(loss).backward()
@@ -123,10 +122,10 @@ def train_epoch(dataloader, modeler, critic, device, optimizer, critic_optimizer
         sum_critic_loss += critic_loss.item() * len(src)
         sum_gen_loss += loss.item() * len(src)
 
-    return sum_mask_loss / len(dataloader.dataset), sum_nxt_loss / len(dataloader.dataset), sum_gen_loss / len(dataloader.dataset), sum_critic_loss / len(dataloader.dataset)
+    return sum_mask_loss / len(dataloader.dataset), sum_gen_loss / len(dataloader.dataset), sum_critic_loss / len(dataloader.dataset)
 
-def validate_epoch(dataloader, model, device, grad_scaler):
-    model.eval()
+def validate_epoch(dataloader, modeler, device, grad_scaler):
+    modeler.eval()
 
     sum_mask_loss = 0
     sum_nxt_loss = 0
@@ -140,7 +139,7 @@ def validate_epoch(dataloader, model, device, grad_scaler):
             is_next = is_next.to(device)
 
             with torch.cuda.amp.autocast_mode.autocast(enabled=grad_scaler is not None):
-                pred, _ = model(src)
+                pred = modeler(src)
  
             mask_loss = mask_crit(src * pred, tgt)
             loss = mask_loss
@@ -151,7 +150,7 @@ def validate_epoch(dataloader, model, device, grad_scaler):
             else:
                 sum_mask_loss += mask_loss.item() * len(src)
 
-    return sum_mask_loss / len(dataloader.dataset), sum_nxt_loss / len(dataloader.dataset)
+    return sum_mask_loss / len(dataloader.dataset)
 
 def main():
     p = argparse.ArgumentParser()
@@ -208,9 +207,9 @@ def main():
     p.add_argument('--save_all', type=str, default='true')
     p.add_argument('--model_dir', type=str, default='G://')
     p.add_argument('--debug', action='store_true')
-    p.add_argument('--dropout', type=float, default=0.3)
-    p.add_argument('--token_size', type=int, default=16)
-    p.add_argument('--mask_rate', type=float, default=0.2)
+    p.add_argument('--dropout', type=float, default=0.1)
+    p.add_argument('--token_size', type=int, default=32)
+    p.add_argument('--mask_rate', type=float, default=0.25)
     p.add_argument('--next_frame_chunk_size', type=int, default=512)
     p.add_argument('--prefetch_factor', type=int, default=2)
     args = p.parse_args()
