@@ -308,6 +308,17 @@ class MaskedPretrainingDataset(torch.utils.data.Dataset):
                     else:
                         starts.append(start)
 
+            if len(starts) == 0:
+                token = np.random.randint(0, num_tokens)
+                start = token * token_size
+                stop = start + token_size                    
+                starts.append(start)
+        
+                X[:, :, start:stop] = 1.0
+
+                if np.random.uniform() < 0.1:
+                    X[:, :, start:stop] = np.maximum(Y[:, :, start:stop], noise[:, :, start:stop])
+
         return X, Y, is_next, starts
 
 class VocalAugmentationDataset(torch.utils.data.Dataset):

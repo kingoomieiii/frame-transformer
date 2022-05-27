@@ -209,7 +209,7 @@ def main():
     p.add_argument('--debug', action='store_true')
     p.add_argument('--dropout', type=float, default=0.1)
     p.add_argument('--token_size', type=int, default=32)
-    p.add_argument('--mask_rate', type=float, default=0.25)
+    p.add_argument('--mask_rate', type=float, default=0.3)
     p.add_argument('--next_frame_chunk_size', type=int, default=512)
     p.add_argument('--prefetch_factor', type=int, default=2)
     args = p.parse_args()
