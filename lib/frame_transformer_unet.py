@@ -28,9 +28,7 @@ class FrameTransformerUnet(nn.Module):
         self.decoder = nn.ModuleList(self.decoder[::-1])
         self.transformer_decoder = nn.ModuleList(self.transformer_decoder[::-1])
 
-        self.is_next = nn.Sequential(
-            nn.Linear(channels * (i + 2) + num_transformer_blocks, 2, bias=bias),
-            nn.LogSoftmax(dim=-1))
+        self.is_next = nn.Linear(channels * (i + 2) + num_transformer_blocks, 2, bias=bias)
 
     def forward(self, x):
         x = x[:, :, :self.max_bin]
@@ -44,7 +42,7 @@ class FrameTransformerUnet(nn.Module):
 
             skips.append(x)
 
-        is_next = F.adaptive_avg_pool2d(self.is_next(x.transpose(1,3)).transpose(1,3), (1,1)).squeeze(-1).squeeze(-1) if self.pretraining else None
+        #is_next = F.adaptive_avg_pool2d(self.is_next(x.transpose(1,3)).transpose(1,3), (1,1)).squeeze(-1).squeeze(-1) if self.pretraining else None
 
         skips = skips[::-1]
         for i, decoder in enumerate(self.decoder):
@@ -57,4 +55,4 @@ class FrameTransformerUnet(nn.Module):
             input=torch.sigmoid(x),
             pad=(0, 0, 0, self.output_bin - self.max_bin),
             mode='replicate'
-        ), is_next
+        )

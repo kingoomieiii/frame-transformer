@@ -15,6 +15,7 @@ from torch.nn.utils import clip_grad_norm_
 from lib import dataset
 from lib import spec_utils
 from tqdm import tqdm
+from lib.frame_primer import FramePrimer, FramePrimerCritic
 
 from lib.frame_transformer import FrameTransformer, FrameTransformerCritic
 
@@ -45,7 +46,7 @@ def setup_logger(name, logfile='LOGFILENAME.log', out_dir='logs'):
 
     return logger
 
-def train_epoch(dataloader, model, critic, device, optimizer, critic_optimizer, grad_scaler, critic_scaler, progress_bar, lr_warmup=None, lr_warmup_critic=None, lambda_l1=100, lambda_gen=2.0, lambda_critic=4.0):
+def train_epoch(dataloader, model, critic, device, optimizer, critic_optimizer, grad_scaler, critic_scaler, progress_bar, lr_warmup=None, lr_warmup_critic=None, lambda_l1=100, lambda_gen=2.0, lambda_critic=4.0, modeler_adversarial_start=1024):
     model.train()
 
     sum_mask_loss = 0
@@ -70,16 +71,16 @@ def train_epoch(dataloader, model, critic, device, optimizer, critic_optimizer, 
         with torch.cuda.amp.autocast_mode.autocast(enabled=grad_scaler is not None):
             mask = model(src)
             real = critic(tgt)
-            fake = critic(src * mask.detach())
+            fake = critic(src * mask)
+            detection_truth = torch.zeros_like(fake)
     
-            fake_segments = torch.ones_like(fake)
             for start in starts:
-                fake_segments[:, start:start+dataloader.dataset.token_size] = 0
-            fake_segments[:, -dataloader.dataset.next_frame_chunk_size-dataloader.dataset.separator_size:-dataloader.dataset.next_frame_chunk_size+dataloader.dataset.separator_size] = 1
+                detection_truth[:, :, :, start:start+dataloader.dataset.token_size] = 1
+            detection_truth[:, -dataloader.dataset.next_frame_chunk_size-dataloader.dataset.separator_size:-dataloader.dataset.next_frame_chunk_size+dataloader.dataset.separator_size] = 0
 
-            full_fake_detection_loss = bce_crit(fake, fake_segments)
-            real_detection_loss = bce_crit(real, torch.ones_like(real))
-            critic_loss = real_detection_loss + full_fake_detection_loss
+            fake_detection_loss = bce_crit(fake, detection_truth)
+            real_detection_loss = bce_crit(real, torch.zeros_like(real))
+            critic_loss = (real_detection_loss + fake_detection_loss) / 2
 
         critic.zero_grad()
         critic_scaler.scale(critic_loss).backward()
@@ -92,10 +93,19 @@ def train_epoch(dataloader, model, critic, device, optimizer, critic_optimizer, 
             lr_warmup_critic.step()
 
         with torch.cuda.amp.autocast_mode.autocast(enabled=grad_scaler is not None):
-            fake = critic(src * mask)
-            fake_loss = bce_crit(fake, torch.ones_like(fake))
+            mask = model(src)
             token_loss = mask_crit(src * mask, tgt)
-            loss = lambda_gen * fake_loss + token_loss * lambda_l1
+            fake = critic(src * mask)
+
+            fake_loss = None
+            for start in starts:
+                segment = fake[:, :, :, start:start+dataloader.dataset.token_size]
+                l = bce_crit(segment, torch.zeros_like(segment))
+                fake_loss = fake_loss + l if fake_loss is not None else l
+
+            fake_loss = fake_loss / len(starts)
+
+            loss = token_loss * lambda_l1 + lambda_gen * fake_loss
 
         model.zero_grad()
         grad_scaler.scale(loss).backward()
@@ -108,7 +118,7 @@ def train_epoch(dataloader, model, critic, device, optimizer, critic_optimizer, 
             lr_warmup.step()
 
         if progress_bar:
-            pbar.set_description(f'{str(token_loss.item())}|{str(fake_loss.item() if fake_loss is not None else 0)}|{str(critic_loss.item())}')
+            pbar.set_description(f'{str(token_loss.item())}|{str(fake_loss.item())}|{str(critic_loss.item())}')
 
         sum_mask_loss += token_loss.item() * len(src)
         sum_critic_loss += critic_loss.item() * len(src)
@@ -147,8 +157,8 @@ def validate_epoch(dataloader, model, device, grad_scaler):
 def main():
     p = argparse.ArgumentParser()
     p.add_argument('--id', type=str, default='')
-    p.add_argument('--gen_type', type=str.lower, choices=['unet', 'vanilla'])
-    p.add_argument('--critic_type', type=str.lower, choices=['conv', 'unet', 'vanilla'])
+    p.add_argument('--gen_type', type=str.lower, choices=['primer', 'unet', 'vanilla'])
+    p.add_argument('--critic_type', type=str.lower, choices=['primer', 'conv', 'unet', 'vanilla'])
     p.add_argument('--curr_warmup_epoch', type=int, default=0)
     p.add_argument('--warmup_epoch', type=int, default=1)
     p.add_argument('--epoch', '-E', type=int, default=30)
@@ -174,7 +184,7 @@ def main():
     p.add_argument('--split_mode', '-S', type=str, choices=['random', 'subdirs'], default='random')
     p.add_argument('--learning_rate', '-l', type=float, default=1e-4)
     p.add_argument('--weight_decay', type=float, default=1e-2)
-    p.add_argument('--optimizer', type=str.lower, choices=['adam', 'adamw'], default='adamw')
+    p.add_argument('--optimizer', type=str.lower, choices=['adam', 'adamw', 'rmsprop'], default='adamw')
     p.add_argument('--lr_scheduler_decay_target', type=int, default=1e-8)
     p.add_argument('--lr_scheduler_decay_power', type=float, default=1.0)
     p.add_argument('--lr_scheduler_current_step', type=int, default=0)
@@ -287,68 +297,79 @@ def main():
     device = torch.device('cpu')
 
     if args.gen_type == 'unet':
-        model = FrameTransformerUnet(channels=args.channels, n_fft=args.n_fft, depth=args.depth, num_transformer_blocks=args.num_transformer_blocks ,num_bands=args.num_bands, feedforward_dim=args.feedforward_dim, bias=args.bias, cropsize=args.cropsize + args.next_frame_chunk_size)
+        modeler = FrameTransformerUnet(channels=args.channels, n_fft=args.n_fft, depth=args.depth, num_transformer_blocks=args.num_transformer_blocks, num_bands=args.num_bands, feedforward_dim=args.feedforward_dim, bias=args.bias, cropsize=args.cropsize + args.next_frame_chunk_size)
+    elif args.gen_type == 'primer':
+        modeler = FramePrimer(channels=args.channels, n_fft=args.n_fft, num_transformer_blocks=args.num_transformer_blocks, num_bands=args.num_bands, feedforward_dim=args.feedforward_dim, bias=args.bias, cropsize=args.cropsize + args.next_frame_chunk_size, dropout=args.dropout)
     else:
-        model = FrameTransformer(channels=args.channels, n_fft=args.n_fft, num_transformer_blocks=args.num_transformer_blocks, num_bands=args.num_bands, feedforward_dim=args.feedforward_dim, bias=args.bias, cropsize=args.cropsize + args.next_frame_chunk_size, dropout=args.dropout)
+        modeler = FrameTransformer(channels=args.channels, n_fft=args.n_fft, num_transformer_blocks=args.num_transformer_blocks, num_bands=args.num_bands, feedforward_dim=args.feedforward_dim, bias=args.bias, cropsize=args.cropsize + args.next_frame_chunk_size, dropout=args.dropout)
 
     if args.critic_type == 'conv':
-        critic = ConvDiscriminator(channels=args.channels*2, n_fft=args.n_fft, depth=args.depth)
+        critic = ConvDiscriminator(channels=args.channels, n_fft=args.n_fft, depth=args.depth)
+    elif args.critic_type == 'primer':
+        critic = FramePrimerCritic(channels=args.channels, n_fft=args.n_fft, num_transformer_blocks=args.num_transformer_blocks, num_bands=args.num_bands, feedforward_dim=args.feedforward_dim, bias=args.bias, cropsize=args.cropsize + args.next_frame_chunk_size, dropout=args.dropout)
     elif args.critic_type == 'unet':
-        critic = FrameTransformerUnetDiscriminator(channels=args.channels*2, n_fft=args.n_fft, depth=args.depth, num_transformer_blocks=args.num_transformer_blocks, num_bands=args.num_bands, feedforward_dim=args.feedforward_dim, bias=args.bias, cropsize=args.cropsize + args.next_frame_chunk_size)
+        critic = FrameTransformerUnetDiscriminator(channels=args.channels, n_fft=args.n_fft, depth=args.depth, num_transformer_blocks=args.num_transformer_blocks, num_bands=args.num_bands, feedforward_dim=args.feedforward_dim, bias=args.bias, cropsize=args.cropsize + args.next_frame_chunk_size)
     elif args.critic_type == 'vanilla':
         critic = FrameTransformerCritic(channels=args.channels, n_fft=args.n_fft, num_transformer_blocks=args.num_transformer_blocks, num_bands=args.num_bands, feedforward_dim=args.feedforward_dim, bias=args.bias, cropsize=args.cropsize + args.next_frame_chunk_size, dropout=args.dropout)
 
     if args.pretrained_model is not None:
-        model.load_state_dict(torch.load(args.pretrained_model, map_location=device))
+        modeler.load_state_dict(torch.load(args.pretrained_model, map_location=device))
     if args.pretrained_critic is not None:
         critic.load_state_dict(torch.load(args.pretrained_critic, map_location=device))
     if torch.cuda.is_available() and args.gpu >= 0:
         device = torch.device('cuda:{}'.format(args.gpu))
-        model.to(device)
+        modeler.to(device)
         critic.to(device)
     
     grad_scaler = torch.cuda.amp.grad_scaler.GradScaler() if args.mixed_precision else None
     critic_scaler = torch.cuda.amp.grad_scaler.GradScaler() if args.mixed_precision else None
     
-    model_parameters = filter(lambda p: p.requires_grad, model.parameters())
+    model_parameters = filter(lambda p: p.requires_grad, modeler.parameters())
     params = sum([np.prod(p.size()) for p in model_parameters])
     print(f'# num params: {params}')
     
     if args.optimizer == 'adam':
         optimizer = torch.optim.Adam(
-            filter(lambda p: p.requires_grad, model.parameters()),
+            filter(lambda p: p.requires_grad, modeler.parameters()),
             lr=args.learning_rate,
             amsgrad=args.amsgrad,
-            weight_decay=args.weight_decay
+            weight_decay=args.weight_decay,
+            betas=(0.5, 0.999)
         )
 
         critic_optimizer = torch.optim.Adam(
             filter(lambda p: p.requires_grad, critic.parameters()),
             lr=args.learning_rate,
             amsgrad=args.amsgrad,
-            weight_decay=args.weight_decay
+            weight_decay=args.weight_decay,
+            betas=(0.5, 0.999)
         )
+    elif args.optimizer == 'rmsprop':
+        optimizer = torch.optim.RMSprop(filter(lambda p: p.requires_grad, modeler.parameters()), lr=args.learning_rate, weight_decay=args.weight_decay)
+        critic_optimizer = torch.optim.RMSprop(filter(lambda p: p.requires_grad, modeler.parameters()), lr=args.learning_rate, weight_decay=args.weight_decay)
     else:
         optimizer = torch.optim.AdamW(
-            filter(lambda p: p.requires_grad, model.parameters()),
+            filter(lambda p: p.requires_grad, modeler.parameters()),
             lr=args.learning_rate,
             amsgrad=args.amsgrad,
-            weight_decay=args.weight_decay
+            weight_decay=args.weight_decay,
+            betas=(0.5, 0.999)
         )
 
         critic_optimizer = torch.optim.AdamW(
             filter(lambda p: p.requires_grad, critic.parameters()),
             lr=args.learning_rate,
             amsgrad=args.amsgrad,
-            weight_decay=args.weight_decay
+            weight_decay=args.weight_decay,
+            betas=(0.5, 0.999)
         )
 
-    steps = len(train_dataset) // (args.batchsize * args.accumulation_steps)
+    steps = len(train_dataset) // args.batchsize
     warmup_steps = steps * args.warmup_epoch
     decay_steps = steps * args.epoch + warmup_steps
     token_steps = steps * args.token_warmup_epoch
 
-    scheduler = torch.optim.lr_scheduler.ChainedScheduler([
+    modeler_scheduler = torch.optim.lr_scheduler.ChainedScheduler([
         LinearWarmupScheduler(optimizer, target_lr=args.learning_rate, num_steps=warmup_steps, current_step=(steps * args.curr_warmup_epoch)),
         PolynomialDecayScheduler(optimizer, target=args.lr_scheduler_decay_target, power=args.lr_scheduler_decay_power, num_decay_steps=decay_steps, start_step=warmup_steps, current_step=(steps * args.curr_warmup_epoch))
     ])
@@ -366,18 +387,18 @@ def main():
         train_dataset.rebuild()
 
         logger.info('# epoch {}'.format(epoch))
-        train_loss_mask, gen_loss, critic_loss = train_epoch(train_dataloader, model, critic, device, optimizer, critic_optimizer, grad_scaler, critic_scaler, args.progress_bar, lr_warmup=scheduler, lr_warmup_critic=critic_scheduler, lambda_l1=args.lambda_l1, lambda_gen=args.lambda_gen, lambda_critic=args.lambda_critic)
+        train_loss_mask, modeler_loss, critic_loss = train_epoch(train_dataloader, modeler, critic, device, optimizer, critic_optimizer, grad_scaler, critic_scaler, args.progress_bar, lr_warmup=modeler_scheduler, lr_warmup_critic=critic_scheduler, lambda_l1=args.lambda_l1, lambda_gen=args.lambda_gen, lambda_critic=args.lambda_critic)
 
-        val_loss_mask1 = validate_epoch(val_dataloader, model, device, grad_scaler)
-        val_loss_mask2 = validate_epoch(val_dataloader, model, device, grad_scaler)
-        val_loss_mask3 = validate_epoch(val_dataloader, model, device, grad_scaler)
-        val_loss_mask4 = validate_epoch(val_dataloader, model, device, grad_scaler)
+        val_loss_mask1 = validate_epoch(val_dataloader, modeler, device, grad_scaler)
+        val_loss_mask2 = validate_epoch(val_dataloader, modeler, device, grad_scaler)
+        val_loss_mask3 = validate_epoch(val_dataloader, modeler, device, grad_scaler)
+        val_loss_mask4 = validate_epoch(val_dataloader, modeler, device, grad_scaler)
 
         val_loss_mask = (val_loss_mask1 + val_loss_mask2 + val_loss_mask3 + val_loss_mask4) / 4
 
         logger.info(
-            '  * training loss mask = {:.6f}, train loss gen = {:6f}, train loss critic = {:6f}'
-            .format(train_loss_mask, gen_loss, critic_loss)
+            '  * training loss mask = {:.6f}, train loss modeler = {:6f}, train loss critic = {:6f}'
+            .format(train_loss_mask, modeler_loss, critic_loss)
         )
 
         logger.info(
@@ -405,12 +426,12 @@ def main():
                 best_loss = val_loss_mask
                 logger.info('  * best validation loss')
 
-            model_path = f'{args.model_dir}models/model_iter{epoch}.gen.pth'
+            model_path = f'{args.model_dir}models/model_iter{epoch}.modeler.pth'
             critic_path = f'{args.model_dir}models/model_iter{epoch}.critic.pth'
-            torch.save(model.state_dict(), model_path)
+            torch.save(modeler.state_dict(), model_path)
             torch.save(critic.state_dict(), critic_path)
 
-        log.append([train_loss_mask, train_loss_nxt, val_loss_mask, val_loss_nxt])
+        log.append([train_loss_mask, val_loss_mask])
         with open('loss_{}.json'.format(timestamp), 'w', encoding='utf8') as f:
             json.dump(log, f, ensure_ascii=False)
 
