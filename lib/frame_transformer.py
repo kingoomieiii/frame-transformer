@@ -47,7 +47,6 @@ class FrameTransformerCritic(nn.Module):
         self.encoder = nn.ModuleList([FrameTransformerEncoder(channels + i, bins=self.max_bin, num_bands=num_bands, cropsize=cropsize, feedforward_dim=feedforward_dim, bias=bias, dropout=dropout) for i in range(num_transformer_blocks)])
 
         self.out_channels = nn.Linear(channels + num_transformer_blocks, 1)
-        self.out = nn.Linear(self.max_bin, 1, bias=bias)
 
         self.activate = out_activate if out_activate is not None else nn.Identity()
 
@@ -58,4 +57,4 @@ class FrameTransformerCritic(nn.Module):
             h = module(x)
             x = torch.cat((x, h), dim=1)
 
-        return self.out(self.out_channels(x.transpose(1,3)).transpose(2,3)).squeeze(-1).squeeze(-1)
+        return torch.mean(self.out_channels(x.transpose(1,3)).transpose(1,3), dim=2, keepdim=True)
