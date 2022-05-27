@@ -71,7 +71,7 @@ def train_epoch(dataloader, model, critic, device, optimizer, critic_optimizer, 
         with torch.cuda.amp.autocast_mode.autocast(enabled=grad_scaler is not None):
             mask = model(src)
             real = critic(tgt)
-            fake = critic(src * mask)
+            fake = critic(src * mask.detach())
             detection_truth = torch.zeros_like(fake)
     
             for start in starts:
@@ -93,7 +93,6 @@ def train_epoch(dataloader, model, critic, device, optimizer, critic_optimizer, 
             lr_warmup_critic.step()
 
         with torch.cuda.amp.autocast_mode.autocast(enabled=grad_scaler is not None):
-            mask = model(src)
             token_loss = mask_crit(src * mask, tgt)
             fake = critic(src * mask)
 
@@ -183,8 +182,8 @@ def main():
     p.add_argument('--dataset', '-d', required=False)
     p.add_argument('--split_mode', '-S', type=str, choices=['random', 'subdirs'], default='random')
     p.add_argument('--learning_rate', '-l', type=float, default=1e-4)
-    p.add_argument('--weight_decay', type=float, default=1e-2)
-    p.add_argument('--optimizer', type=str.lower, choices=['adam', 'adamw', 'rmsprop'], default='adamw')
+    p.add_argument('--weight_decay', type=float, default=0)
+    p.add_argument('--optimizer', type=str.lower, choices=['adam', 'adamw', 'rmsprop'], default='adam')
     p.add_argument('--lr_scheduler_decay_target', type=int, default=1e-8)
     p.add_argument('--lr_scheduler_decay_power', type=float, default=1.0)
     p.add_argument('--lr_scheduler_current_step', type=int, default=0)
