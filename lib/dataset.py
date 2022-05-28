@@ -319,7 +319,13 @@ class MaskedPretrainingDataset(torch.utils.data.Dataset):
                 if np.random.uniform() < 0.1:
                     X[:, :, start:stop] = np.maximum(Y[:, :, start:stop], noise[:, :, start:stop])
 
-        return X, Y, is_next, starts
+        index_count = len(starts)
+        indices = np.pad(np.array(starts), (0, num_tokens - len(starts)))
+
+        assert not np.any(np.isnan(X))
+        assert not np.any(np.isnan(Y))
+
+        return X, Y, index_count, indices
 
 class VocalAugmentationDataset(torch.utils.data.Dataset):
     def __init__(self, path, extra_path=None, pair_path=None, vocal_path="", is_validation=False, mul=1, downsamples=0, epoch_size=None, pair_mul=1, slide=True, cropsize=256, mixup_rate=0, mixup_alpha=1, include_phase=False, force_voxaug=False):

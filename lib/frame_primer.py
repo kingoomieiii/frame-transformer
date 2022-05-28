@@ -3,7 +3,7 @@ from torch import log_softmax, nn
 import torch.nn.functional as F
 import math
 
-from lib.frame_transformer_common import MultibandFrameAttention
+from lib.frame_transformer_common import FrameNorm, MultibandFrameAttention
 
 class FramePrimer(nn.Module):
     def __init__(self, channels=2, n_fft=2048, feedforward_dim=512, num_bands=4, num_transformer_blocks=1, cropsize=1024, bias=False, out_activate=nn.Sigmoid(), dropout=0.1, pretraining=True):
@@ -21,8 +21,6 @@ class FramePrimer(nn.Module):
         self.is_next_bins = nn.Linear(self.max_bin, 1)
         self.is_next_frames = nn.Linear(self.cropsize, 1)
         
-        self.activate = out_activate if out_activate is not None else nn.Identity()
-
     def __call__(self, x):
         x = x[:, :, :self.max_bin]
 
@@ -31,14 +29,14 @@ class FramePrimer(nn.Module):
             x = torch.cat((x, h), dim=1)
 
         return F.pad(
-            input=self.activate(self.out(x.transpose(1,3)).transpose(1,3)),
+            input=torch.sigmoid_(self.out(x.transpose(1,3)).transpose(1,3)),
             pad=(0, 0, 0, self.output_bin - self.max_bin),
             mode='replicate'
         )
 
-class FramePrimerCritic(nn.Module):
+class FramePrimerDiscriminator(nn.Module):
     def __init__(self, channels=2, n_fft=2048, feedforward_dim=512, num_bands=4, num_transformer_blocks=1, cropsize=1024, bias=False, out_activate=nn.Sigmoid(), dropout=0.1, pretraining=True):
-        super(FramePrimerCritic, self).__init__()
+        super(FramePrimerDiscriminator, self).__init__()
         
         self.pretraining = pretraining
         self.max_bin = n_fft // 2
@@ -70,8 +68,8 @@ class FramePrimerEncoder(nn.Module):
         self.cropsize = cropsize
         self.num_bands = num_bands
 
+        self.in_norm = nn.LayerNorm(bins)
         self.in_project = nn.Linear(channels, 1, bias=bias)
-        self.relu = nn.ReLU(inplace=True)
 
         self.norm1 = nn.LayerNorm(bins)
         self.attn = MultibandFrameAttention(num_bands, bins, cropsize, bias=bias)
@@ -81,14 +79,15 @@ class FramePrimerEncoder(nn.Module):
         self.linear2 = nn.Linear(feedforward_dim, bins)
 
     def __call__(self, x):
+        x = self.in_norm(x.transpose(2,3)).transpose(2,3)
         x = self.in_project(x.transpose(1,3)).squeeze(-1)
 
         h = self.norm1(x)
         h = self.attn(h)
         x = x + h
-
+        
         h = self.norm2(x)
-        h = self.linear2(torch.square(self.relu(self.linear1(h))))
+        h = self.linear2(torch.square(torch.relu_(self.linear1(h))))
         x = x + h
 
         return x.transpose(1,2).unsqueeze(1)
