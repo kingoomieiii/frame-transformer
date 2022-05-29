@@ -68,8 +68,8 @@ def train_epoch(dataloader, generator, discriminator, device, generator_optimize
         
         with torch.cuda.amp.autocast_mode.autocast(enabled=mixed_precision):
             mask = generator(src)
-            real = discriminator(tgt)
-            fake = discriminator(src * mask.detach())
+            real = discriminator(torch.cat((src, tgt), dim=1))
+            fake = discriminator(torch.cat((src, src * mask.detach()), dim=1))
 
             real_loss = None
             fake_loss = None
@@ -111,7 +111,7 @@ def train_epoch(dataloader, generator, discriminator, device, generator_optimize
 
         with torch.cuda.amp.autocast_mode.autocast(enabled=mixed_precision):
             token_loss = mask_crit(src * mask, tgt)
-            fake = discriminator(src * mask)
+            fake = discriminator(torch.cat((src, src * mask), dim=1))
 
             fake_loss = None
             for n in range(src.shape[0]):
@@ -146,7 +146,7 @@ def train_epoch(dataloader, generator, discriminator, device, generator_optimize
         discriminator_loss = discriminator_loss.item()
 
         if progress_bar:
-            pbar.set_description(f'{str(token_loss * len(src))}|{str(fake_loss * len(src))}|{str(discriminator_loss * len(src))}')
+            pbar.set_description(f'{str(token_loss)}|{str(fake_loss)}|{str(discriminator_loss)}')
 
         sum_mask_loss += token_loss * len(src)
         sum_critic_loss += discriminator_loss * len(src)
@@ -163,7 +163,7 @@ def validate_epoch(dataloader, generator, device, grad_scaler):
     mask_crit = nn.L1Loss()
 
     with torch.no_grad():
-        for src, tgt, _, _ in tqdm(dataloader):
+        for src, tgt in tqdm(dataloader):
             src = src.to(device)
             tgt = tgt.to(device)
 
@@ -187,8 +187,8 @@ def main():
     p.add_argument('--generator_type', type=str.lower, choices=['primer', 'unet', 'vanilla'])
     p.add_argument('--discriminator_type', type=str.lower, choices=['primer', 'conv', 'unet', 'vanilla'])
     p.add_argument('--curr_warmup_epoch', type=int, default=0)
-    p.add_argument('--warmup_epoch', type=int, default=1)
-    p.add_argument('--epoch', '-E', type=int, default=30)
+    p.add_argument('--warmup_epoch', type=int, default=0)
+    p.add_argument('--epoch', '-E', type=int, default=3000)
     p.add_argument('--lambda_l1', type=float, default=100)
     p.add_argument('--lambda_gen', type=float, default=1.0)
     p.add_argument('--lambda_critic', type=float, default=1.0)
@@ -236,12 +236,15 @@ def main():
     p.add_argument('--save_all', type=str, default='true')
     p.add_argument('--model_dir', type=str, default='G://')
     p.add_argument('--debug', action='store_true')
-    p.add_argument('--dropout', type=float, default=0.1)
-    p.add_argument('--token_size', type=int, default=16)
-    p.add_argument('--mask_rate', type=float, default=0.15)
+    p.add_argument('--dropout', type=float, default=0.25)
+    p.add_argument('--token_size', type=int, default=32)
+    p.add_argument('--mask_rate', type=float, default=0.2)
     p.add_argument('--next_frame_chunk_size', type=int, default=512)
-    p.add_argument('--prefetch_factor', type=int, default=12)
+    p.add_argument('--prefetch_factor', type=int, default=4)
     args = p.parse_args()
+
+    
+    torch.set_printoptions(threshold=1024*1024)
 
     args.amsgrad = str.lower(args.amsgrad) == 'true'
     args.progress_bar = str.lower(args.progress_bar) == 'true'
@@ -282,8 +285,7 @@ def main():
         batch_size=args.batchsize,
         shuffle=True,
         num_workers=args.num_workers,
-        prefetch_factor=args.prefetch_factor,
-        persistent_workers=True
+        prefetch_factor=args.prefetch_factor
     )
     
     val_dataset = dataset.MaskedPretrainingDataset(
@@ -332,13 +334,13 @@ def main():
         generator = FrameTransformer(channels=args.channels, n_fft=args.n_fft, num_transformer_blocks=args.num_transformer_blocks, num_bands=args.num_bands, feedforward_dim=args.feedforward_dim, bias=args.bias, cropsize=args.cropsize + args.next_frame_chunk_size, dropout=args.dropout)
 
     if args.discriminator_type == 'conv':
-        discriminator = ConvDiscriminator(channels=args.channels, n_fft=args.n_fft, depth=args.depth)
+        discriminator = ConvDiscriminator(channels=args.channels*2, n_fft=args.n_fft, depth=args.depth)
     elif args.discriminator_type == 'primer':
-        discriminator = FramePrimerDiscriminator(channels=args.channels, n_fft=args.n_fft, num_transformer_blocks=args.num_transformer_blocks, num_bands=args.num_bands, feedforward_dim=args.feedforward_dim, bias=args.bias, cropsize=args.cropsize + args.next_frame_chunk_size, dropout=args.dropout)
+        discriminator = FramePrimerDiscriminator(channels=args.channels*2, n_fft=args.n_fft, num_transformer_blocks=args.num_transformer_blocks, num_bands=args.num_bands, feedforward_dim=args.feedforward_dim, bias=args.bias, cropsize=args.cropsize + args.next_frame_chunk_size, dropout=args.dropout)
     elif args.discriminator_type == 'unet':
-        discriminator = FrameTransformerUnetDiscriminator(channels=args.channels, n_fft=args.n_fft, depth=args.depth, num_transformer_blocks=args.num_transformer_blocks, num_bands=args.num_bands, feedforward_dim=args.feedforward_dim, bias=args.bias, cropsize=args.cropsize + args.next_frame_chunk_size)
+        discriminator = FrameTransformerUnetDiscriminator(channels=args.channels*2, n_fft=args.n_fft, depth=args.depth, num_transformer_blocks=args.num_transformer_blocks, num_bands=args.num_bands, feedforward_dim=args.feedforward_dim, bias=args.bias, cropsize=args.cropsize + args.next_frame_chunk_size)
     elif args.discriminator_type == 'vanilla':
-        discriminator = FrameTransformerDiscriminator(channels=args.channels, n_fft=args.n_fft, num_transformer_blocks=args.num_transformer_blocks, num_bands=args.num_bands, feedforward_dim=args.feedforward_dim, bias=args.bias, cropsize=args.cropsize + args.next_frame_chunk_size, dropout=args.dropout)
+        discriminator = FrameTransformerDiscriminator(channels=args.channels*2, n_fft=args.n_fft, num_transformer_blocks=args.num_transformer_blocks, num_bands=args.num_bands, feedforward_dim=args.feedforward_dim, bias=args.bias, cropsize=args.cropsize + args.next_frame_chunk_size, dropout=args.dropout)
 
     if args.pretrained_model is not None:
         generator.load_state_dict(torch.load(args.pretrained_model, map_location=device))
@@ -392,7 +394,7 @@ def main():
             betas=(0.5, 0.999)
         )
 
-    steps = len(train_dataset) // (args.batchsize * args.accumulation_steps)
+    steps = len(train_dataset) // (args.batchsize)
     warmup_steps = steps * args.warmup_epoch
     decay_steps = steps * args.epoch + warmup_steps
     token_steps = steps * args.token_warmup_epoch

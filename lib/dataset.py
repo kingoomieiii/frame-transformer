@@ -323,7 +323,9 @@ class MaskedPretrainingDataset(torch.utils.data.Dataset):
         indices = np.pad(np.array(starts), (0, num_tokens - len(starts)))
 
         assert not np.any(np.isnan(X))
+        assert not np.any(np.isinf(X))
         assert not np.any(np.isnan(Y))
+        assert not np.any(np.isinf(Y))
 
         return X, Y, index_count, indices
 
