@@ -8,6 +8,7 @@ import numpy as np
 import torch
 import torch.utils.data
 from tqdm import tqdm
+import librosa
 
 try:
     from lib import spec_utils
@@ -791,36 +792,65 @@ def make_dataset(filelist, cropsize, sr, hop_length, n_fft, offset=0, is_validat
                         Y=Y_pad[:, :, start:start + cropsize],
                         c=coef.item())
 
-def make_vocals_dataset(filelist, cropsize, sr, hop_length, n_fft, offset=0, is_validation=False, suffix='', root=''):
+def make_mix_dataset(filelist, cropsize, sr, hop_length, n_fft, offset=0, is_validation=False, root='', max_samples=220000000):
     patch_list = []    
-    patch_dir = f'{root}cs{cropsize}_sr{sr}_hl{hop_length}_nf{n_fft}_of{offset}{suffix}'
+    patch_dir = f'{root}cs{cropsize}_sr{sr}_hl{hop_length}_nf{n_fft}_of{offset}_MIXES'
     os.makedirs(patch_dir, exist_ok=True)
 
     for X_path, Y_path in tqdm(filelist):
         basename = os.path.splitext(os.path.basename(X_path))[0]
 
-        voxaug = X_path == Y_path
+        cache_dir = 'sr{}_hl{}_nf{}'.format(sr, hop_length, n_fft)
+        inst_cache_dir = os.path.join(os.path.dirname(X_path), cache_dir)
+        os.makedirs(inst_cache_dir, exist_ok=True)
 
-        X, Y = spec_utils.load(X_path, Y_path, sr, hop_length, n_fft)
+        X, _ = librosa.load(X_path, sr, False, dtype=np.float32, res_type='kaiser_fast')
 
-        coef = np.max([np.abs(X).max(), np.abs(Y).max()])
+        if X.ndim == 1:
+            X = np.array([X, X])
 
-        l, r, roi_size = make_padding(X.shape[2], cropsize, offset)
-        X_pad = np.pad(X, ((0, 0), (0, 0), (l, r)), mode='constant')
-        Y_pad = np.pad(Y, ((0, 0), (0, 0), (l, r)), mode='constant')
+        if X.shape[1] > max_samples:
+            for i in range(math.ceil(X.shape[1] / max_samples)):
+                start = i * max_samples
+                ix = X[:, start:start+max_samples]
+                ix = spec_utils.wave_to_spectrogram(ix, hop_length, n_fft)
+                coef = np.abs(ix).max()
+                
+                l, r, roi_size = make_padding(ix.shape[2], cropsize, offset)
+                X_pad = np.pad(ix, ((0, 0), (0, 0), (l, r)), mode='constant')
 
-        len_dataset = int(np.ceil(X.shape[2] / roi_size))
-        for j in range(len_dataset):
-            outpath = os.path.join(patch_dir, '{}_p{}.npz'.format(basename, j))
-            patch_list.append(outpath)
+                len_dataset = int(np.ceil(ix.shape[2] / roi_size))
+                for j in range(len_dataset):
+                    outpath = os.path.join(patch_dir, '{}_c{}_p{}.npz'.format(basename, i, j))
+                    patch_list.append(outpath)
 
-            start = j * roi_size
-            if not os.path.exists(outpath):
-                np.savez(
-                    outpath,
-                    X=X_pad[:, :, start:start + cropsize],
-                    c=coef.item(),
-                    vocals=True)
+                    start = j * roi_size
+                    if not os.path.exists(outpath):
+                        np.savez(
+                            outpath,
+                            X=X_pad[:, :, start:start + cropsize],
+                            c=coef.item(),
+                            vocals=True)
+        else:
+            X = spec_utils.wave_to_spectrogram(X, hop_length, n_fft)
+
+            coef = np.abs(X).max()
+
+            l, r, roi_size = make_padding(X.shape[2], cropsize, offset)
+            X_pad = np.pad(X, ((0, 0), (0, 0), (l, r)), mode='constant')
+
+            len_dataset = int(np.ceil(X.shape[2] / roi_size))
+            for j in range(len_dataset):
+                outpath = os.path.join(patch_dir, '{}_p{}.npz'.format(basename, j))
+                patch_list.append(outpath)
+
+                start = j * roi_size
+                if not os.path.exists(outpath):
+                    np.savez(
+                        outpath,
+                        X=X_pad[:, :, start:start + cropsize],
+                        c=coef.item(),
+                        vocals=True)
 
 def make_validation_set(filelist, sr, hop_length, n_fft, offset=0, root=''):
     patch_list = []    
