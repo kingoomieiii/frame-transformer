@@ -3,7 +3,7 @@ from torch import log_softmax, nn
 import torch.nn.functional as F
 import math
 
-from lib.frame_transformer_common import FrameNorm, MultibandFrameAttention
+from lib.frame_transformer_common import MultibandFrameAttention
 
 class FramePrimer(nn.Module):
     def __init__(self, channels=2, n_fft=2048, feedforward_dim=512, num_bands=4, num_transformer_blocks=1, cropsize=1024, bias=False, out_activate=nn.Sigmoid(), dropout=0.1, pretraining=True):
@@ -15,7 +15,7 @@ class FramePrimer(nn.Module):
         self.cropsize = cropsize
         self.encoder = nn.ModuleList([FramePrimerEncoder(channels + i, bins=self.max_bin, num_bands=num_bands, cropsize=cropsize, feedforward_dim=feedforward_dim, bias=bias, dropout=dropout) for i in range(num_transformer_blocks)])
 
-        self.out_norm = nn.BatchNorm2d(channels + num_transformer_blocks)
+        self.out_norm = FrameNorm(self.max_bin, channels + num_transformer_blocks)
         self.out = nn.Linear(channels + num_transformer_blocks, 2, bias=bias)
                 
     def __call__(self, x):
@@ -25,10 +25,8 @@ class FramePrimer(nn.Module):
             h = module(x)
             x = torch.cat((x, h), dim=1)
 
-        x = self.out_norm(x)
-
         return F.pad(
-            input=torch.sigmoid_(self.out(x.transpose(1,3)).transpose(1,3)),
+            input=torch.sigmoid_(self.out(self.out_norm(x).transpose(1,3)).transpose(1,3)),
             pad=(0, 0, 0, self.output_bin - self.max_bin),
             mode='replicate'
         )
@@ -43,7 +41,7 @@ class FramePrimerDiscriminator(nn.Module):
         self.cropsize = cropsize
         self.encoder = nn.ModuleList([FramePrimerEncoder(channels + i, bins=self.max_bin, num_bands=num_bands, cropsize=cropsize, feedforward_dim=feedforward_dim, bias=bias, dropout=dropout) for i in range(num_transformer_blocks)])
 
-        self.out_norm = nn.BatchNorm2d(channels + num_transformer_blocks)
+        self.out_norm = FrameNorm(self.max_bin, channels + num_transformer_blocks)
         self.out_channels = nn.Linear(channels + num_transformer_blocks, 1)
 
     def __call__(self, x):
@@ -53,9 +51,7 @@ class FramePrimerDiscriminator(nn.Module):
             h = module(x)
             x = torch.cat((x, h), dim=1)
 
-        x = self.out_norm(x)
-
-        return torch.mean(self.out_channels(x.transpose(1,3)).transpose(1,3), dim=2, keepdim=True)
+        return torch.mean(self.out_channels(self.out_norm(x).transpose(1,3)).transpose(1,3), dim=2, keepdim=True)
 
 class FramePrimerEncoder(nn.Module):
     def __init__(self, channels, bins=0, num_bands=4, cropsize=1024, feedforward_dim=2048, bias=False, dropout=0.1, downsamples=0, n_fft=2048):
@@ -70,7 +66,7 @@ class FramePrimerEncoder(nn.Module):
         self.cropsize = cropsize
         self.num_bands = num_bands
 
-        self.in_norm = nn.BatchNorm2d(channels)
+        self.in_norm = FrameNorm(bins, channels)
         self.in_project = nn.Linear(channels, 1, bias=bias)
 
         self.norm1 = nn.LayerNorm(bins)
@@ -93,3 +89,13 @@ class FramePrimerEncoder(nn.Module):
         x = x + h
 
         return x.transpose(1,2).unsqueeze(1)
+
+class FrameNorm(nn.Module):
+    def __init__(self, bins, channels):
+        super(FrameNorm, self).__init__()
+
+        self.norm = nn.LayerNorm(bins * channels)
+
+    def __call__(self, x):
+        h = x.reshape(x.shape[0], 1, x.shape[1] * x.shape[2], x.shape[3])
+        return self.norm(h.transpose(2,3)).transpose(2,3).reshape(x.shape[0], x.shape[1], x.shape[2], x.shape[3])
