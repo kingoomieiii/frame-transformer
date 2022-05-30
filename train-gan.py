@@ -71,32 +71,8 @@ def train_epoch(dataloader, generator, discriminator, device, generator_optimize
             real = discriminator(torch.cat((src, tgt), dim=1))
             fake = discriminator(torch.cat((src, src * mask.detach()), dim=1))
 
-            real_loss = None
-            fake_loss = None
-            for n in range(src.shape[0]):
-                real_itm = real[n]
-                fake_itm = fake[n]
-                idx_count_itm = num_indices[n]
-                indices_itm = indices[n]
-
-                real_loss_itm = None
-                fake_loss_itm = None
-                for idx in range(idx_count_itm):
-                    start = indices_itm[idx]
-
-                    real_segment = real_itm[:, :, start:start+token_size]
-                    real_loss_idx = bce_crit(real_segment, torch.zeros_like(real_segment)) / idx_count_itm
-                    real_loss_itm = real_loss_itm + real_loss_idx if real_loss_itm is not None else real_loss_idx
-
-                    fake_segment = fake_itm[:, :, start:start+token_size]
-                    fake_loss_idx = bce_crit(fake_segment, torch.ones_like(fake_segment)) / idx_count_itm
-                    fake_loss_itm = fake_loss_itm + fake_loss_idx if fake_loss_itm is not None else fake_loss_idx
-
-                real_loss = real_loss + real_loss_itm if real_loss is not None else real_loss_itm
-                fake_loss = fake_loss + fake_loss_itm if fake_loss is not None else fake_loss_itm
-
-            real_loss = real_loss / src.shape[0]
-            fake_loss = fake_loss / src.shape[0]
+            real_loss = bce_crit(real, torch.ones_like(real))
+            fake_loss = bce_crit(fake, torch.zeros_like(fake))
             discriminator_loss = (real_loss + fake_loss) / 2
 
         discriminator_scaler.scale(discriminator_loss).backward()
@@ -112,23 +88,7 @@ def train_epoch(dataloader, generator, discriminator, device, generator_optimize
         with torch.cuda.amp.autocast_mode.autocast(enabled=mixed_precision):
             token_loss = mask_crit(src * mask, tgt)
             fake = discriminator(torch.cat((src, src * mask), dim=1))
-
-            fake_loss = None
-            for n in range(src.shape[0]):
-                fake_itm = fake[n]
-                idx_count_itm = num_indices[n]
-                indices_itm = indices[n]
-
-                fake_loss_itm = None
-                for idx in range(idx_count_itm):
-                    start = indices_itm[idx]
-                    fake_segment = fake_itm[:, :, start:start+token_size]
-                    fake_loss_idx = bce_crit(fake_segment, torch.zeros_like(fake_segment)) / idx_count_itm
-                    fake_loss_itm = fake_loss_itm + fake_loss_idx if fake_loss_itm is not None else fake_loss_idx
-
-                fake_loss = fake_loss + fake_loss_itm if fake_loss is not None else fake_loss_itm
-
-            fake_loss = fake_loss / src.shape[0]
+            fake_loss = bce_crit(fake, torch.ones_like(fake))
             generator_loss = token_loss * lambda_l1 + lambda_gen * fake_loss
 
         generator.zero_grad()
@@ -163,7 +123,7 @@ def validate_epoch(dataloader, generator, device, grad_scaler):
     mask_crit = nn.L1Loss()
 
     with torch.no_grad():
-        for src, tgt in tqdm(dataloader):
+        for src, tgt, _, _ in tqdm(dataloader):
             src = src.to(device)
             tgt = tgt.to(device)
 
@@ -187,7 +147,7 @@ def main():
     p.add_argument('--generator_type', type=str.lower, choices=['primer', 'unet', 'vanilla'])
     p.add_argument('--discriminator_type', type=str.lower, choices=['primer', 'conv', 'unet', 'vanilla'])
     p.add_argument('--curr_warmup_epoch', type=int, default=0)
-    p.add_argument('--warmup_epoch', type=int, default=0)
+    p.add_argument('--warmup_epoch', type=int, default=1)
     p.add_argument('--epoch', '-E', type=int, default=3000)
     p.add_argument('--lambda_l1', type=float, default=100)
     p.add_argument('--lambda_gen', type=float, default=1.0)
@@ -238,9 +198,9 @@ def main():
     p.add_argument('--debug', action='store_true')
     p.add_argument('--dropout', type=float, default=0.25)
     p.add_argument('--token_size', type=int, default=32)
-    p.add_argument('--mask_rate', type=float, default=0.2)
+    p.add_argument('--mask_rate', type=float, default=0.15)
     p.add_argument('--next_frame_chunk_size', type=int, default=512)
-    p.add_argument('--prefetch_factor', type=int, default=16)
+    p.add_argument('--prefetch_factor', type=int, default=8)
     args = p.parse_args()
 
     
