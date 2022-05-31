@@ -15,7 +15,7 @@ class FramePrimer(nn.Module):
         self.cropsize = cropsize
         self.encoder = nn.ModuleList([FramePrimerEncoder(channels + i, bins=self.max_bin, num_bands=num_bands, cropsize=cropsize, feedforward_dim=feedforward_dim, bias=bias, dropout=dropout) for i in range(num_transformer_blocks)])
 
-        self.out_norm = FrameNorm(self.max_bin, channels + num_transformer_blocks)
+        self.out_norm = nn.BatchNorm2d(channels + num_transformer_blocks)
         self.out = nn.Linear(channels + num_transformer_blocks, 2, bias=bias)
                 
     def __call__(self, x):
@@ -41,7 +41,7 @@ class FramePrimerDiscriminator(nn.Module):
         self.cropsize = cropsize
         self.encoder = nn.ModuleList([FramePrimerEncoder(channels + i, bins=self.max_bin, num_bands=num_bands, cropsize=cropsize, feedforward_dim=feedforward_dim, bias=bias, dropout=dropout) for i in range(num_transformer_blocks)])
 
-        self.out_norm = FrameNorm(self.max_bin, channels + num_transformer_blocks)
+        self.out_norm = nn.BatchNorm2d(channels + num_transformer_blocks)
         self.out_channels = nn.Linear(channels + num_transformer_blocks, 1)
 
     def __call__(self, x):
@@ -66,7 +66,7 @@ class FramePrimerEncoder(nn.Module):
         self.cropsize = cropsize
         self.num_bands = num_bands
 
-        self.in_norm = FrameNorm(bins, channels)
+        self.in_norm = nn.BatchNorm2d(channels)
         self.in_project = nn.Linear(channels, 1, bias=bias)
 
         self.norm1 = nn.LayerNorm(bins)

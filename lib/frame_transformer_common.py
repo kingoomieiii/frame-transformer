@@ -55,7 +55,7 @@ class FrameTransformerEncoder(nn.Module):
         self.cropsize = cropsize
         self.num_bands = num_bands
 
-        self.in_norm = FrameNorm(bins, channels)
+        self.in_norm = nn.BatchNorm2d(channels)
         self.in_project = nn.Linear(channels, 1, bias=bias)
 
         self.relu = nn.ReLU(inplace=True)
