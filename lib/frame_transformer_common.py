@@ -55,6 +55,7 @@ class FrameTransformerEncoder(nn.Module):
         self.cropsize = cropsize
         self.num_bands = num_bands
 
+        self.in_norm = FrameNorm(bins, channels)
         self.in_project = nn.Linear(channels, 1, bias=bias)
 
         self.relu = nn.ReLU(inplace=True)
@@ -84,7 +85,7 @@ class FrameTransformerEncoder(nn.Module):
         self.dropout4 = nn.Dropout(dropout) if dropout > 0 else nn.Identity()
 
     def __call__(self, x):
-        x = self.in_project(x.transpose(1,3)).squeeze(-1)
+        x = self.in_project(self.in_norm(x).transpose(1,3)).squeeze(-1)
 
         h = self.norm1(x)
         h = self.glu(h)
@@ -189,13 +190,14 @@ class FrameTransformerDecoder(nn.Module):
         return x.transpose(1,2).unsqueeze(1)
 
 class FrameNorm(nn.Module):
-    def __init__(self, cropsize):
+    def __init__(self, bins, channels):
         super(FrameNorm, self).__init__()
 
-        self.norm = nn.InstanceNorm2d(cropsize, affine=True)
+        self.norm = nn.LayerNorm(bins * channels)
 
     def __call__(self, x):
-        return self.norm(x.transpose(1,3)).transpose(1,3)
+        h = x.reshape(x.shape[0], 1, x.shape[1] * x.shape[2], x.shape[3])
+        return self.norm(h.transpose(2,3)).transpose(2,3).reshape(x.shape[0], x.shape[1], x.shape[2], x.shape[3])
 
 class FrameConv(nn.Module):
     def __init__(self, in_channels, out_channels, kernel_size=3, stride=1, padding=1, dilation=1, groups=1, activate=nn.ReLU, norm=True, cropsize=1024, dropout=None):
@@ -212,7 +214,7 @@ class FrameConv(nn.Module):
                 groups=groups,
                 bias=False)
 
-        self.norm = FrameNorm(cropsize) if norm else None
+        self.norm = nn.BatchNorm2d(out_channels) if norm else None
         self.activate = activate(inplace=True) if activate is not None else None
 
     def __call__(self, x):
