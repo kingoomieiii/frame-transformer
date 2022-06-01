@@ -284,11 +284,36 @@ class MaskedPretrainingDataset(torch.utils.data.Dataset):
         is_next = 1.0
         starts = []
 
+        index_count = None
+        indices = None
         if root:
             self.current_step = self.current_step + 1
             token_size = self.token_size
             noise = np.random.uniform(0, 1, X.shape)
             num_tokens = (self.cropsize + self.next_frame_chunk_size) // token_size
+
+            if np.random.uniform() < 0.5:
+                if np.random.uniform() < 0.67:
+                    nidx = np.random.randint(len(self))
+                else:
+                    nidx = np.random.randint(1, 5)
+
+                    if np.random.uniform() < 0.5:
+                        nidx = (idx + nidx) % len(self)
+                    else:
+                        nidx = (idx - nidx) % len(self)
+
+                while nidx == idx:
+                    nidx = np.random.randint(len(self))
+
+                NX, _, _, _, _ = self.__getitem__(nidx, root=False)
+
+                start = np.random.randint(0, NX.shape[2] - self.next_frame_chunk_size)
+                stop = start + self.next_frame_chunk_size
+
+                is_next = 0.0
+                X[:, :, -self.next_frame_chunk_size:] = NX[:, :, start:stop]
+                Y[:, :, -self.next_frame_chunk_size:] = NX[:, :, start:stop]
                         
             X = np.clip(np.abs(X) / c, 0, 1)
             Y = X.copy()
@@ -297,38 +322,45 @@ class MaskedPretrainingDataset(torch.utils.data.Dataset):
                 if np.random.uniform() < self.mask_rate:
                     start = token * token_size
                     stop = start + token_size
+                    starts.append(start)
             
                     X[:, :, start:stop] = 1.0
 
                     if np.random.uniform() < 0.2:
                         if np.random.uniform() < 0.5:
                             X[:, :, start:stop] = np.maximum(Y[:, :, start:stop], noise[:, :, start:stop])
-                            starts.append(start)
                         else:
                             X[:, :, start:stop] = Y[:, :, start:stop]
-                    else:
-                        starts.append(start)
 
             if len(starts) == 0:
+                num_tokens = (self.cropsize + self.next_frame_chunk_size) // token_size
                 token = np.random.randint(0, num_tokens)
                 start = token * token_size
-                stop = start + token_size                    
+                stop = start + token_size
                 starts.append(start)
         
                 X[:, :, start:stop] = 1.0
 
-                if np.random.uniform() < 0.1:
-                    X[:, :, start:stop] = np.maximum(Y[:, :, start:stop], noise[:, :, start:stop])
+                if np.random.uniform() < 0.2:
+                    if np.random.uniform() < 0.5:
+                        X[:, :, start:stop] = np.maximum(Y[:, :, start:stop], noise[:, :, start:stop])
+                    else:
+                        X[:, :, start:stop] = Y[:, :, start:stop]
+                    
+            separator_token = np.ones(X.shape)
+            separator_token[:, 1::2, :] = 0
+            X[:, :, -self.next_frame_chunk_size-(self.token_size//2):-self.next_frame_chunk_size+(self.token_size//2)] = separator_token[:, :, -self.next_frame_chunk_size-(self.token_size//2):-self.next_frame_chunk_size+(self.token_size//2)]
+            Y[:, :, -self.next_frame_chunk_size-(self.token_size//2):-self.next_frame_chunk_size+(self.token_size//2)] = separator_token[:, :, -self.next_frame_chunk_size-(self.token_size//2):-self.next_frame_chunk_size+(self.token_size//2)]
 
-        index_count = len(starts)
-        indices = np.pad(np.array(starts), (0, num_tokens - len(starts)))
+            index_count = len(starts)
+            indices = np.pad(np.array(starts), (0, num_tokens - len(starts)))
 
         assert not np.any(np.isnan(X))
         assert not np.any(np.isinf(X))
         assert not np.any(np.isnan(Y))
         assert not np.any(np.isinf(Y))
 
-        return X, Y, index_count, indices
+        return X, Y, is_next, index_count, indices
 
 class VocalAugmentationDataset(torch.utils.data.Dataset):
     def __init__(self, path, extra_path=None, pair_path=None, vocal_path="", is_validation=False, mul=1, downsamples=0, epoch_size=None, pair_mul=1, slide=True, cropsize=256, mixup_rate=0, mixup_alpha=1, include_phase=False, force_voxaug=False):
