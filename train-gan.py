@@ -67,7 +67,7 @@ def train_epoch(dataloader, generator, discriminator, device, generator_optimize
         
         with torch.cuda.amp.autocast_mode.autocast(enabled=mixed_precision):
             disc_loss = None
-            mask, _ = generator(src)
+            mask = generator(src)
             pred = src * mask.detach()
 
             real_batch, fake_batch = None, None
