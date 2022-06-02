@@ -66,23 +66,20 @@ def train_epoch(dataloader, generator, discriminator, device, generator_optimize
         indices = indices.to(device)
         
         with torch.cuda.amp.autocast_mode.autocast(enabled=mixed_precision):
-            disc_loss = None
             mask = generator(src)
             pred = src * mask.detach()
+            real_batch = None
+            fake_batch = None
 
-            real_batch, fake_batch = None, None
             for n in range(src.shape[0]):
                 idx_count_itm = num_indices[n]
                 start_idx = indices[n]
 
                 for idx in range(idx_count_itm):
-                    masked_token = src[None, n, :, :, start_idx[idx]:start_idx[idx]+dataloader.dataset.token_size]
                     real_token = tgt[None, n, :, :, start_idx[idx]:start_idx[idx]+dataloader.dataset.token_size]
                     fake_token = pred[None, n, :, :, start_idx[idx]:start_idx[idx]+dataloader.dataset.token_size]
-                    real_batch_itm = torch.cat((masked_token, real_token), dim=1)
-                    fake_batch_itm = torch.cat((masked_token, fake_token), dim=1)
-                    real_batch = torch.cat((real_batch, real_batch_itm), dim=0) if real_batch is not None else real_batch_itm
-                    fake_batch = torch.cat((fake_batch, fake_batch_itm), dim=0) if fake_batch is not None else fake_batch_itm
+                    real_batch = torch.cat((real_batch, real_token), dim=0) if real_batch is not None else real_token
+                    fake_batch = torch.cat((fake_batch, fake_token), dim=0) if fake_batch is not None else fake_token
 
             real = discriminator(real_batch)
             fake = discriminator(fake_batch)
@@ -102,31 +99,22 @@ def train_epoch(dataloader, generator, discriminator, device, generator_optimize
 
         with torch.cuda.amp.autocast_mode.autocast(enabled=mixed_precision):
             pred = src * mask
-            fake_loss = None
-            unmask_loss = None
-
-            fake = None
-
             fake_batch = None
-            unmask_x_batch = None
-            unmask_y_batch = None
+            real_batch = None
 
             for n in range(src.shape[0]):
                 idx_count_itm = num_indices[n]
                 start_idx = indices[n]
                 
                 for idx in range(num_indices[n]):
-                    masked_token = src[None, n, :, :, start_idx[idx]:start_idx[idx]+dataloader.dataset.token_size]
                     fake_token = pred[None, n, :, :, start_idx[idx]:start_idx[idx]+dataloader.dataset.token_size]
                     real_token = tgt[None, n, :, :, start_idx[idx]:start_idx[idx]+dataloader.dataset.token_size]
-                    fake_batch_itm = torch.cat((masked_token, fake_token), dim=1)
-                    fake_batch = torch.cat((fake_batch, fake_batch_itm), dim=0) if fake_batch is not None else fake_batch_itm
-                    unmask_x_batch = torch.cat((unmask_x_batch, fake_token), dim=0) if unmask_x_batch is not None else fake_token
-                    unmask_y_batch = torch.cat((unmask_y_batch, real_token), dim=0) if unmask_y_batch is not None else real_token
+                    fake_batch = torch.cat((fake_batch, fake_token), dim=0) if fake_batch is not None else fake_token
+                    real_batch = torch.cat((real_batch, real_token), dim=0) if real_batch is not None else real_token
                     
             fake = discriminator(fake_batch)
             fake_loss = bce_crit(fake, torch.ones_like(fake))
-            unmask_loss = mask_crit(unmask_x_batch, unmask_y_batch)
+            unmask_loss = mask_crit(fake_batch, real_batch)
             generator_loss = lambda_l1 * unmask_loss + fake_loss
 
         generator_scaler.scale(generator_loss).backward()
@@ -233,7 +221,7 @@ def main():
     p.add_argument('--model_dir', type=str, default='G://')
     p.add_argument('--debug', action='store_true')
     p.add_argument('--dropout', type=float, default=0.25)
-    p.add_argument('--token_size', type=int, default=32)
+    p.add_argument('--token_size', type=int, default=16)
     p.add_argument('--mask_rate', type=float, default=0.2)
     p.add_argument('--next_frame_chunk_size', type=int, default=512)
     p.add_argument('--prefetch_factor', type=int, default=8)
@@ -321,7 +309,7 @@ def main():
 
     device = torch.device('cpu')
     generator = FramePrimer(channels=args.channels, n_fft=args.n_fft, num_transformer_blocks=args.num_transformer_blocks, num_bands=args.num_bands, feedforward_dim=args.feedforward_dim, bias=args.bias, cropsize=args.cropsize + args.next_frame_chunk_size, dropout=args.dropout)
-    discriminator = FramePrimerDiscriminator(channels=args.channels*2, n_fft=args.n_fft, num_transformer_blocks=args.num_transformer_blocks, num_bands=args.num_bands, feedforward_dim=args.feedforward_dim, bias=args.bias, cropsize=args.token_size, dropout=args.dropout)
+    discriminator = FramePrimerDiscriminator(channels=args.channels, n_fft=args.n_fft, num_transformer_blocks=args.num_transformer_blocks, num_bands=args.num_bands, feedforward_dim=args.feedforward_dim, bias=args.bias, cropsize=args.token_size, dropout=args.dropout)
 
     if args.pretrained_model is not None:
         generator.load_state_dict(torch.load(args.pretrained_model, map_location=device))
