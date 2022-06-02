@@ -123,8 +123,9 @@ def train_epoch(dataloader, generator, discriminator, device, generator_optimize
                     fake_batch = torch.cat((fake_batch, fake_batch_itm), dim=0) if fake_batch is not None else fake_batch_itm
                     unmask_x_batch = torch.cat((unmask_x_batch, fake_token), dim=0) if unmask_x_batch is not None else fake_token
                     unmask_y_batch = torch.cat((unmask_y_batch, real_token), dim=0) if unmask_y_batch is not None else real_token
-
-            fake_loss = bce_crit(fake_batch, torch.ones_like(fake_batch))
+                    
+            fake = discriminator(fake_batch)
+            fake_loss = bce_crit(fake, torch.ones_like(fake))
             unmask_loss = mask_crit(unmask_x_batch, unmask_y_batch)
             generator_loss = lambda_l1 * unmask_loss + fake_loss
 
