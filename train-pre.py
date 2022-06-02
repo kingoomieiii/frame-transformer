@@ -70,48 +70,42 @@ def train_epoch(dataloader, model, device, optimizer, accumulation_steps, grad_s
     bce_crit = nn.BCEWithLogitsLoss()
 
     pbar = tqdm(dataloader) if progress_bar else dataloader
-    for itr, (src, tgt, is_next, num_indices, indices) in enumerate(pbar):
+    for itr, (src, tgt, num_indices, indices) in enumerate(pbar):
         src = src.to(device)
         tgt = tgt.to(device)
-        is_next = is_next.to(device)
         num_indices = num_indices.to(device)
         indices = indices.to(device)
 
-        if len(is_next.shape) == 1:
-            is_next = is_next.unsqueeze(-1)
-
         with torch.cuda.amp.autocast_mode.autocast(enabled=grad_scaler is not None):
-            pred, nxt = model(src)
+            pred = model(src)
 
         pred = src * pred
 
         if reconstruction_loss_type == 'unmasked':
             mask_loss = None
+
+            x_batch = None
+            y_batch = None
+
             for n in range(src.shape[0]):
                 idx_count_itm = num_indices[n]
                 indices_itm = indices[n]
 
-                loss_itm = None
                 for idx in range(idx_count_itm):
                     start = indices_itm[idx]
+                    unmasked = pred[None, n, :, :, start:start+dataloader.dataset.token_size]
+                    target = tgt[None, n, :, :, start:start+dataloader.dataset.token_size]
+                    x_batch = torch.cat((x_batch, unmasked), dim=0) if x_batch is not None else unmasked
+                    y_batch = torch.cat((y_batch, target), dim=0) if y_batch is not None else target
 
-                    segment = pred[n, :, :, start:start+dataloader.dataset.token_size]
-                    tgt_segment = tgt[n, :, :, start:start+dataloader.dataset.token_size]
-                    real_loss_idx = mask_crit(segment, tgt_segment) / idx_count_itm
-                    loss_itm = loss_itm + real_loss_idx if loss_itm is not None else real_loss_idx
-
-                mask_loss = mask_loss + loss_itm if mask_loss is not None else loss_itm
-
-            mask_loss = mask_loss / src.shape[0]
+            mask_loss = mask_crit(x_batch, y_batch)
         else:
-            mask_loss = mask_crit(src * pred, tgt)
+            mask_loss = mask_crit(pred, tgt)
         
-        #nxt_loss = bce_crit(nxt, is_next)
-        loss = mask_loss# + nxt_loss
+        loss = mask_loss
         accum_loss = loss / accumulation_steps
 
         batch_mask_loss = batch_mask_loss + (mask_loss / accumulation_steps)
-        #batch_nxt_loss = batch_nxt_loss + (nxt_loss / accumulation_steps)
 
         if grad_scaler is not None:
             grad_scaler.scale(accum_loss).backward()
@@ -135,10 +129,8 @@ def train_epoch(dataloader, model, device, optimizer, accumulation_steps, grad_s
 
             model.zero_grad()
             batch_mask_loss = 0
-            #batch_nxt_loss = 0
 
         sum_mask_loss += mask_loss.item() * len(src)
-        #sum_nxt_loss += nxt_loss.item() * len(src)
 
     # the rest batch
     if (itr + 1) % accumulation_steps != 0:
@@ -160,28 +152,22 @@ def validate_epoch(dataloader, model, device, grad_scaler, reconstruction_loss_t
     bce_crit = nn.BCEWithLogitsLoss()
 
     with torch.no_grad():
-        for src, tgt, is_next, num_indices, indices in tqdm(dataloader):
+        for src, tgt, num_indices, indices in tqdm(dataloader):
             src = src.to(device)
             tgt = tgt.to(device)
-            is_next = is_next.to(device)
             num_indices = num_indices.to(device)
             indices = indices.to(device)
 
-            if len(is_next.shape) == 1:
-                is_next = is_next.unsqueeze(-1)
-
             with torch.cuda.amp.autocast_mode.autocast(enabled=grad_scaler is not None):
-                pred, nxt = model(src)
+                pred = model(src)
 
             mask_loss = mask_crit(src * pred, tgt)
-            #nxt_loss = bce_crit(nxt, is_next)
-            loss = mask_loss# + nxt_loss
+            loss = mask_loss
     
             if torch.logical_or(loss.isnan(), loss.isinf()):
                 print('non-finite or nan validation loss')
             else:
                 sum_mask_loss += mask_loss.item() * len(src)
-                #sum_nxt_loss += nxt_loss.item() * len(src)
 
     return sum_mask_loss / len(dataloader.dataset), sum_nxt_loss / len(dataloader.dataset)
 

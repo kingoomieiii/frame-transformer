@@ -53,13 +53,13 @@ def train_epoch(dataloader, generator, discriminator, device, generator_optimize
     sum_gen_loss = 0
     sum_disc_loss = 0
 
-    mask_crit = nn.L1Loss()
-    bce_crit = nn.BCEWithLogitsLoss()
+    mask_crit = nn.L1Loss().to(device)
+    bce_crit = nn.BCEWithLogitsLoss().to(device)
 
     disc_loss = 0
 
     pbar = tqdm(dataloader) if progress_bar else dataloader
-    for src, tgt, _, num_indices, indices in pbar:
+    for src, tgt, num_indices, indices in pbar:
         src = src.to(device)
         tgt = tgt.to(device)
         num_indices = num_indices.to(device)
@@ -70,23 +70,25 @@ def train_epoch(dataloader, generator, discriminator, device, generator_optimize
             mask, _ = generator(src)
             pred = src * mask.detach()
 
+            real_batch, fake_batch = None, None
             for n in range(src.shape[0]):
                 idx_count_itm = num_indices[n]
                 start_idx = indices[n]
-                disc_loss_itm = None
 
                 for idx in range(idx_count_itm):
-                    fake_token = pred[n, :, :, start_idx[idx]:start_idx[idx]+dataloader.dataset.token_size]
-                    source_token = src[n, :, :, start_idx[idx]:start_idx[idx]+dataloader.dataset.token_size]
-                    target_token = tgt[n, :, :, start_idx[idx]:start_idx[idx]+dataloader.dataset.token_size]
-                    real_itm = discriminator(torch.cat((source_token, target_token), dim=1))
-                    fake_itm = discriminator(torch.cat((source_token, fake_token), dim=1))
-                    real_loss_itm = bce_crit(real_itm, torch.ones_like(real_itm))
-                    fake_loss_itm = bce_crit(fake_itm, torch.zeros_like(fake_itm))
-                    disc_loss_token = (real_loss_itm + fake_loss_itm) / 2
-                    disc_loss_itm = disc_loss_itm + disc_loss_token / idx_count_itm if disc_loss_itm is not None else disc_loss_token / idx_count_itm
-                disc_loss = disc_loss + disc_loss_itm if disc_loss is not None else disc_loss_itm
-            disc_loss = disc_loss / src.shape[0]
+                    masked_token = src[None, n, :, :, start_idx[idx]:start_idx[idx]+dataloader.dataset.token_size]
+                    real_token = tgt[None, n, :, :, start_idx[idx]:start_idx[idx]+dataloader.dataset.token_size]
+                    fake_token = pred[None, n, :, :, start_idx[idx]:start_idx[idx]+dataloader.dataset.token_size]
+                    real_batch_itm = torch.cat((masked_token, real_token), dim=1)
+                    fake_batch_itm = torch.cat((masked_token, fake_token), dim=1)
+                    real_batch = torch.cat((real_batch, real_batch_itm), dim=0) if real_batch is not None else real_batch_itm
+                    fake_batch = torch.cat((fake_batch, fake_batch_itm), dim=0) if fake_batch is not None else fake_batch_itm
+
+            real = discriminator(real_batch)
+            fake = discriminator(fake_batch)
+            real_loss = bce_crit(real, torch.ones_like(real))
+            fake_loss = bce_crit(fake, torch.zeros_like(fake))
+            disc_loss = (fake_loss + real_loss) / 2
 
         disc_scaler.scale(disc_loss).backward()
         disc_scaler.unscale_(discriminator_optimizer)
@@ -99,46 +101,51 @@ def train_epoch(dataloader, generator, discriminator, device, generator_optimize
             discriminator_warmup.step()
 
         with torch.cuda.amp.autocast_mode.autocast(enabled=mixed_precision):
+            pred = src * mask
             fake_loss = None
             unmask_loss = None
-            token_loss = mask_crit(src * mask, tgt)
+
+            fake = None
+
+            fake_batch = None
+            unmask_x_batch = None
+            unmask_y_batch = None
 
             for n in range(src.shape[0]):
+                idx_count_itm = num_indices[n]
                 start_idx = indices[n]
-                unmask_loss_itm = None
-                fake_loss_itm = None
-
+                
                 for idx in range(num_indices[n]):
-                    source_token = src[n, :, :, start_idx[idx]:start_idx[idx]+dataloader.dataset.token_size]
-                    fake_token = pred[n, :, :, start_idx[idx]:start_idx[idx]+dataloader.dataset.token_size]
-                    target_token = tgt[n, :, :, start_idx[idx]:start_idx[idx]+dataloader.dataset.token_size]
-                    fake_token = discriminator(torch.cat((source_token, fake_token), dim=1))
-                    fake_loss_token = bce_crit(fake_token, torch.ones_like(fake_token)) / num_indices[n]
-                    unmask_loss_token = mask_crit(fake_token, target_token) / num_indices[n]
-                    unmask_loss_itm = unmask_loss_itm + unmask_loss_token if unmask_loss_itm is not None else unmask_loss_token
-                    fake_loss_itm = fake_loss_itm + fake_loss_token if fake_loss_itm is not None else fake_loss_token
-                fake_loss = fake_loss + disc_loss_itm if fake_loss is not None else disc_loss_itm
-                unmask_loss = unmask_loss + unmask_loss_itm if unmask_loss is not None else unmask_loss_itm
-            generator_loss = lambda_l1 * (unmask_loss / src.shape[0]) + (fake_loss / src.shape[0])
+                    masked_token = src[None, n, :, :, start_idx[idx]:start_idx[idx]+dataloader.dataset.token_size]
+                    fake_token = pred[None, n, :, :, start_idx[idx]:start_idx[idx]+dataloader.dataset.token_size]
+                    real_token = tgt[None, n, :, :, start_idx[idx]:start_idx[idx]+dataloader.dataset.token_size]
+                    fake_batch_itm = torch.cat((masked_token, fake_token), dim=1)
+                    fake_batch = torch.cat((fake_batch, fake_batch_itm), dim=0) if fake_batch is not None else fake_batch_itm
+                    unmask_x_batch = torch.cat((unmask_x_batch, fake_token), dim=0) if unmask_x_batch is not None else fake_token
+                    unmask_y_batch = torch.cat((unmask_y_batch, real_token), dim=0) if unmask_y_batch is not None else real_token
 
-        generator.zero_grad()
+            fake_loss = bce_crit(fake_batch, torch.ones_like(fake_batch))
+            unmask_loss = mask_crit(unmask_x_batch, unmask_y_batch)
+            generator_loss = lambda_l1 * unmask_loss + fake_loss
+
         generator_scaler.scale(generator_loss).backward()
         generator_scaler.unscale_(generator_optimizer)
         clip_grad_norm_(generator.parameters(), 0.5)
         generator_scaler.step(generator_optimizer)
         generator_scaler.update()
+        generator.zero_grad()
 
         if generator_warmup is not None:
             generator_warmup.step()
 
-        token_loss = token_loss.item()
+        unmask_loss = unmask_loss.item() / src.shape[0]
         fake_loss = fake_loss.item()
         disc_loss = disc_loss.item()
 
         if progress_bar:
-            pbar.set_description(f'{str(token_loss)}|{str(fake_loss)}|{str(disc_loss)}')
+            pbar.set_description(f'{str(unmask_loss)}|{str(fake_loss)}|{str(disc_loss)}')
 
-        sum_mask_loss += token_loss * len(src)
+        sum_mask_loss += generator_loss * len(src)
         sum_disc_loss += disc_loss * len(src)
         sum_gen_loss += generator_loss * len(src)
 
@@ -230,7 +237,7 @@ def main():
     p.add_argument('--token_size', type=int, default=32)
     p.add_argument('--mask_rate', type=float, default=0.2)
     p.add_argument('--next_frame_chunk_size', type=int, default=512)
-    p.add_argument('--prefetch_factor', type=int, default=8)
+    p.add_argument('--prefetch_factor', type=int, default=16)
     args = p.parse_args()
 
     
@@ -352,7 +359,7 @@ def main():
         )
     elif args.optimizer == 'rmsprop':
         optimizer = torch.optim.RMSprop(filter(lambda p: p.requires_grad, generator.parameters()), lr=args.learning_rate, weight_decay=args.weight_decay)
-        critic_optimizer = torch.optim.RMSprop(filter(lambda p: p.requires_grad, generator.parameters()), lr=args.learning_rate, weight_decay=args.weight_decay)
+        critic_optimizer = torch.optim.RMSprop(filter(lambda p: p.requires_grad, discriminator.parameters()), lr=args.learning_rate, weight_decay=args.weight_decay)
     else:
         optimizer = torch.optim.AdamW(
             filter(lambda p: p.requires_grad, generator.parameters()),
@@ -432,8 +439,8 @@ def main():
                 best_loss = val_loss_mask
                 logger.info('  * best validation loss')
 
-            model_path = f'{args.model_dir}models/model_iter{epoch}.modeler.pth'
-            critic_path = f'{args.model_dir}models/model_iter{epoch}.critic.pth'
+            model_path = f'{args.model_dir}models/model_iter{epoch}.gen.pth'
+            critic_path = f'{args.model_dir}models/model_iter{epoch}.disc.pth'
             torch.save(generator.state_dict(), model_path)
             torch.save(discriminator.state_dict(), critic_path)
 

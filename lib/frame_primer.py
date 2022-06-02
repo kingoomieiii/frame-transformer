@@ -18,7 +18,6 @@ class FramePrimer(nn.Module):
         self.out_norm = nn.BatchNorm2d(channels + num_transformer_blocks)
         
         self.out = nn.Linear(channels + num_transformer_blocks, 2)
-        self.is_next = nn.Linear(channels + num_transformer_blocks, 1, bias=bias)
                 
     def __call__(self, x):
         x = x[:, :, :self.max_bin]
@@ -28,13 +27,12 @@ class FramePrimer(nn.Module):
             x = torch.cat((x, h), dim=1)
 
         x = self.out_norm(x)
-        is_next = F.adaptive_avg_pool2d(self.is_next(x.transpose(1,3)).transpose(1,3), (1,1)).squeeze(-1).squeeze(-1)
 
         return F.pad(
             input=torch.sigmoid(self.out(x.transpose(1,3)).transpose(1,3)),
             pad=(0, 0, 0, self.output_bin - self.max_bin),
             mode='replicate'
-        ), is_next
+        )
 
 class FramePrimerDiscriminator(nn.Module):
     def __init__(self, channels=2, n_fft=2048, feedforward_dim=512, num_bands=4, num_transformer_blocks=1, cropsize=1024, bias=False, out_activate=nn.Sigmoid(), dropout=0.1, pretraining=True):
@@ -58,7 +56,7 @@ class FramePrimerDiscriminator(nn.Module):
 
         x = self.out_norm(x)
 
-        return torch.mean(self.out_channels(x).transpose(1,3), dim=2, keepdim=True)
+        return torch.mean(self.out_channels(x.transpose(1,3)).transpose(1,3), dim=2, keepdim=True)
 
 class FramePrimerEncoder(nn.Module):
     def __init__(self, channels, bins=0, num_bands=4, cropsize=1024, feedforward_dim=2048, bias=False, dropout=0.1, downsamples=0, n_fft=2048):
