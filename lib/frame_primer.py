@@ -2,6 +2,7 @@ import torch
 from torch import log_softmax, nn
 import torch.nn.functional as F
 import math
+from torch.nn.utils.spectral_norm import spectral_norm
 
 from lib.frame_transformer_common import MultibandFrameAttention
 
@@ -16,7 +17,7 @@ class FramePrimer(nn.Module):
         self.encoder = nn.ModuleList([FramePrimerEncoder(channels + i, bins=self.max_bin, num_bands=num_bands, cropsize=cropsize, feedforward_dim=feedforward_dim, bias=bias, dropout=dropout) for i in range(num_transformer_blocks)])
 
         self.out_norm = nn.BatchNorm2d(channels + num_transformer_blocks, affine=True)
-        self.out = nn.Linear(channels + num_transformer_blocks, 2)
+        self.out = spectral_norm(nn.Linear(channels + num_transformer_blocks, 2))
                 
     def __call__(self, x):
         x = x[:, :, :self.max_bin]
@@ -44,7 +45,7 @@ class FramePrimerDiscriminator(nn.Module):
         self.encoder = nn.ModuleList([FramePrimerEncoder(channels + i, bins=self.max_bin, num_bands=num_bands, cropsize=cropsize, feedforward_dim=feedforward_dim, bias=bias, dropout=dropout) for i in range(num_transformer_blocks)])
 
         self.out_norm = nn.BatchNorm2d(channels + num_transformer_blocks, affine=True)
-        self.out_channels = nn.Linear(channels + num_transformer_blocks, 1)
+        self.out_channels = spectral_norm(nn.Linear(channels + num_transformer_blocks, 1))
 
     def __call__(self, x):
         x = x[:, :, :self.max_bin]
@@ -73,14 +74,14 @@ class FramePrimerEncoder(nn.Module):
         self.relu = nn.ReLU(inplace=True)
 
         self.in_norm = nn.BatchNorm2d(channels, affine=True)
-        self.in_project = nn.Linear(channels, 1, bias=bias)
+        self.in_project = spectral_norm(nn.Linear(channels, 1, bias=bias))
 
         self.norm1 = nn.BatchNorm2d(1, affine=True)
         self.attn = MultibandFrameAttention(num_bands, bins, cropsize, bias=bias)
 
         self.norm2 = nn.BatchNorm2d(1, affine=True)
-        self.linear1 = nn.Linear(bins, feedforward_dim, bias=bias)
-        self.linear2 = nn.Linear(feedforward_dim, bins, bias=bias)
+        self.linear1 = spectral_norm(nn.Linear(bins, feedforward_dim, bias=bias))
+        self.linear2 = spectral_norm(nn.Linear(feedforward_dim, bins, bias=bias))
 
     def __call__(self, x):
         x = self.in_norm(x)

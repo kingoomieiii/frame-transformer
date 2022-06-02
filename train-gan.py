@@ -167,7 +167,7 @@ def main():
     p.add_argument('--generator_type', type=str.lower, choices=['primer', 'unet', 'vanilla'])
     p.add_argument('--discriminator_type', type=str.lower, choices=['primer', 'conv', 'unet', 'vanilla'])
     p.add_argument('--curr_warmup_epoch', type=int, default=0)
-    p.add_argument('--warmup_epoch', type=int, default=1)
+    p.add_argument('--warmup_epoch', type=int, default=0)
     p.add_argument('--epoch', '-E', type=int, default=30)
     p.add_argument('--lambda_l1', type=float, default=100)
     p.add_argument('--lambda_gen', type=float, default=1.0)
@@ -222,7 +222,6 @@ def main():
     p.add_argument('--next_frame_chunk_size', type=int, default=512)
     p.add_argument('--prefetch_factor', type=int, default=2)
     args = p.parse_args()
-
     
     torch.set_printoptions(threshold=1024*1024)
 

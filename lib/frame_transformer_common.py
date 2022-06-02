@@ -3,6 +3,7 @@ from torch import log_softmax, nn
 import torch.nn.functional as F
 import math
 import lib.spec_utils as spec_utils
+from torch.nn.utils.spectral_norm import spectral_norm
 
 class MultibandFrameAttention(nn.Module):
     def __init__(self, num_bands, bins, cropsize, kernel_size=3, padding=1, bias=False):
@@ -10,19 +11,19 @@ class MultibandFrameAttention(nn.Module):
 
         self.num_bands = num_bands
 
-        self.q_proj = nn.Linear(bins, bins, bias=bias)
-        self.q_conv = nn.Conv1d(bins, bins, kernel_size=kernel_size, padding=padding, groups=bins, bias=bias)
+        self.q_proj = spectral_norm(nn.Linear(bins, bins, bias=bias))
+        self.q_conv = spectral_norm(nn.Conv1d(bins, bins, kernel_size=kernel_size, padding=padding, groups=bins, bias=bias))
 
-        self.k_proj = nn.Linear(bins, bins, bias=bias)
-        self.k_conv = nn.Conv1d(bins, bins, kernel_size=kernel_size, padding=padding, groups=bins, bias=bias)
+        self.k_proj = spectral_norm(nn.Linear(bins, bins, bias=bias))
+        self.k_conv = spectral_norm(nn.Conv1d(bins, bins, kernel_size=kernel_size, padding=padding, groups=bins, bias=bias))
 
-        self.v_proj = nn.Linear(bins, bins, bias=bias)
-        self.v_conv = nn.Conv1d(bins, bins, kernel_size=kernel_size, padding=padding, groups=bins, bias=bias)
+        self.v_proj = spectral_norm(nn.Linear(bins, bins, bias=bias))
+        self.v_conv = spectral_norm(nn.Conv1d(bins, bins, kernel_size=kernel_size, padding=padding, groups=bins, bias=bias))
 
-        self.o_proj = nn.Linear(bins, bins, bias=bias)
+        self.o_proj = spectral_norm(nn.Linear(bins, bins, bias=bias))
 
-        self.er = nn.Parameter(torch.empty(bins // num_bands, cropsize))
-        nn.init.normal_(self.er)
+        self.weight = nn.Parameter(torch.empty(bins // num_bands, cropsize))
+        nn.init.normal_(self.weight)
 
     def forward(self, x, mem=None, mask=None):
         b,w,c = x.shape
@@ -30,7 +31,7 @@ class MultibandFrameAttention(nn.Module):
         q = self.q_conv(self.q_proj(x).transpose(1,2)).transpose(1,2).reshape(b, w, self.num_bands, -1).permute(0,2,1,3)
         k = self.q_conv(self.k_proj(x if mem is None else mem).transpose(1,2)).transpose(1,2).reshape(b, w, self.num_bands, -1).permute(0,2,3,1)
         v = self.q_conv(self.v_proj(x if mem is None else mem).transpose(1,2)).transpose(1,2).reshape(b, w, self.num_bands, -1).permute(0,2,1,3)
-        p = F.pad(torch.matmul(q,self.er), (1,0)).transpose(2,3)[:,:,1:,:]
+        p = F.pad(torch.matmul(q,self.weight), (1,0)).transpose(2,3)[:,:,1:,:]
         qk = (torch.matmul(q,k)+p) / math.sqrt(c)
 
         if mask is not None:
@@ -55,7 +56,7 @@ class FrameTransformerEncoder(nn.Module):
         self.cropsize = cropsize
         self.num_bands = num_bands
 
-        self.in_norm = nn.BatchNorm2d(channels)
+        self.in_norm = nn.LayerNorm(bins)
         self.in_project = nn.Linear(channels, 1, bias=bias)
 
         self.relu = nn.ReLU(inplace=True)
@@ -85,7 +86,8 @@ class FrameTransformerEncoder(nn.Module):
         self.dropout4 = nn.Dropout(dropout) if dropout > 0 else nn.Identity()
 
     def __call__(self, x):
-        x = self.in_project(self.in_norm(x).transpose(1,3)).squeeze(-1)
+        x = self.in_norm(x.transpose(2,3)).transpose(2,3)
+        x = self.in_project(x.transpose(1,3)).squeeze(-1)
 
         h = self.norm1(x)
         h = self.glu(h)
@@ -121,7 +123,10 @@ class FrameTransformerDecoder(nn.Module):
         self.cropsize = cropsize
         self.num_bands = num_bands
 
+        self.in_norm = nn.LayerNorm(bins)
         self.in_project = nn.Linear(channels, 1, bias=bias)
+
+        self.skip_norm = nn.LayerNorm(bins)
         self.skip_project = nn.Linear(skip_channels, 1, bias=bias)
 
         self.relu = nn.ReLU(inplace=True)
@@ -160,7 +165,10 @@ class FrameTransformerDecoder(nn.Module):
         self.dropout5 = nn.Dropout(dropout) if dropout > 0 else nn.Identity()
 
     def __call__(self, x, skip, mask=None):
+        x = self.in_norm(x.transpose(2,3)).transpose(2,3)
         x = self.in_project(x.transpose(1,3)).squeeze(-1)
+
+        skip = self.skip_norm(skip.transpose(2,3)).transpose(2,3)
         skip = self.skip_project(skip.transpose(1,3)).squeeze(-1)
 
         h = self.norm1(x)
