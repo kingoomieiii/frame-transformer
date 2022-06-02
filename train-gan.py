@@ -127,16 +127,12 @@ def train_epoch(dataloader, generator, discriminator, device, generator_optimize
         if generator_warmup is not None:
             generator_warmup.step()
 
-        unmask_loss = unmask_loss.item()
-        fake_loss = fake_loss.item()
-        disc_loss = disc_loss.item()
-
         if progress_bar:
-            pbar.set_description(f'{str(unmask_loss)}|{str(fake_loss)}|{str(disc_loss)}')
+            pbar.set_description(f'{str(unmask_loss.item())}|{str(fake_loss.item())}|{str(disc_loss.item())}')
 
-        sum_mask_loss += unmask_loss * len(src)
-        sum_disc_loss += disc_loss * len(src)
-        sum_gen_loss += generator_loss * len(src)
+        sum_mask_loss += unmask_loss.item() * len(src)
+        sum_disc_loss += disc_loss.item() * len(src)
+        sum_gen_loss += generator_loss.item() * len(src)
 
     return sum_mask_loss / len(dataloader.dataset), sum_gen_loss / len(dataloader.dataset), sum_disc_loss / len(dataloader.dataset)
 
@@ -224,7 +220,7 @@ def main():
     p.add_argument('--token_size', type=int, default=16)
     p.add_argument('--mask_rate', type=float, default=0.2)
     p.add_argument('--next_frame_chunk_size', type=int, default=512)
-    p.add_argument('--prefetch_factor', type=int, default=8)
+    p.add_argument('--prefetch_factor', type=int, default=2)
     args = p.parse_args()
 
     
