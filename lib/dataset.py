@@ -283,7 +283,6 @@ class MaskedPretrainingDataset(torch.utils.data.Dataset):
             X = X * a + (1 - a) * MX
         
         starts = []
-
         index_count = None
         indices = None
         if root:

@@ -138,14 +138,14 @@ def train_epoch(dataloader, generator, discriminator, device, generator_optimize
         if generator_warmup is not None:
             generator_warmup.step()
 
-        unmask_loss = unmask_loss.item() / src.shape[0]
+        unmask_loss = unmask_loss.item()
         fake_loss = fake_loss.item()
         disc_loss = disc_loss.item()
 
         if progress_bar:
             pbar.set_description(f'{str(unmask_loss)}|{str(fake_loss)}|{str(disc_loss)}')
 
-        sum_mask_loss += generator_loss * len(src)
+        sum_mask_loss += unmask_loss * len(src)
         sum_disc_loss += disc_loss * len(src)
         sum_gen_loss += generator_loss * len(src)
 
@@ -155,26 +155,24 @@ def validate_epoch(dataloader, generator, device, grad_scaler):
     generator.eval()
 
     sum_mask_loss = 0
-    sum_nxt_loss = 0
 
     mask_crit = nn.L1Loss()
 
     with torch.no_grad():
-        for src, tgt, _, _, _ in tqdm(dataloader):
+        for src, tgt, _, _ in tqdm(dataloader):
             src = src.to(device)
             tgt = tgt.to(device)
 
             with torch.cuda.amp.autocast_mode.autocast(enabled=grad_scaler is not None):
                 pred = generator(src)
  
-            mask_loss = mask_crit(src * pred, tgt)
-            loss = mask_loss
+            loss = mask_crit(src * pred, tgt)
     
             if torch.logical_or(loss.isnan(), loss.isinf()):
                 print('non-finite or nan validation loss; aborting')
                 quit()
             else:
-                sum_mask_loss += mask_loss.item() * len(src)
+                sum_mask_loss += loss.item() * len(src)
 
     return sum_mask_loss / len(dataloader.dataset)
 
@@ -184,8 +182,8 @@ def main():
     p.add_argument('--generator_type', type=str.lower, choices=['primer', 'unet', 'vanilla'])
     p.add_argument('--discriminator_type', type=str.lower, choices=['primer', 'conv', 'unet', 'vanilla'])
     p.add_argument('--curr_warmup_epoch', type=int, default=0)
-    p.add_argument('--warmup_epoch', type=int, default=0)
-    p.add_argument('--epoch', '-E', type=int, default=3000)
+    p.add_argument('--warmup_epoch', type=int, default=1)
+    p.add_argument('--epoch', '-E', type=int, default=30)
     p.add_argument('--lambda_l1', type=float, default=100)
     p.add_argument('--lambda_gen', type=float, default=1.0)
     p.add_argument('--lambda_critic', type=float, default=1.0)
@@ -237,7 +235,7 @@ def main():
     p.add_argument('--token_size', type=int, default=32)
     p.add_argument('--mask_rate', type=float, default=0.2)
     p.add_argument('--next_frame_chunk_size', type=int, default=512)
-    p.add_argument('--prefetch_factor', type=int, default=16)
+    p.add_argument('--prefetch_factor', type=int, default=8)
     args = p.parse_args()
 
     
@@ -262,7 +260,6 @@ def main():
         mix_path=[
             "D://cs2048_sr44100_hl1024_nf2048_of0_MIXES",
             "C://cs2048_sr44100_hl1024_nf2048_of0_MIXES",
-            #"G://cs2048_sr44100_hl1024_nf2048_of0_MIXES",
             "F://cs2048_sr44100_hl1024_nf2048_of0_MIXES",
             "H://cs2048_sr44100_hl1024_nf2048_of0_MIXES"],
         is_validation=False,
