@@ -53,7 +53,7 @@ def train_epoch(dataloader, generator, discriminator, device, generator_optimize
     sum_gen_loss = 0
     sum_disc_loss = 0
 
-    mask_crit = nn.L1Loss().to(device)
+    l1_crit = nn.L1Loss().to(device)
     bce_crit = nn.BCEWithLogitsLoss().to(device)
 
     disc_loss = 0
@@ -114,7 +114,7 @@ def train_epoch(dataloader, generator, discriminator, device, generator_optimize
                     
             fake = discriminator(fake_batch)
             fake_loss = bce_crit(fake, torch.ones_like(fake))
-            unmask_loss = mask_crit(fake_batch, real_batch)
+            unmask_loss = l1_crit(fake_batch, real_batch)
             generator_loss = lambda_l1 * unmask_loss + fake_loss
 
         generator_scaler.scale(generator_loss).backward()
@@ -164,8 +164,8 @@ def validate_epoch(dataloader, generator, device, grad_scaler):
 def main():
     p = argparse.ArgumentParser()
     p.add_argument('--id', type=str, default='')
-    p.add_argument('--generator_type', type=str.lower, choices=['primer', 'unet', 'vanilla'])
-    p.add_argument('--discriminator_type', type=str.lower, choices=['primer', 'conv', 'unet', 'vanilla'])
+    p.add_argument('--generator_type', type=str.lower, choices=['primer', 'unet', 'vanilla'], default='primer')
+    p.add_argument('--discriminator_type', type=str.lower, choices=['primer', 'conv'], default='conv')
     p.add_argument('--curr_warmup_epoch', type=int, default=0)
     p.add_argument('--warmup_epoch', type=int, default=0)
     p.add_argument('--epoch', '-E', type=int, default=30)
@@ -304,7 +304,11 @@ def main():
 
     device = torch.device('cpu')
     generator = FramePrimer(channels=args.channels, n_fft=args.n_fft, num_transformer_blocks=args.num_transformer_blocks, num_bands=args.num_bands, feedforward_dim=args.feedforward_dim, bias=args.bias, cropsize=args.cropsize + args.next_frame_chunk_size, dropout=args.dropout)
-    discriminator = FramePrimerDiscriminator(channels=args.channels, n_fft=args.n_fft, num_transformer_blocks=args.num_transformer_blocks, num_bands=args.num_bands, feedforward_dim=args.feedforward_dim, bias=args.bias, cropsize=args.token_size, dropout=args.dropout)
+    
+    if args.discriminator_type == 'primer':
+        discriminator = FramePrimerDiscriminator(channels=args.channels, n_fft=args.n_fft, num_transformer_blocks=args.num_transformer_blocks, num_bands=args.num_bands, feedforward_dim=args.feedforward_dim, bias=args.bias, cropsize=args.token_size, dropout=args.dropout)
+    else:
+        discriminator = ConvDiscriminator(in_channels=args.channels, channels=8)
 
     if args.pretrained_model is not None:
         generator.load_state_dict(torch.load(args.pretrained_model, map_location=device))

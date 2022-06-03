@@ -81,26 +81,23 @@ def train_epoch(dataloader, model, device, optimizer, accumulation_steps, grad_s
 
         pred = src * pred
 
-        if reconstruction_loss_type == 'unmasked':
-            mask_loss = None
+        mask_loss = None
 
-            x_batch = None
-            y_batch = None
+        x_batch = None
+        y_batch = None
 
-            for n in range(src.shape[0]):
-                idx_count_itm = num_indices[n]
-                indices_itm = indices[n]
+        for n in range(src.shape[0]):
+            idx_count_itm = num_indices[n]
+            indices_itm = indices[n]
 
-                for idx in range(idx_count_itm):
-                    start = indices_itm[idx]
-                    unmasked = pred[None, n, :, :, start:start+dataloader.dataset.token_size]
-                    target = tgt[None, n, :, :, start:start+dataloader.dataset.token_size]
-                    x_batch = torch.cat((x_batch, unmasked), dim=0) if x_batch is not None else unmasked
-                    y_batch = torch.cat((y_batch, target), dim=0) if y_batch is not None else target
+            for idx in range(idx_count_itm):
+                start = indices_itm[idx]
+                unmasked = pred[None, n, :, :, start:start+dataloader.dataset.token_size]
+                target = tgt[None, n, :, :, start:start+dataloader.dataset.token_size]
+                x_batch = torch.cat((x_batch, unmasked), dim=0) if x_batch is not None else unmasked
+                y_batch = torch.cat((y_batch, target), dim=0) if y_batch is not None else target
 
-            mask_loss = mask_crit(x_batch, y_batch)
-        else:
-            mask_loss = mask_crit(pred, tgt)
+        mask_loss = mask_crit(x_batch, y_batch)
         
         loss = mask_loss
         accum_loss = loss / accumulation_steps
@@ -226,7 +223,7 @@ def main():
     p.add_argument('--mask_rate', type=float, default=0.15)
     p.add_argument('--next_frame_chunk_size', type=int, default=512)
     p.add_argument('--reconstruction_loss_type', type=str.lower, choices=['full', 'unmasked'], default='unmasked')
-    p.add_argument('--prefetch_factor', type=int, default=8)
+    p.add_argument('--prefetch_factor', type=int, default=2)
     args = p.parse_args()
 
     args.amsgrad = str.lower(args.amsgrad) == 'true'
