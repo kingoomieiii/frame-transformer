@@ -20,13 +20,6 @@ import torch.nn.functional as F
 
 from kmeans_pytorch import kmeans
 
-class KmeansClustering(nn.Module):
-    def __init__(self, num_clusters=2):
-        super(KmeansClustering, self).__init__()
-
-        self.num_clusters = num_clusters
-        
-
 def setup_logger(name, logfile='LOGFILENAME.log', out_dir='logs'):
     logger = logging.getLogger(name)
     logger.setLevel(logging.DEBUG)
