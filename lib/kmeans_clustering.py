@@ -1,6 +1,7 @@
 import torch
 import torch.nn as nn
 import numpy as np
+from tqdm import tqdm
 from lib.dataset_kmeans import KMeansPreprocessingDataset
 
 class KmeansClustering(nn.Module):
@@ -19,7 +20,7 @@ class KmeansClustering(nn.Module):
         with torch.no_grad():
             centroids = None
 
-            for i, B in enumerate(dataloader):
+            for i, B in enumerate(tqdm(dataloader)):
                 B = B.to(device)
                 B = B[:, :, :, :, :self.max_bin]
                 N,T,W,C,H = B.shape

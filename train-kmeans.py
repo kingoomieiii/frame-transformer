@@ -41,7 +41,7 @@ def main():
     p.add_argument('--id', type=str, default='')
     p.add_argument('--seed', type=int, default=0)
     p.add_argument('--num_clusters', type=int, default=128)
-    p.add_argument('--num_init_samples', type=int, default=32)
+    p.add_argument('--num_init_samples', type=int, default=64)
     p.add_argument('--n_fft', type=int, default=2048)
     p.add_argument('--batchsize', '-B', type=int, default=10)
     p.add_argument('--epoch', '-E', type=int, default=30)
@@ -55,9 +55,9 @@ def main():
 
     logger.info(args)
 
-    random.seed(args.seed + 1)
-    np.random.seed(args.seed + 1)
-    torch.manual_seed(args.seed + 1)
+    random.seed(args.seed)
+    np.random.seed(args.seed)
+    torch.manual_seed(args.seed)
 
     init_dataset = KMeansPreprocessingDataset(
         path="C://cs2048_sr44100_hl1024_nf2048_of0",
@@ -75,7 +75,7 @@ def main():
         dataset=init_dataset,
         batch_size=args.num_clusters,
         shuffle=True,
-        num_workers=12,
+        num_workers=16,
         prefetch_factor=2
     )
 
