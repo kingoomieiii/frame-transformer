@@ -66,8 +66,8 @@ class KMeansPreprocessingDataset(torch.utils.data.Dataset):
     def __len__(self):
         return len(self.curr_list)
 
-    def __getitem__(self, idx, root=True):
-        path = self.curr_list[idx % len(self.curr_list)]
+    def __getitem__(self, idx):
+        path = self.curr_list[idx]
         data = np.load(str(path))
         X, c = data['X'], data['c']
 
