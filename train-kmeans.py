@@ -41,7 +41,7 @@ def main():
     p.add_argument('--id', type=str, default='')
     p.add_argument('--seed', type=int, default=0)
     p.add_argument('--num_clusters', type=int, default=128)
-    p.add_argument('--num_init_samples', type=int, default=64)
+    p.add_argument('--num_init_samples', type=int, default=1)
     p.add_argument('--n_fft', type=int, default=2048)
     p.add_argument('--batchsize', '-B', type=int, default=10)
     p.add_argument('--epoch', '-E', type=int, default=30)
@@ -49,7 +49,7 @@ def main():
     p.add_argument('--pretrained_model', '-P', type=str, default=None)
     p.add_argument('--model_dir', type=str, default='G://')
     p.add_argument('--token_size', type=int, default=16)
-    p.add_argument('--num_workers', type=int, default=16)
+    p.add_argument('--num_workers', type=int, default=14)
     p.add_argument('--prefetch_factor', type=int, default=2)
     args = p.parse_args()
 
@@ -105,18 +105,18 @@ def main():
         dataset=train_dataset,
         batch_size=args.batchsize,
         shuffle=True,
+        drop_last=True,
         num_workers=args.num_workers,
         prefetch_factor=2
     )
 
     for epoch in range(args.epoch):
-        sum_point_loss = 0
+        logger.info(f'# epoch {epoch}')
+        sum_point_dist = 0
         sum_delta_loss = 0
 
-        i = 0
         pb = tqdm(train_dataloader)
         for X in pb:
-            i += 1
             with torch.no_grad():
                 X = X.to(device)
                 X = X[:, :, :, :, :max_bin]
@@ -125,14 +125,19 @@ def main():
 
                 with torch.cuda.amp.autocast_mode.autocast():
                     center_delta, point_loss = kmeans(X)
-                    sum_point_loss += point_loss
+                    sum_point_dist += point_loss
                     sum_delta_loss += center_delta
 
             pb.set_description_str(f'delta={center_delta.item()}, point={point_loss.item()}')
 
-        cluster_path = f'{args.model_dir}models/model_iter{epoch}.cluster.pth'
-        torch.save(kmeans.state_dict(), cluster_path)
-        logger.info('# epoch {} complete; point loss = {}'.format(epoch, sum_point_loss / len(train_dataloader)))
+        cluster_path = f'{args.model_dir}models/model_iter{epoch}.cluster'
+        np.savez(cluster_path, centers=kmeans.centroids.clone().cpu())
+        logger.info('# epoch {} complete; average change in centroid = {}, average point dist = {}'.format(epoch, sum_delta_loss / len(train_dataloader), sum_point_dist / len(train_dataloader)))
+
+        logger.info(
+            '  * avg move dist = {:.6f}, avg point dist = {:.6f}'
+            .format(sum_delta_loss / len(train_dataloader), sum_point_dist / len(train_dataloader))
+        )
 
 if __name__ == '__main__':
     timestamp = datetime.now().strftime('%Y.%m.%d-%H.%M.%S')

@@ -52,8 +52,11 @@ class KmeansClustering(nn.Module):
                     delta_k += 1
                     old_center = self.centroids[K]
                     new_center = torch.sum(x[idx, :], dim=0) / len(idx)
-                    delta = torch.sum(torch.square(torch.sub(old_center, new_center)))
+                    delta = torch.sum(torch.square(torch.sub(new_center, old_center)))
                     sum_delta = sum_delta + delta
                     self.centroids[K] = new_center
 
             return sum_delta / delta_k, avg_dist
+
+    def get_clusters(self, x):
+        return torch.argmin(torch.sum(torch.square(torch.sub(x.unsqueeze(0), self.centroids.unsqueeze(1))), dim=2), dim=0)
