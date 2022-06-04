@@ -3,9 +3,9 @@ import torch.nn as nn
 import numpy as np
 from lib.dataset_kmeans import KMeansPreprocessingDataset
 
-class Kmeans(nn.Module):
+class KmeansClustering(nn.Module):
     def __init__(self, num_clusters, num_features, momentum=0.5, n_fft=2048):
-        super(Kmeans, self).__init__()
+        super(KmeansClustering, self).__init__()
 
         self.num_clusters = num_clusters
         self.num_features = num_features
@@ -36,24 +36,23 @@ class Kmeans(nn.Module):
     def __call__(self, x):
         if self.centroids.device != x.device:
             self.centroids = self.centroids.to(x.device)
-            self.m = self.m.to(x.device)
-            self.v = self.v.to(x.device)
+        
+        with torch.no_grad():
+            sum_delta = 0
+            delta_k = 0
+            dist = torch.sum(torch.square(torch.sub(x.unsqueeze(0), self.centroids.unsqueeze(1))), dim=2)
+            nearest = torch.argmin(dist, dim=0)
+            avg_dist = torch.sum(dist[:, nearest]) / x.shape[0]
 
-        sum_delta = 0
-        delta_k = 0
-        dist = torch.sum(torch.square(torch.sub(x.unsqueeze(0), self.centroids.unsqueeze(1))), dim=2)
-        nearest = torch.argmin(dist, dim=0)
-        avg_dist = torch.sum(dist[:, nearest]) / x.shape[0]
+            for K in range(self.num_clusters):
+                idx, = torch.where(nearest == K)
 
-        for K in range(self.num_clusters):
-            idx, = torch.where(nearest == K)
+                if len(idx) > 0:
+                    delta_k += 1
+                    old_center = self.centroids[K]
+                    new_center = torch.sum(x[idx, :], dim=0) / len(idx)
+                    delta = torch.sum(torch.square(torch.sub(old_center, new_center)))
+                    sum_delta = sum_delta + delta
+                    self.centroids[K] = new_center
 
-            if len(idx) > 0:
-                delta_k += 1
-                old_center = self.centroids[K]
-                new_center = torch.sum(x[idx, :], dim=0) / len(idx)
-                delta = torch.sum(torch.square(torch.sub(old_center, new_center)))
-                sum_delta = sum_delta + delta
-                self.centroids[K] = new_center
-
-        return sum_delta / delta_k, avg_dist
+            return sum_delta / delta_k, avg_dist

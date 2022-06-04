@@ -14,7 +14,7 @@ from tqdm import tqdm
 from lib.dataset_kmeans import KMeansPreprocessingDataset
 
 import torch.nn.functional as F
-from lib.kmeans import Kmeans
+from lib.kmeans_clustering import KmeansClustering
 
 def setup_logger(name, logfile='LOGFILENAME.log', out_dir='logs'):
     logger = logging.getLogger(name)
@@ -49,7 +49,7 @@ def main():
     p.add_argument('--pretrained_model', '-P', type=str, default=None)
     p.add_argument('--model_dir', type=str, default='G://')
     p.add_argument('--token_size', type=int, default=16)
-    p.add_argument('--num_workers', type=int, default=8)
+    p.add_argument('--num_workers', type=int, default=16)
     p.add_argument('--prefetch_factor', type=int, default=2)
     args = p.parse_args()
 
@@ -83,7 +83,7 @@ def main():
     num_clusters = args.num_clusters
 
     device = torch.device('cuda')
-    kmeans = Kmeans(num_clusters, num_features=2*args.token_size*max_bin).to(device)
+    kmeans = KmeansClustering(num_clusters, num_features=2*args.token_size*max_bin).to(device)
     kmeans.initialize(init_dataloader, device, num_init_samples=args.num_init_samples)
 
     del init_dataloader
@@ -106,7 +106,7 @@ def main():
         batch_size=args.batchsize,
         shuffle=True,
         num_workers=args.num_workers,
-        prefetch_factor=16
+        prefetch_factor=2
     )
 
     for epoch in range(args.epoch):
