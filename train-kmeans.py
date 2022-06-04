@@ -41,8 +41,9 @@ def main():
     p.add_argument('--id', type=str, default='')
     p.add_argument('--seed', type=int, default=0)
     p.add_argument('--num_clusters', type=int, default=128)
+    p.add_argument('--num_init_samples', type=int, default=32)
     p.add_argument('--n_fft', type=int, default=2048)
-    p.add_argument('--batchsize', '-B', type=int, default=8)
+    p.add_argument('--batchsize', '-B', type=int, default=10)
     p.add_argument('--epoch', '-E', type=int, default=30)
     p.add_argument('--cropsize', '-C', type=int, default=512)
     p.add_argument('--pretrained_model', '-P', type=str, default=None)
@@ -74,8 +75,8 @@ def main():
         dataset=init_dataset,
         batch_size=args.num_clusters,
         shuffle=True,
-        num_workers=8,
-        prefetch_factor=1
+        num_workers=12,
+        prefetch_factor=2
     )
 
     max_bin = args.n_fft // 2
@@ -83,7 +84,7 @@ def main():
 
     device = torch.device('cuda')
     kmeans = Kmeans(num_clusters, num_features=2*args.token_size*max_bin).to(device)
-    kmeans.initialize(init_dataloader, device, num_init_samples=32)
+    kmeans.initialize(init_dataloader, device, num_init_samples=args.num_init_samples)
 
     del init_dataloader
     del init_dataset
@@ -105,12 +106,11 @@ def main():
         batch_size=args.batchsize,
         shuffle=True,
         num_workers=args.num_workers,
-        prefetch_factor=args.prefetch_factor
+        prefetch_factor=16
     )
 
     for epoch in range(args.epoch):
         sum_point_loss = 0
-        sum_dist_loss = 0
         sum_delta_loss = 0
 
         i = 0
@@ -124,16 +124,15 @@ def main():
                 X = X.reshape(N*T,W*C*H)
 
                 with torch.cuda.amp.autocast_mode.autocast():
-                    center_delta, point_loss, dist_loss = kmeans(X)
+                    center_delta, point_loss = kmeans(X)
                     sum_point_loss += point_loss
-                    sum_dist_loss += dist_loss
                     sum_delta_loss += center_delta
 
-            pb.set_description_str(f'delta={center_delta.item()}, point={point_loss.item()}, dist={dist_loss.item()}')
+            pb.set_description_str(f'delta={center_delta.item()}, point={point_loss.item()}')
 
         cluster_path = f'{args.model_dir}models/model_iter{epoch}.cluster.pth'
         torch.save(kmeans.state_dict(), cluster_path)
-        logger.info('# epoch {} complete; point loss = {}, dist loss = {}'.format(epoch, sum_point_loss / len(train_dataloader), sum_dist_loss / len(train_dataloader)))
+        logger.info('# epoch {} complete; point loss = {}'.format(epoch, sum_point_loss / len(train_dataloader)))
 
 if __name__ == '__main__':
     timestamp = datetime.now().strftime('%Y.%m.%d-%H.%M.%S')
