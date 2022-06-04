@@ -58,18 +58,17 @@ class Kmeans(nn.Module):
             idx, = torch.where(nearest == K)
 
             if len(idx) > 0:
-                delta_k += 1
                 old_center = self.centroids[K]
                 new_center = torch.sum(x[idx, :], dim=0) / len(idx)
                 delta = torch.sum(torch.square(torch.sub(new_center, old_center)))
-                sum_delta = sum_delta + delta
                 m = self.betas[0] * self.m[K] + (1 - self.betas[0]) * (delta + self.betas[2] * point_loss + self.betas[3] * centroid_loss)
                 v = self.betas[1] * self.v[K] + (1 - self.betas[1]) * torch.pow((delta + self.betas[2] * point_loss + self.betas[3] * centroid_loss), 2)
                 mh = m / (1 - self.betas[0] ** self.step)
                 vh = v / (1 - self.betas[1] ** self.step)
-                next_center = old_center - (self.learning_rate * mh / (torch.sqrt(vh) + 1e-8))
-                self.centroids[K] = next_center
+                self.centroids[K] = old_center - (self.learning_rate * mh / (torch.sqrt(vh) + 1e-8))
                 self.m[K] = m
                 self.v[K] = v
+                delta_k += 1
+                sum_delta = sum_delta + delta
 
         return sum_delta / delta_k, point_loss, centroid_loss
