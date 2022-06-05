@@ -5,7 +5,7 @@ from tqdm import tqdm
 from lib.dataset_kmeans import KMeansPreprocessingDataset
 
 class KmeansClustering(nn.Module):
-    def __init__(self, num_clusters, num_features, adjustment_rate=0.1, n_fft=2048, centroids=None):
+    def __init__(self, num_clusters, num_features, adjustment_rate=1e-3, n_fft=2048, centroids=None):
         super(KmeansClustering, self).__init__()
 
         self.adjustment_rate = adjustment_rate
@@ -52,7 +52,7 @@ class KmeansClustering(nn.Module):
 
                 if len(idx) > 0:
                     delta_k += 1
-                    new_center = torch.sum(x[idx, :], dim=0) / len(idx)
+                    new_center = self.adjustment_rate * (torch.sum(x[idx, :], dim=0) / len(idx)) + (1 - self.adjustment_rate) * self.centroids[K]
                     delta = torch.sum(torch.square(torch.sub(new_center, self.centroids[K])))
                     sum_delta = sum_delta + delta
                     self.centroids[K] = new_center
