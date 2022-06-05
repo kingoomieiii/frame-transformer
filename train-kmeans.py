@@ -124,11 +124,11 @@ def main():
                 X = X.reshape(N*T,W*C*H)
 
                 with torch.cuda.amp.autocast_mode.autocast():
-                    center_delta, point_loss = kmeans(X)
+                    center_delta, point_loss, miss = kmeans(X)
                     sum_point_dist += point_loss
                     sum_delta_loss += center_delta
 
-            pb.set_description_str(f'delta={center_delta.item()}, point={point_loss.item()}')
+            pb.set_description_str(f'delta={center_delta.item()}, point={point_loss.item()}, misses={miss}')
 
         cluster_path = f'{args.model_dir}models/model_iter{epoch}.cluster'
         np.savez(cluster_path, centers=kmeans.centroids.clone().cpu())
