@@ -346,6 +346,11 @@ class MaskedPretrainingDataset(torch.utils.data.Dataset):
                         X[:, :, start:stop] = np.maximum(Y[:, :, start:stop], noise[:, :, start:stop])
                     else:
                         X[:, :, start:stop] = Y[:, :, start:stop]
+
+            separator_token = np.ones(X.shape)
+            separator_token[:, 1::2, :] = 0
+            X[:, :, -self.next_frame_chunk_size-(self.token_size//2):-self.next_frame_chunk_size+(self.token_size//4)] = separator_token[:, :, -self.next_frame_chunk_size-(self.token_size//4):-self.next_frame_chunk_size+(self.token_size//2)]
+            Y[:, :, -self.next_frame_chunk_size-(self.token_size//2):-self.next_frame_chunk_size+(self.token_size//4)] = separator_token[:, :, -self.next_frame_chunk_size-(self.token_size//4):-self.next_frame_chunk_size+(self.token_size//2)]
                     
             index_count = len(starts)
             indices = np.pad(np.array(starts), (0, num_tokens - len(starts)))
