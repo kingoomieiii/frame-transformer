@@ -19,6 +19,7 @@ from lib.frame_primer import FramePrimer
 from lib.frame_transformer import FrameTransformer
 
 from lib.frame_transformer_unet import FrameTransformerUnet
+from lib.kmeans_clustering import KmeansClustering
 from lib.lr_scheduler_linear_warmup import LinearWarmupScheduler
 from lib.lr_scheduler_polynomial_decay import PolynomialDecayScheduler
 
@@ -70,19 +71,19 @@ def train_epoch(dataloader, model, device, optimizer, accumulation_steps, grad_s
     bce_crit = nn.BCEWithLogitsLoss()
 
     pbar = tqdm(dataloader) if progress_bar else dataloader
-    for itr, (src, tgt, num_indices, indices) in enumerate(pbar):
-        src = src.to(device)
-        tgt = tgt.to(device)
+    for itr, (src, tgt, num_indices, indices, is_next) in enumerate(pbar):
+        src = src.to(device)[:, :, :model.max_bin]
+        tgt = tgt.to(device)[:, :, :model.max_bin]
+        is_next = is_next.to(device).unsqueeze(-1)
+
         num_indices = num_indices.to(device)
         indices = indices.to(device)
 
         with torch.cuda.amp.autocast_mode.autocast(enabled=grad_scaler is not None):
-            pred = model(src)
+            pred, is_next_pred = model(src)
 
         pred = src * pred
-
         mask_loss = None
-
         x_batch = None
         y_batch = None
 
@@ -98,11 +99,11 @@ def train_epoch(dataloader, model, device, optimizer, accumulation_steps, grad_s
                 y_batch = torch.cat((y_batch, target), dim=0) if y_batch is not None else target
 
         mask_loss = mask_crit(x_batch, y_batch)
-        
-        loss = mask_loss
+        next_loss = bce_crit(is_next_pred, is_next)
+        loss = mask_loss + next_loss
         accum_loss = loss / accumulation_steps
-
         batch_mask_loss = batch_mask_loss + (mask_loss / accumulation_steps)
+        batch_nxt_loss = batch_nxt_loss + (next_loss / accumulation_steps)
 
         if grad_scaler is not None:
             grad_scaler.scale(accum_loss).backward()
@@ -111,7 +112,7 @@ def train_epoch(dataloader, model, device, optimizer, accumulation_steps, grad_s
 
         if (itr + 1) % accumulation_steps == 0:
             if progress_bar:
-                pbar.set_description(f'{str(batch_mask_loss.item())}')
+                pbar.set_description(f'{str(batch_mask_loss.item())}|{str(batch_nxt_loss.item())}')
 
             if grad_scaler is not None:
                 grad_scaler.unscale_(optimizer)
@@ -126,6 +127,7 @@ def train_epoch(dataloader, model, device, optimizer, accumulation_steps, grad_s
 
             model.zero_grad()
             batch_mask_loss = 0
+            batch_nxt_loss = 0
 
         sum_mask_loss += mask_loss.item() * len(src)
 
@@ -156,7 +158,7 @@ def validate_epoch(dataloader, model, device, grad_scaler, reconstruction_loss_t
             indices = indices.to(device)
 
             with torch.cuda.amp.autocast_mode.autocast(enabled=grad_scaler is not None):
-                pred = model(src)
+                pred, _ = model(src)
 
             mask_loss = mask_crit(src * pred, tgt)
             loss = mask_loss
@@ -211,6 +213,7 @@ def main():
     p.add_argument('--mixup_rate', '-M', type=float, default=0)
     p.add_argument('--mixup_alpha', '-a', type=float, default=0.4)
     p.add_argument('--pretrained_model', '-P', type=str, default=None)
+    p.add_argument('--pretrained_clusterer', type=str, default="G://models/model_iter19.cluster.npz")
     p.add_argument('--pretrained_model_scheduler', type=str, default=None)
     p.add_argument('--progress_bar', '-pb', type=str, default='true')
     p.add_argument('--mixed_precision', type=str, default='true')
@@ -219,7 +222,7 @@ def main():
     p.add_argument('--model_dir', type=str, default='G://')
     p.add_argument('--debug', action='store_true')
     p.add_argument('--dropout', type=float, default=0.1)
-    p.add_argument('--token_size', type=int, default=16)
+    p.add_argument('--token_size', type=int, default=32)
     p.add_argument('--mask_rate', type=float, default=0.15)
     p.add_argument('--next_frame_chunk_size', type=int, default=512)
     p.add_argument('--reconstruction_loss_type', type=str.lower, choices=['full', 'unmasked'], default='unmasked')
@@ -319,7 +322,7 @@ def main():
         model.load_state_dict(torch.load(args.pretrained_model, map_location=device))
     if torch.cuda.is_available() and args.gpu >= 0:
         device = torch.device('cuda:{}'.format(args.gpu))
-        model.to(device)    
+        model.to(device)
     
     grad_scaler = torch.cuda.amp.grad_scaler.GradScaler() if args.mixed_precision else None
     
