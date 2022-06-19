@@ -2,7 +2,7 @@
 
 This is a deep-learning-based tool to extract instrumental track from your songs.
 
-This is an experimental fork that is changing rapidly. 
+This is an experimental fork that is changing rapidly. Still working on this heavily, just haven't pushed current changes as they are quite a drastic departure from what is currently in the repo; don't want to push code until its in a good state and trained, should be quite interesting if it works though. Basically working on a vector quantization system for individual frames.
 
 There are three files for training:
 
