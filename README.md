@@ -14,9 +14,9 @@ FrameEncoder - this module is an encoder for individual frames of a spectrogram.
 
 FrameDecoder - this module is a decoder for individual frames of a spectrogram. It consists of a ResBlock module and a nn.Upsample module if needed.
 
-FramePrimerEncoder - this module is a variation of the primer encoder architecture. It first bottlenecks the input to a single channel; from here, it is a standard primer encoder with relative positional encoding and residual attention connection.
+FramePrimerEncoder - this module is a variation of the primer encoder architecture. It first bottlenecks the input to a single channel; from here, it is a standard primer encoder with relative positional encoding.
 
-FramePrimerDecoder - this module is a variation of the primer decoder architecture. It first bottlenecks the input to a single channel; from here, it is a standard primer decoder with relative positional encoding and residual attention connection. The memory for this decoder is the skip connection in the u-net, which allows for each frame to query for global information from the skip connections.
+FramePrimerDecoder - this module is a variation of the primer decoder architecture. It first bottlenecks the input to a single channel; from here, it is a standard primer decoder with relative positional encoding. The memory for this decoder is the skip connection in the u-net, which allows for each frame to query for global information from the skip connections.
 
 Right now I'm mainly only focusing on train-pre.py and train.py. train-gan.py works, but it seems it will require quite a bit of training. I will likely modify this script to be for vocal removing rather than pretraining.
 
@@ -32,6 +32,5 @@ train.py - This is the original training script with some modifications (learnin
 - [5] Vaswani et al., "Attention Is All You Need", https://arxiv.org/pdf/1706.03762.pdf
 - [6] So et al., "Primer: Searching for Efficient Transformers for Language Modeling", https://arxiv.org/pdf/2109.08668v2.pdf
 - [7] Huang et al., "Music Transformer: Generating Music with Long-Term Structure", https://arxiv.org/pdf/1809.04281.pdf
-- [8] He et al., "RealFormer: Transformer Likes Residual Attention", https://arxiv.org/pdf/2012.11747.pdf
-- [9] Devlin et al., "BERT: Pre-training of Deep Bidirectional Transformers for Language Understanding", https://arxiv.org/pdf/1810.04805.pdf
-- [10] Hsu et al., "HuBERT: Self-Supervised Speech Representation Learning by Masked Prediction of Hidden Units", https://arxiv.org/pdf/2106.07447.pdf
+- [8] Devlin et al., "BERT: Pre-training of Deep Bidirectional Transformers for Language Understanding", https://arxiv.org/pdf/1810.04805.pdf
+- [9] Hsu et al., "HuBERT: Self-Supervised Speech Representation Learning by Masked Prediction of Hidden Units", https://arxiv.org/pdf/2106.07447.pdf
