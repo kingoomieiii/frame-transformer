@@ -2,7 +2,6 @@ import torch
 from torch import nn
 import torch.nn.functional as F
 import math
-
 from frame_primer.common import FrameConv, FrameDecoder, FrameEncoder, FramePrimerEncoder, FramePrimerDecoder
 
 class FramePrimer(nn.Module):

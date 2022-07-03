@@ -44,11 +44,10 @@ class FramePrimerEncoder(nn.Module):
     def __init__(self, channels, bins=0, num_bands=4, cropsize=1024, feedforward_dim=2048, bias=False, dropout=0.1, downsamples=0, n_fft=2048):
         super(FramePrimerEncoder, self).__init__()
 
-        if bins == 0:
-            bins = n_fft // 2
-            if downsamples > 0:
-                for _ in range(downsamples):
-                    bins = ((bins - 1) // 2) + 1
+        bins = n_fft // 2
+        if downsamples > 0:
+            for _ in range(downsamples):
+                bins = ((bins - 1) // 2) + 1
 
         self.bins = bins
         self.cropsize = cropsize
@@ -57,35 +56,33 @@ class FramePrimerEncoder(nn.Module):
         self.relu = nn.ReLU(inplace=True)
 
         self.in_norm = nn.InstanceNorm2d(cropsize, affine=True)
-        self.in_project = nn.Linear(channels, 1)
+        self.in_project = nn.Linear(channels, 1, bias=bias)
 
         self.norm1 = nn.InstanceNorm2d(cropsize, affine=True)
-        self.attn = MultibandFrameAttention(num_bands, bins, cropsize, bias=bias)
-        
+        self.attn = MultibandFrameAttention(num_bands, bins, cropsize)
+
         self.norm2 = nn.InstanceNorm2d(cropsize, affine=True)
-        self.ff_project = nn.Linear(2, 1)
         self.linear1 = nn.Linear(bins, feedforward_dim, bias=bias)
         self.linear2 = nn.Linear(feedforward_dim, bins, bias=bias)
 
     def __call__(self, x, prev_qk=None):
-        x = self.in_project(self.in_norm(x.transpose(1,3))).transpose(1,3)
+        x = self.in_project(self.relu(self.in_norm(x.transpose(1,3)))).squeeze(-1)
 
-        h = self.norm1(x.transpose(1,3)).transpose(1,3)
-        h, prev_qk = self.attn(h.transpose(1,3).squeeze(-1), prev_qk=prev_qk)
-        x = torch.cat((x, h.unsqueeze(-1).transpose(1,3)), dim=1)
+        h = self.norm1(x.unsqueeze(-1)).squeeze(-1)
+        h, prev_qk = self.attn(h, prev_qk=None)
+        x = x + h
         
-        h = self.norm2(x.transpose(1,3)).transpose(1,3)
-        h = self.ff_project(h.transpose(1,3)).transpose(1,3)
-        h = self.linear2(torch.square(self.relu(self.linear1(h.transpose(2,3))))).transpose(2,3)
-        x = torch.cat((x, h), dim=1)
+        h = self.norm2(x.unsqueeze(-1)).squeeze(-1)
+        h = self.linear2(torch.square(self.relu(self.linear1(h))))
+        x = x + h
 
-        return x, prev_qk
+        return x.transpose(1,2).unsqueeze(1), prev_qk
 
 class FramePrimerDecoder(nn.Module):
-    def __init__(self, channels, mem_channels, num_bands=4, cropsize=1024, n_fft=2048, feedforward_dim=2048, downsamples=0, bias=False, dropout=0.1):
+    def __init__(self, channels, mem_channels, bins=0, num_bands=4, cropsize=1024, feedforward_dim=2048, bias=False, dropout=0.1, downsamples=0, n_fft=2048):
         super(FramePrimerDecoder, self).__init__()
 
-        bins = (n_fft // 2)
+        bins = n_fft // 2
         if downsamples > 0:
             for _ in range(downsamples):
                 bins = ((bins - 1) // 2) + 1
@@ -102,40 +99,33 @@ class FramePrimerDecoder(nn.Module):
         self.mem_norm = nn.InstanceNorm2d(cropsize, affine=True)
         self.mem_project = nn.Linear(mem_channels, 1, bias=bias)
 
-        self.attn1_norm = nn.InstanceNorm2d(cropsize, affine=True)
-        self.attn1_project = nn.Linear(2, 1)
-        self.attn = MultibandFrameAttention(num_bands, bins, cropsize, bias=bias)
+        self.norm1 = nn.InstanceNorm2d(cropsize, affine=True)
+        self.attn1 = MultibandFrameAttention(num_bands, bins, cropsize)
 
-        self.attn2_norm = nn.InstanceNorm2d(cropsize, affine=True)
-        self.attn2_project = nn.Linear(3, 1)
-        self.mem_attn = MultibandFrameAttention(num_bands, bins, cropsize, bias=bias)
+        self.norm2 = nn.InstanceNorm2d(cropsize, affine=True)
+        self.attn2 = MultibandFrameAttention(num_bands, bins, cropsize)
 
         self.norm3 = nn.InstanceNorm2d(cropsize, affine=True)
-        self.ff_project = nn.Linear(4, 1)
         self.linear1 = nn.Linear(bins, feedforward_dim, bias=bias)
         self.linear2 = nn.Linear(feedforward_dim, bins, bias=bias)
 
-    def __call__(self, x, mem, prev_qk1=None, prev_qk2=None):
-        x = self.in_project(self.in_norm(x.transpose(1,3))).transpose(1,3)
-        mem = self.mem_project(self.mem_norm(mem.transpose(1,3))).transpose(1,3)
-        x = torch.cat((x, mem), dim=1)
+    def __call__(self, x, mem=None, prev_qk1=None, prev_qk2=None):
+        x = self.in_project(self.relu(self.in_norm(x.transpose(1,3)))).squeeze(-1)
+        mem = self.mem_project(self.relu(self.mem_norm(mem.transpose(1,3)))).squeeze(-1)
 
-        h = self.attn1_norm(x.transpose(1,3)).transpose(1,3)
-        h = self.attn1_project(h.transpose(1,3)).transpose(1,3)
-        h, prev_qk1 = self.attn(h.transpose(1,3).squeeze(-1), prev_qk=prev_qk1)
-        x = torch.cat((x, h.unsqueeze(-1).transpose(1,3)), dim=1)
+        h = self.norm1(x.unsqueeze(-1)).squeeze(-1)
+        h, prev_qk1 = self.attn1(h, prev_qk=None)
+        x = x + h
 
-        h = self.attn2_norm(x.transpose(1,3)).transpose(1,3)
-        h = self.attn2_project(h.transpose(1,3)).transpose(1,3)
-        h, prev_qk2 = self.mem_attn(h.transpose(1,3).squeeze(-1), mem=mem.transpose(1,3).squeeze(-1), prev_qk=prev_qk2)
-        x = torch.cat((x, h.unsqueeze(-1).transpose(1,3)), dim=1)
+        h = self.norm2(x.unsqueeze(-1)).squeeze(-1)
+        h, prev_qk2 = self.attn2(h, mem=mem, prev_qk=None)
+        x = x + h
         
-        h = self.norm3(x.transpose(1,3)).transpose(1,3)
-        h = self.ff_project(h.transpose(1,3)).transpose(1,3)
-        h = self.linear2(torch.square(self.relu(self.linear1(h.transpose(2,3))))).transpose(2,3)
-        x = torch.cat((x, h), dim=1)
+        h = self.norm2(x.unsqueeze(-1)).squeeze(-1)
+        h = self.linear2(torch.square(self.relu(self.linear1(h))))
+        x = x + h
 
-        return x, prev_qk1, prev_qk2
+        return x.transpose(1,2).unsqueeze(1), prev_qk1, prev_qk2
 
 class FrameConv(nn.Module):
     def __init__(self, in_channels, out_channels, kernel_size=3, stride=1, padding=1, dilation=1, groups=1, activate=nn.ReLU, norm=True, cropsize=1024, downsamples=0, n_fft=2048, dropout=None):
