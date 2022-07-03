@@ -71,7 +71,8 @@ class VocalAutoregressiveDataset(torch.utils.data.Dataset):
         self.full_list = self.curr_list
 
         if not is_validation and self.epoch_size is not None:
-            self.curr_list = self.full_list[:self.epoch_size]            
+            end = math.ceil(len(self.full_list) * self.epoch_size)
+            self.curr_list = self.full_list[:end]            
             self.rebuild()
 
     def rebuild(self):
@@ -79,8 +80,9 @@ class VocalAutoregressiveDataset(torch.utils.data.Dataset):
         random.shuffle(self.vocal_list)
 
         if self.epoch_size is not None:
+            end = math.ceil(len(self.full_list) * self.epoch_size)
             random.shuffle(self.full_list)
-            self.curr_list = self.full_list[:self.epoch_size]
+            self.curr_list = self.full_list[:end]
 
     def __len__(self):
         return len(self.curr_list) * self.mul
@@ -169,81 +171,47 @@ class VocalAutoregressiveDataset(torch.utils.data.Dataset):
         return X, Y
 
 class MaskedPretrainingDataset(torch.utils.data.Dataset):
-    def __init__(self, path, extra_path=None, pair_path=None, mix_path=[], vocal_path=None, is_validation=False, mul=1, downsamples=0, epoch_size=None, pair_mul=1, slide=True, cropsize=256, mixup_rate=0, mixup_alpha=1, mask_rate=0.15, next_frame_chunk_size=16, token_size=16, current_step=0, num_steps=16000):
+    def __init__(self, path, is_validation=False, mul=1, downsamples=0, epoch_size=None, pair_mul=1, slide=True, cropsize=256, mixup_rate=0, mixup_alpha=1, mask_rate=0.15, next_frame_chunk_size=16, token_size=16, target_token_size=32, current_step=0, num_steps=16000, start_step=0, mask_indices=[]):
         self.epoch_size = epoch_size
         self.slide = slide
         self.mul = mul
-        patch_list = [os.path.join(path, f) for f in os.listdir(path) if os.path.isfile(os.path.join(path, f))]
         self.cropsize = cropsize
         self.mixup_rate = mixup_rate
         self.mixup_alpha = mixup_alpha
         self.mask_rate = mask_rate
         self.next_frame_chunk_size = next_frame_chunk_size
         self.random_ending_rate = 0
-        pair_list = []
-
-        self.warmup_steps = num_steps
+        self.mask_indices = []
+        self.starting_token_size = token_size
         self.token_size = token_size
-        self.separator_size = token_size // 4
+        self.target_token_size = target_token_size
+        self.warmup_steps = num_steps
+        self.separator_size = target_token_size // 4
         self.current_step = current_step
+        self.start_step = start_step
+        self.is_validation = is_validation
+        self.separator_token = None
 
-        if pair_path is not None and pair_mul > 0:
-            pairs = [os.path.join(pair_path, f) for f in os.listdir(pair_path) if os.path.isfile(os.path.join(pair_path, f))]
-
-            for p in pairs:
-                if pair_mul > 1:
-                    for _ in range(pair_mul):
-                        pair_list.append(p)
-                else:
-                    if np.random.uniform() < pair_mul:
-                        pair_list.append(p)
-
-        for mp in mix_path:
+        self.curr_list = []
+        for mp in path:
             mixes = [os.path.join(mp, f) for f in os.listdir(mp) if os.path.isfile(os.path.join(mp, f))]
 
             for m in mixes:
-                if pair_mul > 1:
-                    for _ in range(pair_mul):
-                        pair_list.append(m)
-                else:
-                    if np.random.uniform() < pair_mul:
-                        pair_list.append(m)
-
-        if extra_path is not None:
-            extra_list = [os.path.join(extra_path, f) for f in os.listdir(extra_path) if os.path.isfile(os.path.join(extra_path, f))]
-
-            for f in extra_list:
-                patch_list.append(f) 
+                self.curr_list.append(m)
         
-        if not is_validation and vocal_path is not None:
-            self.vocal_list = [os.path.join(vocal_path, f) for f in os.listdir(vocal_path) if os.path.isfile(os.path.join(vocal_path, f))]
-        else:
-            self.vocal_list = None
-
-        self.is_validation = is_validation
-
-        self.curr_list = []
-        for p in patch_list:
-            self.curr_list.append(p)
-
-        for p in pair_list:
-            self.curr_list.append(p)
-
         self.downsamples = downsamples
         self.full_list = self.curr_list
 
         if not is_validation and self.epoch_size is not None:
-            self.curr_list = self.full_list[:self.epoch_size]            
+            end = math.ceil(len(self.full_list) * self.epoch_size)
+            self.curr_list = self.full_list[:end]            
             self.rebuild()
 
     def rebuild(self):
-        if self.vocal_list is not None:
-            self.vidx = 0
-            random.shuffle(self.vocal_list)
-
         if self.epoch_size is not None:
+            end = math.ceil(len(self.full_list) * self.epoch_size)
             random.shuffle(self.full_list)
-            self.curr_list = self.full_list[:self.epoch_size]
+            self.curr_list = self.full_list[:end]
 
     def __len__(self):
         return len(self.curr_list) * self.mul
@@ -254,14 +222,8 @@ class MaskedPretrainingDataset(torch.utils.data.Dataset):
         aug = 'Y' not in data.files
         X, Xc = data['X'], data['c']
         Y = X if aug else data['Y']
-        vocals = 'vocals' in data.files
         
         if not self.is_validation:
-            start = np.random.randint(0, X.shape[2] - self.cropsize - 1 - self.next_frame_chunk_size)
-            stop = start + self.cropsize + self.next_frame_chunk_size
-
-            X = X[:,:,start:stop]
-            Y = Y[:,:,start:stop]
             c = Xc
 
             if np.random.uniform() < 0.5:
@@ -269,129 +231,76 @@ class MaskedPretrainingDataset(torch.utils.data.Dataset):
                 Y = Y[::-1]
         else:
             c = Xc
-            start = np.random.randint(0, X.shape[2] - self.cropsize - 1 - self.next_frame_chunk_size)
-            stop = start + self.cropsize + self.next_frame_chunk_size
-
-            if np.random.uniform() < 0.5:
-                X = X[:,:,start:stop]
-            else:
-                X = Y[:,:,start:stop]
 
         if np.random.uniform() < self.mixup_rate and root and not self.is_validation:
             MX, _, _, _ = self.__getitem__(np.random.randint(len(self)), root=False)
             a = np.random.beta(self.mixup_alpha, self.mixup_alpha)
             X = X * a + (1 - a) * MX
+
+        self.current_step = self.current_step + 1
         
         starts = []
         index_count = None
         indices = None
-        is_next = 1.0
         if root:
             self.current_step = self.current_step + 1
-            token_size = self.token_size
             noise = np.random.uniform(0, 1, X.shape)
-            num_tokens = (self.cropsize + self.next_frame_chunk_size) // token_size
-            
-            if np.random.uniform() < 0.5:
-                if np.random.uniform() < 0.75:
-                    nidx = np.random.randint(len(self))
-                else:
-                    nidx = np.random.randint(1, 5)
-
-                    if np.random.uniform() < 0.5:
-                        nidx = (idx + nidx) % len(self)
-                    else:
-                        nidx = (idx - nidx) % len(self)
-
-                while nidx == idx:
-                    nidx = np.random.randint(len(self))
-
-                NX, _, _, _, _ = self.__getitem__(nidx, root=False)
-
-                start = np.random.randint(0, NX.shape[2] - self.next_frame_chunk_size)
-                stop = start + self.next_frame_chunk_size
-
-                is_next = 0.0
-                X[:, :, -self.next_frame_chunk_size:] = NX[:, :, start:stop]
-                Y[:, :, -self.next_frame_chunk_size:] = NX[:, :, start:stop]
-                        
+            num_tokens = (self.cropsize + self.next_frame_chunk_size) // self.token_size
+                                    
             X = np.clip(np.abs(X) / c, 0, 1)
             Y = X.copy()
 
             for token in range(num_tokens):
-                if np.random.uniform() < self.mask_rate:
-                    start = token * token_size
-                    stop = start + token_size
+                if (np.random.uniform() < self.mask_rate and len(self.mask_indices) == 0) or token in self.mask_indices:
+                    start = token * self.token_size
+                    stop = start + self.token_size
                     starts.append(start)
             
                     X[:, :, start:stop] = 1.0
 
                     if np.random.uniform() < 0.2:
                         if np.random.uniform() < 0.5:
-                            X[:, :, start:stop] = np.maximum(Y[:, :, start:stop], noise[:, :, start:stop])
+                            X[:, :, start:stop] = np.clip(Y[:, :, start:stop] + noise[:, :, start:stop], 0, 1)
                         else:
                             X[:, :, start:stop] = Y[:, :, start:stop]
 
             if len(starts) == 0:
-                num_tokens = (self.cropsize + self.next_frame_chunk_size) // token_size
+                num_tokens = (self.cropsize + self.next_frame_chunk_size) // self.token_size
                 token = np.random.randint(0, num_tokens)
-                start = token * token_size
-                stop = start + token_size
+                start = token * self.token_size
+                stop = start + self.token_size
                 starts.append(start)
         
                 X[:, :, start:stop] = 1.0
 
                 if np.random.uniform() < 0.2:
                     if np.random.uniform() < 0.5:
-                        X[:, :, start:stop] = np.maximum(Y[:, :, start:stop], noise[:, :, start:stop])
+                        X[:, :, start:stop] = np.clip(Y[:, :, start:stop] + noise[:, :, start:stop], 0, 1)
                     else:
                         X[:, :, start:stop] = Y[:, :, start:stop]
 
-            separator_token = np.ones(X.shape)
-            separator_token[:, 1::2, :] = 0
-            X[:, :, -self.next_frame_chunk_size-(self.token_size//2):-self.next_frame_chunk_size+(self.token_size//4)] = separator_token[:, :, -self.next_frame_chunk_size-(self.token_size//4):-self.next_frame_chunk_size+(self.token_size//2)]
-            Y[:, :, -self.next_frame_chunk_size-(self.token_size//2):-self.next_frame_chunk_size+(self.token_size//4)] = separator_token[:, :, -self.next_frame_chunk_size-(self.token_size//4):-self.next_frame_chunk_size+(self.token_size//2)]
-                    
             index_count = len(starts)
             indices = np.pad(np.array(starts), (0, num_tokens - len(starts)))
 
-        assert not np.any(np.isnan(X))
-        assert not np.any(np.isinf(X))
-        assert not np.any(np.isnan(Y))
-        assert not np.any(np.isinf(Y))
-
-        return X, Y, index_count, indices, is_next
+        return X, Y, index_count, indices
 
 class VocalAugmentationDataset(torch.utils.data.Dataset):
-    def __init__(self, path, extra_path=None, pair_path=None, vocal_path="", is_validation=False, mul=1, downsamples=0, epoch_size=None, pair_mul=1, slide=True, cropsize=256, mixup_rate=0, mixup_alpha=1, include_phase=False, force_voxaug=False):
+    def __init__(self, path=[], vocal_path="", is_validation=False, mul=1, downsamples=0, epoch_size=None, pair_mul=1, slide=True, cropsize=256, mixup_rate=0, mixup_alpha=1, include_phase=False, force_voxaug=False):
         self.epoch_size = epoch_size
         self.slide = slide
         self.mul = mul
-        patch_list = [os.path.join(path, f) for f in os.listdir(path) if os.path.isfile(os.path.join(path, f))]
+        patch_list = []
         self.cropsize = cropsize
         self.mixup_rate = mixup_rate
         self.mixup_alpha = mixup_alpha
         self.include_phase = include_phase
         self.force_voxaug = force_voxaug
-        pair_list = []
-        extra_list = []
 
-        if pair_path is not None and pair_mul > 0:
-            pairs = [os.path.join(pair_path, f) for f in os.listdir(pair_path) if os.path.isfile(os.path.join(pair_path, f))]
+        for mp in path:
+            mixes = [os.path.join(mp, f) for f in os.listdir(mp) if os.path.isfile(os.path.join(mp, f))]
 
-            for p in pairs:
-                if pair_mul > 1:
-                    for _ in range(pair_mul):
-                        pair_list.append(p)
-                else:
-                    if np.random.uniform() < pair_mul:
-                        pair_list.append(p)
-
-        if extra_path is not None:
-            extra_list = [os.path.join(extra_path, f) for f in os.listdir(extra_path) if os.path.isfile(os.path.join(extra_path, f))]
-
-            for f in extra_list:
-                patch_list.append(f) 
+            for m in mixes:
+                patch_list.append(m)
         
         if not is_validation and vocal_path != "":
             self.vocal_list = [os.path.join(vocal_path, f) for f in os.listdir(vocal_path) if os.path.isfile(os.path.join(vocal_path, f))]
@@ -401,10 +310,6 @@ class VocalAugmentationDataset(torch.utils.data.Dataset):
         self.curr_list = []
         for p in patch_list:
             self.curr_list.append(p)
-
-        if len(pair_list) > 0:
-            for p in pair_list:
-                self.curr_list.append(p)
 
         self.downsamples = downsamples
         self.full_list = self.curr_list
@@ -439,10 +344,10 @@ class VocalAugmentationDataset(torch.utils.data.Dataset):
             else:
                 V[1] = V[1] * 0
 
-        if self.slide:
-            start = np.random.randint(0, V.shape[2] - self.cropsize)
-            stop = start + self.cropsize
-            V = V[:,:,start:stop]
+        # if self.slide:
+        #     start = np.random.randint(0, V.shape[2] - self.cropsize)
+        #     stop = start + self.cropsize
+        #     V = V[:,:,start:stop]
 
         if np.random.uniform() < 0.5 and root:
             V2, Vc2 = self._get_vocals(root=False)
@@ -467,11 +372,11 @@ class VocalAugmentationDataset(torch.utils.data.Dataset):
                 aug = True
 
         if not self.is_validation:
-            if self.slide:
-                start = np.random.randint(0, X.shape[2] - self.cropsize)
-                stop = start + self.cropsize
-                X = X[:,:,start:stop]
-                Y = Y[:,:,start:stop]
+            # if self.slide:
+            #     start = np.random.randint(0, X.shape[2] - self.cropsize)
+            #     stop = start + self.cropsize
+            #     X = X[:,:,start:stop]
+            #     Y = Y[:,:,start:stop]
 
             if aug and np.random.uniform() > 0.02:
                 V, Vc = self._get_vocals()
