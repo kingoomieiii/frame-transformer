@@ -14,9 +14,9 @@ FrameEncoder - this module is an encoder for individual frames of a spectrogram.
 
 FrameDecoder - this module is a decoder for individual frames of a spectrogram. It consists of a ResBlock module and a nn.Upsample module if needed.
 
-FramePrimerEncoder - this module is a variation of the primer encoder architecture with some obvious differences. Each layer in the primer encoder is densely connected and bottlenecks back to a single channel representation for that layer, and at the end all layers are returned.
+FramePrimerEncoder - this module is a variation of the primer encoder architecture. It first bottlenecks the input to a single channel; from here, it is a standard primer encoder with relative positional encoding.
 
-FramePrimerDecoder - this module is a variation of the primer decoder architecture similar to the above. The memory for this decoder is the skip connection in the u-net, which allows for each frame to query for global information from the skip connections.
+FramePrimerDecoder - this module is a variation of the primer decoder architecture. It first bottlenecks the input to a single channel; from here, it is a standard primer decoder with relative positional encoding. The memory for this decoder is the skip connection in the u-net, which allows for each frame to query for global information from the skip connections.
 
 Right now I'm mainly only focusing on train-pre.py and train.py. train-gan.py works, but it seems it will require quite a bit of training. I will likely modify this script to be for vocal removing rather than pretraining.
 
