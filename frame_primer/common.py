@@ -1,10 +1,7 @@
-from turtle import down
 import torch
-from torch import log_softmax, nn
+from torch import nn
 import torch.nn.functional as F
 import math
-import lib.spec_utils as spec_utils
-from torch.nn.utils.spectral_norm import spectral_norm
 
 class MultibandFrameAttention(nn.Module):
     def __init__(self, num_bands, bins, cropsize, kernel_size=3, padding=1, bias=False):
@@ -62,21 +59,23 @@ class FramePrimerEncoder(nn.Module):
 
         self.norm1 = nn.InstanceNorm2d(cropsize, affine=True)
         self.attn = MultibandFrameAttention(num_bands, bins, cropsize)
+        self.dropout1 = nn.Dropout(dropout)
 
         self.norm2 = nn.InstanceNorm2d(cropsize, affine=True)
         self.linear1 = nn.Linear(bins, feedforward_dim, bias=bias)
         self.linear2 = nn.Linear(feedforward_dim, bins, bias=bias)
+        self.dropout2 = nn.Dropout(dropout)
 
     def __call__(self, x, prev_qk=None):
         x = self.in_project(self.relu(self.in_norm(x.transpose(1,3)))).squeeze(-1)
 
         h = self.norm1(x.unsqueeze(-1)).squeeze(-1)
         h, prev_qk = self.attn(h, prev_qk=prev_qk)
-        x = x + h
+        x = x + self.dropout1(h)
         
         h = self.norm2(x.unsqueeze(-1)).squeeze(-1)
         h = self.linear2(torch.square(self.relu(self.linear1(h))))
-        x = x + h
+        x = x + self.dropout2(h)
 
         return x.transpose(1,2).unsqueeze(1), prev_qk
 
@@ -103,13 +102,16 @@ class FramePrimerDecoder(nn.Module):
 
         self.norm1 = nn.InstanceNorm2d(cropsize, affine=True)
         self.attn1 = MultibandFrameAttention(num_bands, bins, cropsize)
+        self.dropout1 = nn.Dropout(dropout) if dropout > 0 else nn.Identity()
 
         self.norm2 = nn.InstanceNorm2d(cropsize, affine=True)
         self.attn2 = MultibandFrameAttention(num_bands, bins, cropsize)
+        self.dropout2 = nn.Dropout(dropout) if dropout > 0 else nn.Identity()
 
         self.norm3 = nn.InstanceNorm2d(cropsize, affine=True)
         self.linear1 = nn.Linear(bins, feedforward_dim, bias=bias)
         self.linear2 = nn.Linear(feedforward_dim, bins, bias=bias)
+        self.dropout3 = nn.Dropout(dropout) if dropout > 0 else nn.Identity()
 
     def __call__(self, x, mem=None, prev_qk1=None, prev_qk2=None):
         x = self.in_project(self.relu(self.in_norm(x.transpose(1,3)))).squeeze(-1)
@@ -117,15 +119,15 @@ class FramePrimerDecoder(nn.Module):
 
         h = self.norm1(x.unsqueeze(-1)).squeeze(-1)
         h, prev_qk1 = self.attn1(h, prev_qk=prev_qk1)
-        x = x + h
+        x = x + self.dropout1(h)
 
         h = self.norm2(x.unsqueeze(-1)).squeeze(-1)
         h, prev_qk2 = self.attn2(h, mem=mem, prev_qk=prev_qk2)
-        x = x + h
+        x = x + self.dropout2(h)
         
-        h = self.norm2(x.unsqueeze(-1)).squeeze(-1)
+        h = self.norm3(x.unsqueeze(-1)).squeeze(-1)
         h = self.linear2(torch.square(self.relu(self.linear1(h))))
-        x = x + h
+        x = x + self.dropout3(h)
 
         return x.transpose(1,2).unsqueeze(1), prev_qk1, prev_qk2
 
