@@ -265,7 +265,7 @@ def main():
         "pretrained_model": args.pretrained_model,
         "mixed_precision": args.mixed_precision,
     }
-
+    
     wandb.init(project=args.wandb_project, entity=args.wandb_entity, config=config, id=args.wandb_run_id, resume="must" if args.wandb_run_id is not None else None)
 
     logger.info(args)
@@ -349,7 +349,7 @@ def main():
 
     device = torch.device('cpu')
 
-    model = FramePrimer(channels=args.channels, depth=args.depth, num_transformer_encoders=0, num_transformer_decoders=args.num_transformer_blocks, n_fft=args.n_fft, cropsize=args.cropsize, num_bands=args.num_bands, feedforward_dim=args.feedforward_dim, bias=args.bias)
+    model = FramePrimer(channels=args.channels, depth=args.depth, num_transformer_encoders=args.num_transformer_blocks, num_transformer_decoders=args.num_transformer_blocks, n_fft=args.n_fft, cropsize=args.cropsize, num_bands=args.num_bands, feedforward_dim=args.feedforward_dim, bias=args.bias)
 
     if args.pretrained_model is not None:
         model.load_state_dict(torch.load(args.pretrained_model, map_location=device))

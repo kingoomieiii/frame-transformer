@@ -59,12 +59,12 @@ class FramePrimerEncoder(nn.Module):
 
         self.norm1 = nn.InstanceNorm2d(cropsize, affine=True)
         self.attn = MultibandFrameAttention(num_bands, bins, cropsize)
-        self.dropout1 = nn.Dropout(dropout)
+        self.dropout1 = nn.Dropout(dropout) if dropout > 0 else nn.Identity()
 
         self.norm2 = nn.InstanceNorm2d(cropsize, affine=True)
         self.linear1 = nn.Linear(bins, feedforward_dim, bias=bias)
         self.linear2 = nn.Linear(feedforward_dim, bins, bias=bias)
-        self.dropout2 = nn.Dropout(dropout)
+        self.dropout2 = nn.Dropout(dropout) if dropout > 0 else nn.Identity()
 
     def __call__(self, x, prev_qk=None):
         x = self.in_project(self.relu(self.in_norm(x.transpose(1,3)))).squeeze(-1)
