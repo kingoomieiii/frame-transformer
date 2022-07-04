@@ -10,23 +10,14 @@ import numpy as np
 import torch
 import torch.nn as nn
 import torch.utils.data
-from torch.nn.utils import clip_grad_norm_
 import wandb
-from frame_primer.vqfpu import FPUnet
 
 from lib import dataset
-from lib import spec_utils
 from tqdm import tqdm
-from lib import nets
-
-from lib.nets import PrimerNet
-
-from lib.frame_transformer_unet import FrameTransformerUnet
-from lib.lr_scheduler_linear_warmup import LinearWarmupScheduler
-from lib.lr_scheduler_polynomial_decay import PolynomialDecayScheduler
 
 from frame_primer.frame_primer import FramePrimer
-from frame_primer.resunet import ResUNet
+from lib.lr_scheduler_linear_warmup import LinearWarmupScheduler
+from lib.lr_scheduler_polynomial_decay import PolynomialDecayScheduler
 
 def setup_logger(name, logfile='LOGFILENAME.log', out_dir='logs'):
     logger = logging.getLogger(name)
@@ -294,7 +285,7 @@ def main():
     # model.out = FramePrimer(channels=2 + args.num_transformer_blocks * 3, n_fft=args.n_fft, feedforward_dim=6144, num_bands=16, num_transformer_blocks=5, cropsize=args.cropsize, bias=args.bias)
     # model.out_norm = nn.Identity() # nn.BatchNorm2d(2 + args.num_transformer_blocks * 3)
 
-    model = FPUnet(channels=args.channels, depth=args.depth, num_transformer_encoders=args.num_transformer_blocks, num_transformer_decoders=args.num_transformer_blocks, n_fft=args.n_fft, cropsize=args.cropsize, num_bands=args.num_bands, feedforward_dim=args.feedforward_dim, bias=args.bias)
+    model = FramePrimer(channels=args.channels, depth=args.depth, num_transformer_encoders=args.num_transformer_blocks, num_transformer_decoders=args.num_transformer_blocks, n_fft=args.n_fft, cropsize=args.cropsize, num_bands=args.num_bands, feedforward_dim=args.feedforward_dim, bias=args.bias)
 
     groups = []
 

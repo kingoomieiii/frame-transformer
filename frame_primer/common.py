@@ -29,13 +29,15 @@ class MultibandFrameAttention(nn.Module):
         k = self.k_conv(self.k_proj(x if mem is None else mem).transpose(1,2)).transpose(1,2).reshape(b, w, self.num_bands, -1).permute(0,2,3,1).contiguous()
         v = self.v_conv(self.v_proj(x if mem is None else mem).transpose(1,2)).transpose(1,2).reshape(b, w, self.num_bands, -1).permute(0,2,1,3).contiguous()
         p = F.pad(torch.matmul(q,self.weight), (1,0)).transpose(2,3)[:,:,1:,:]
-        qk = (torch.matmul(q,k)+p) / math.sqrt(c)
 
-        if prev_qk is not None:
-            qk = qk + prev_qk
+        with torch.cuda.amp.autocast_mode.autocast(enabled=False):
+            qk = (torch.matmul(q,k)+p) / math.sqrt(c)
 
-        a = F.softmax(qk, dim=-1)
-        a = torch.matmul(a,v).transpose(1,2).reshape(b,w,-1).contiguous()
+            if prev_qk is not None:
+                qk = qk + prev_qk
+
+            a = torch.matmul(F.softmax(qk, dim=-1),v).transpose(1,2).reshape(b,w,-1).contiguous()
+                
         o = self.o_proj(a)
 
         return o, qk
@@ -69,7 +71,7 @@ class FramePrimerEncoder(nn.Module):
         x = self.in_project(self.relu(self.in_norm(x.transpose(1,3)))).squeeze(-1)
 
         h = self.norm1(x.unsqueeze(-1)).squeeze(-1)
-        h, prev_qk = self.attn(h, prev_qk=None)
+        h, prev_qk = self.attn(h, prev_qk=prev_qk)
         x = x + h
         
         h = self.norm2(x.unsqueeze(-1)).squeeze(-1)
@@ -114,11 +116,11 @@ class FramePrimerDecoder(nn.Module):
         mem = self.mem_project(self.relu(self.mem_norm(mem.transpose(1,3)))).squeeze(-1)
 
         h = self.norm1(x.unsqueeze(-1)).squeeze(-1)
-        h, prev_qk1 = self.attn1(h, prev_qk=None)
+        h, prev_qk1 = self.attn1(h, prev_qk=prev_qk1)
         x = x + h
 
         h = self.norm2(x.unsqueeze(-1)).squeeze(-1)
-        h, prev_qk2 = self.attn2(h, mem=mem, prev_qk=None)
+        h, prev_qk2 = self.attn2(h, mem=mem, prev_qk=prev_qk2)
         x = x + h
         
         h = self.norm2(x.unsqueeze(-1)).squeeze(-1)
@@ -189,7 +191,7 @@ class FrameDecoder(nn.Module):
     def __init__(self, in_channels, out_channels, kernel_size=3, padding=1, upsample=True, activ=nn.LeakyReLU, norm=True, dropout=False, cropsize=1024, downsamples=0, n_fft=2048, num_res_blocks=1):
         super(FrameDecoder, self).__init__()
 
-        self.upsample = nn.Upsample(scale_factor=(2,1)) if upsample else nn.Identity()
+        self.upsample = nn.Upsample(scale_factor=(2,1), mode='bilinear', align_corners=True) if upsample else nn.Identity()
         self.body = ResBlock(in_channels, out_channels, cropsize=cropsize)
 
     def __call__(self, x, skip=None):

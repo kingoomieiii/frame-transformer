@@ -2,7 +2,11 @@
 
 This is a deep-learning-based tool to extract instrumental track from your songs.
 
-For the most part, this fork has converged on a final architecture that seems to have the most benefits. The current architecture is called a frame primer. It consists of a residual u-net modified to use frame convolutions, frame primer encoders and frame primer decoders. After each encoder in the u-net there is a sequence of densely connected frame primer encoders. Before each decoder, there is a sequence of densely connected frame primer decoders. All of the following files are located in the frame_primer folder. I am currently pretraining a model with 121,503,734 parameters on 61+ days of music. Each spectrogram in my dataset captures around 40 seconds of audio (2048 fft 1024 hl 2048 cropsize), and it is learning to unmask chunks of 64 frames with a mask rate of 0.2. Below is a summary of modules and training scripts.
+For the most part, this fork has converged on a final architecture that seems to have the most benefits. The current architecture is called a frame primer. It consists of a residual u-net modified to use frame convolutions, frame primer encoders and frame primer decoders. After each encoder in the u-net there is a sequence of densely connected frame primer encoders. Before each decoder, there is a sequence of densely connected frame primer decoders. All of the following files are located in the frame_primer folder. I am currently pretraining a model with 121,503,734 parameters on 61+ days of music. Each spectrogram in my dataset captures around 40 seconds of audio (2048 fft 1024 hl 2048 cropsize), and it is learning to unmask chunks of 64 frames with a mask rate of 0.2.
+
+Update: Testing out pretraining at 250k optimization steps has had actually somewhat surprising results; it allows for extremely rapid convergence with the vocal remover even with some pretty glaring issues that were overlooked (dropout rate of 50% on inner decoders, nearest neighbor upsampling, and residual attention layer not being used). I also have made some changes to try to make the architecture more amenable to mixed precision, but I am not entirely sure if it works just yet - full precision works without issue however and requires no gradient clipping. If mixed precision still fails, I will likely change the code to alternate between full and mixed precision on the fly in order to mitigate the issues; the downside here is that you don't really gain any reward in terms of VRAM that way, but mixed precision is faster on an rtx 3080 ti at least so there is a benefit there. I am currently testing a decoder only variant which is performing quite well, will allow this to continue training and will upload checkpoints hopefully in a week or so.
+
+Below is a summary of modules and training scripts:
 
 FramePrimer - this module is the base network. It consists of four submodules: a sequence of FrameEncoders, a sequence of FramePrimerEncoders, a sequence of FrameDecoders and one conv2d, and a sequence of FramePrimerDecoders.
 
@@ -32,5 +36,6 @@ train.py - This is the original training script with some modifications (learnin
 - [5] Vaswani et al., "Attention Is All You Need", https://arxiv.org/pdf/1706.03762.pdf
 - [6] So et al., "Primer: Searching for Efficient Transformers for Language Modeling", https://arxiv.org/pdf/2109.08668v2.pdf
 - [7] Huang et al., "Music Transformer: Generating Music with Long-Term Structure", https://arxiv.org/pdf/1809.04281.pdf
-- [8] Devlin et al., "BERT: Pre-training of Deep Bidirectional Transformers for Language Understanding", https://arxiv.org/pdf/1810.04805.pdf
-- [9] Hsu et al., "HuBERT: Self-Supervised Speech Representation Learning by Masked Prediction of Hidden Units", https://arxiv.org/pdf/2106.07447.pdf
+- [8] He et al., "RealFormer: Transformer Likes Residual Attention", https://arxiv.org/pdf/2012.11747.pdf
+- [9] Devlin et al., "BERT: Pre-training of Deep Bidirectional Transformers for Language Understanding", https://arxiv.org/pdf/1810.04805.pdf
+- [10] Hsu et al., "HuBERT: Self-Supervised Speech Representation Learning by Masked Prediction of Hidden Units", https://arxiv.org/pdf/2106.07447.pdf

@@ -10,23 +10,13 @@ import numpy as np
 import torch
 import torch.nn as nn
 import torch.utils.data
-from torch.nn.utils import clip_grad_norm_
 
 from lib import dataset
-from lib import spec_utils
 from tqdm import tqdm
-from lib.frame_transformer import FrameTransformer
 
-from lib.frame_transformer_unet import FrameTransformerUnet
-from lib.kmeans_clustering import KmeansClustering
-from lib.lr_scheduler_batch_growth import LinearBatchGrowth
+from frame_primer.frame_primer import FramePrimer
 from lib.lr_scheduler_linear_warmup import LinearWarmupScheduler
 from lib.lr_scheduler_polynomial_decay import PolynomialDecayScheduler
-
-from frame_primer.vqfpu import FPUnet
-from frame_primer.frame_primer import FramePrimer
-from frame_primer.ev_frame_primer import EvFramePrimer
-from lib.nets import BaseNet
 
 import wandb
 import torch.nn.functional as F
@@ -67,14 +57,15 @@ def train_epoch(dataloader, model, device, optimizer, accumulation_steps, grad_s
     model.train()
 
     sum_mask_loss = 0
-
     batch_loss = 0
-    batch_qloss = 0
-
+    batches = 0
     mask_crit = nn.L1Loss()
 
+    i = 0
+    skipped = 0
+
     pbar = tqdm(dataloader) if progress_bar else dataloader
-    for itr, (src, tgt, num_indices, indices) in enumerate(pbar):
+    for src, tgt, num_indices, indices in pbar:
         src = src.to(device)[:, :, :model.max_bin]
         tgt = tgt.to(device)[:, :, :model.max_bin]
         num_indices = num_indices.to(device)
@@ -96,52 +87,49 @@ def train_epoch(dataloader, model, device, optimizer, accumulation_steps, grad_s
                 x_batch = torch.cat((x_batch, unmasked), dim=0) if x_batch is not None else unmasked
                 y_batch = torch.cat((y_batch, target), dim=0) if y_batch is not None else target
 
-        l1_loss = mask_crit(x_batch, y_batch) / accumulation_steps
-        loss = l1_loss
-        batch_loss = batch_loss + l1_loss
+        loss = mask_crit(x_batch, y_batch) / accumulation_steps
 
         if torch.logical_or(loss.isnan(), loss.isinf()):
-            print('non-finite loss')
-
-        if grad_scaler is not None:
-            grad_scaler.scale(loss).backward()
+            print('non-finite loss, skipping batch')
+            model.zero_grad()
+            i = 0
+            skipped = skipped + accumulation_steps
         else:
-            loss.backward()
-
-        if (itr + 1) % accumulation_steps == 0:
-            if progress_bar:
-                pbar.set_description(f'{str(batch_loss.item())}')
-
-            wandb.log({
-                'loss': batch_loss.item()
-            })
+            batch_loss = batch_loss + loss
 
             if grad_scaler is not None:
-                grad_scaler.unscale_(optimizer)
-                torch.nn.utils.clip_grad.clip_grad_norm_(model.parameters(), 1)
-                grad_scaler.step(optimizer)
-                grad_scaler.update()
+                grad_scaler.scale(loss).backward()
             else:
-                optimizer.step()
+                loss.backward()
 
-            if lr_warmup is not None:
-                lr_warmup.step()
+            if (i + 1) % accumulation_steps == 0:
+                if progress_bar:
+                    pbar.set_description(f'{str(batch_loss.item())}')
 
-            model.zero_grad()
-            batch_loss = 0
+                wandb.log({
+                    'loss': batch_loss.item()
+                })
 
-        sum_mask_loss += loss.item() * len(src)
+                if grad_scaler is not None:
+                    grad_scaler.unscale_(optimizer)
+                    torch.nn.utils.clip_grad.clip_grad_norm_(model.parameters(), 1)
+                    grad_scaler.step(optimizer)
+                    grad_scaler.update()
+                else:
+                    optimizer.step()
 
-    # the rest batch
-    if (itr + 1) % accumulation_steps != 0:
-        optimizer.step()
+                if lr_warmup is not None:
+                    lr_warmup.step()
 
-        if lr_warmup is not None:
-            lr_warmup.step()
+                batches = batches + 1
+                sum_mask_loss += batch_loss.item()
+                model.zero_grad()
+                batch_loss = 0
+                i = 0
+            else:
+                i = i + 1
 
-        model.zero_grad()
-
-    return sum_mask_loss / len(dataloader.dataset)
+    return sum_mask_loss / batches
 
 def validate_epoch(dataloader, model, device, grad_scaler, reconstruction_loss_type=""):
     model.eval()
@@ -227,8 +215,7 @@ def main():
     p.add_argument('--reduction_level', '-L', type=float, default=0.2)
     p.add_argument('--mixup_rate', '-M', type=float, default=0)
     p.add_argument('--mixup_alpha', '-a', type=float, default=0.4)
-    p.add_argument('--pretrained_model', '-P', type=str, default="G://models/pre_iter0.pth")
-    p.add_argument('--pretrained_clusterer', type=str, default="G://models/model_iter19.cluster.npz")
+    p.add_argument('--pretrained_model', '-P', type=str, default=None)
     p.add_argument('--pretrained_model_scheduler', type=str, default=None)
     p.add_argument('--progress_bar', '-pb', type=str, default='true')
     p.add_argument('--mixed_precision', type=str, default='false')
@@ -362,10 +349,7 @@ def main():
 
     device = torch.device('cpu')
 
-    #model = FramePrimer(channels=args.channels, n_fft=args.n_fft, feedforward_dim=args.feedforward_dim, num_bands=args.num_bands, num_transformer_blocks=args.num_transformer_blocks, cropsize=args.cropsize, bias=args.bias)
-    #model = BaseNet(in_channels=2, mid_channels=args.channels, out_channels=2, cropsize=args.cropsize, n_fft=args.n_fft, num_bands=args.num_bands, feedforward_dim=args.feedforward_dim, num_primer_blocks=args.num_transformer_blocks)
-
-    model = FPUnet(channels=args.channels, depth=args.depth, num_transformer_encoders=args.num_transformer_blocks, num_transformer_decoders=args.num_transformer_blocks, n_fft=args.n_fft, cropsize=args.cropsize, num_bands=args.num_bands, feedforward_dim=args.feedforward_dim, bias=args.bias)
+    model = FramePrimer(channels=args.channels, depth=args.depth, num_transformer_encoders=0, num_transformer_decoders=args.num_transformer_blocks, n_fft=args.n_fft, cropsize=args.cropsize, num_bands=args.num_bands, feedforward_dim=args.feedforward_dim, bias=args.bias)
 
     if args.pretrained_model is not None:
         model.load_state_dict(torch.load(args.pretrained_model, map_location=device))
@@ -416,12 +400,7 @@ def main():
         
         logger.info('# epoch {}'.format(epoch))
         train_loss_mask = train_epoch(train_dataloader, model, device, optimizer, args.accumulation_steps, grad_scaler, args.progress_bar, lr_warmup=scheduler, epoch=epoch)
-
-        val_loss_mask1, val_token1 = validate_epoch(val_dataloader, model, device, grad_scaler)
-        val_loss_mask2, val_token2 = validate_epoch(val_dataloader, model, device, grad_scaler)
-        val_loss_mask3, val_token3 = validate_epoch(val_dataloader, model, device, grad_scaler)
-        val_loss_mask4, val_token4 = validate_epoch(val_dataloader, model, device, grad_scaler)
-        val_loss_mask, val_token = (val_loss_mask1 + val_loss_mask2 + val_loss_mask3 + val_loss_mask4) / 4, (val_token1 + val_token2 + val_token3 + val_token4) / 4
+        val_loss_mask, val_token = validate_epoch(val_dataloader, model, device, grad_scaler)
 
         wandb.log({
             'validation_full_loss': val_loss_mask,
