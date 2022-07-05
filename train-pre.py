@@ -54,7 +54,7 @@ def mixup(X, Y, alpha=1):
     return X, Y
 
 def train_epoch(dataloader, model, device, optimizer, accumulation_steps, grad_scaler, progress_bar, lr_warmup=None, step=0, batch_growth_start=1, batch_growth_target=256, batch_growth_duration=4, epoch=0):
-    model.train()
+    #model.train()
 
     sum_mask_loss = 0
     batch_loss = 0
@@ -63,6 +63,8 @@ def train_epoch(dataloader, model, device, optimizer, accumulation_steps, grad_s
 
     i = 0
     skipped = 0
+
+    model.zero_grad()
 
     pbar = tqdm(dataloader) if progress_bar else dataloader
     for src, tgt, num_indices, indices in pbar:
@@ -132,7 +134,7 @@ def train_epoch(dataloader, model, device, optimizer, accumulation_steps, grad_s
     return sum_mask_loss / batches
 
 def validate_epoch(dataloader, model, device, grad_scaler, reconstruction_loss_type=""):
-    model.eval()
+    #model.eval()
 
     sum_mask_loss = 0
     sum_token_loss = 0
@@ -185,7 +187,6 @@ def main():
     p.add_argument('--bias', type=str, default='true')
     p.add_argument('--amsgrad', type=str, default='false')
     p.add_argument('--batchsize', '-B', type=int, default=1)
-    p.add_argument('--accumulation_steps', '-A', type=int, default=8)
     p.add_argument('--gpu', '-g', type=int, default=-1)
     p.add_argument('--seed', '-s', type=int, default=51)
     p.add_argument('--sr', '-r', type=int, default=44100)
@@ -199,6 +200,9 @@ def main():
     p.add_argument('--lr_scheduler_decay_target', type=int, default=1e-7)
     p.add_argument('--lr_scheduler_decay_power', type=float, default=1.0)
     p.add_argument('--lr_scheduler_current_step', type=int, default=0)
+    p.add_argument('--accumulation_steps', '-A', type=str, default='2,2,2,2,2,2,4')
+    p.add_argument('--cropsizes', type=str, default='512,512,512,1024,1024,1024,2048')
+    p.add_argument('--batch_sizes', type=str, default='2,2,2,2,2,2,1')
     p.add_argument('--cropsize', '-C', type=int, default=512)
     p.add_argument('--patches', '-p', type=int, default=16)
     p.add_argument('--val_rate', '-v', type=float, default=0.2)
@@ -206,11 +210,13 @@ def main():
     p.add_argument('--val_batchsize', '-b', type=int, default=1)
     p.add_argument('--val_cropsize', '-c', type=int, default=1024)
     p.add_argument('--num_workers', '-w', type=int, default=2)
-    p.add_argument('--curr_warmup_epoch', type=int, default=0)
+    p.add_argument('--curr_warmup_step', type=int, default=0)
     p.add_argument('--token_warmup_epoch', type=int, default=4)
     p.add_argument('--warmup_epoch', type=int, default=1)
+    p.add_argument('--warmup_steps', type=int, default=64000)
+    p.add_argument('--decay_steps', type=int, default=100064000)
     p.add_argument('--epoch', '-E', type=int, default=30)
-    p.add_argument('--epoch_size', type=int, default=None)
+    p.add_argument('--epoch_size', type=float, default=None)
     p.add_argument('--reduction_rate', '-R', type=float, default=0.0)
     p.add_argument('--reduction_level', '-L', type=float, default=0.2)
     p.add_argument('--mixup_rate', '-M', type=float, default=0)
@@ -239,34 +245,11 @@ def main():
     args.mixed_precision = str.lower(args.mixed_precision) == 'true'
     args.save_all = str.lower(args.save_all) == 'true'
     args.force_voxaug = str.lower(args.force_voxaug) == 'true'
-
-    config = {
-        "token_size": args.token_size,
-        "mask_rate": args.mask_rate,
-        "seed": args.seed,
-        "mixup_rate": args.mixup_rate,
-        "mixup_alpha": args.mixup_alpha,
-        "learning_rate": args.learning_rate,
-        "batchsize": args.batchsize,
-        "accumulation_steps": args.accumulation_steps,
-        "num_bands": args.num_bands,
-        "num_transformer_blocks": args.num_transformer_blocks,
-        "feedforward_dim": args.feedforward_dim,
-        "channels": args.channels,
-        "bias": args.bias,
-        "dropout": args.dropout,
-        "amsgrad": args.amsgrad,
-        "optimizer": args.optimizer,
-        "cropsize": args.cropsize,
-        "curr_warmup_epoch": args.curr_warmup_epoch,
-        "token_warmup_epoch": args.token_warmup_epoch,
-        "warmup_epoch": args.warmup_epoch,
-        "epoch": args.epoch,
-        "pretrained_model": args.pretrained_model,
-        "mixed_precision": args.mixed_precision,
-    }
+    args.cropsizes = [int(cropsize) for cropsize in args.cropsizes.split(',')]
+    args.batch_sizes = [int(batch_size) for batch_size in args.batch_sizes.split(',')]
+    args.accumulation_steps = [int(steps) for steps in args.accumulation_steps.split(',')]
     
-    wandb.init(project=args.wandb_project, entity=args.wandb_entity, config=config, id=args.wandb_run_id, resume="must" if args.wandb_run_id is not None else None)
+    wandb.init(project=args.wandb_project, entity=args.wandb_entity, config=args, id=args.wandb_run_id, resume="must" if args.wandb_run_id is not None else None)
 
     logger.info(args)
 
@@ -294,41 +277,6 @@ def main():
         token_size=args.token_size
     )
 
-    train_dataloader = torch.utils.data.DataLoader(
-        dataset=train_dataset,
-        batch_size=args.batchsize,
-        shuffle=True,
-        num_workers=args.num_workers,
-        prefetch_factor=args.prefetch_factor
-    )
-
-    num_tokens = (args.cropsize + args.next_frame_chunk_size) // args.token_size
-
-    mask_indices = []
-    for token in range(num_tokens):
-        if np.random.uniform() < args.mask_rate:
-            mask_indices.append(token)
-
-    print(f'mask indices={mask_indices}')
-    
-    val_dataset = dataset.MaskedPretrainingDataset(
-        path=["C://cs2048_sr44100_hl1024_nf2048_of0_VALIDATION"],
-        is_validation=True,
-        cropsize=args.cropsize,
-        mixup_rate=args.mixup_rate,
-        mixup_alpha=args.mixup_alpha,
-        mask_rate=0,
-        next_frame_chunk_size=0,
-        mask_indices=mask_indices
-    )
-
-    val_dataloader = torch.utils.data.DataLoader(
-        dataset=val_dataset,
-        batch_size=1,
-        shuffle=False,
-        num_workers=2
-    )
-
     random.seed(args.seed)
     np.random.seed(args.seed)
     torch.manual_seed(args.seed)
@@ -349,7 +297,7 @@ def main():
 
     device = torch.device('cpu')
 
-    model = FramePrimer(channels=args.channels, depth=args.depth, num_transformer_encoders=args.num_transformer_blocks, num_transformer_decoders=args.num_transformer_blocks, n_fft=args.n_fft, cropsize=args.cropsize, num_bands=args.num_bands, feedforward_dim=args.feedforward_dim, bias=args.bias)
+    model = FramePrimer(channels=args.channels, depth=args.depth, num_transformer_encoders=0, num_transformer_decoders=args.num_transformer_blocks, n_fft=args.n_fft, cropsize=args.cropsize, num_bands=args.num_bands, feedforward_dim=args.feedforward_dim, bias=args.bias)
 
     if args.pretrained_model is not None:
         model.load_state_dict(torch.load(args.pretrained_model, map_location=device))
@@ -378,28 +326,72 @@ def main():
             weight_decay=args.weight_decay
         )
 
-    steps = len(train_dataset) // (args.batchsize * args.accumulation_steps)
-    warmup_steps = steps * args.warmup_epoch
-    decay_steps = steps * args.epoch + warmup_steps
-    token_steps = steps * args.token_warmup_epoch
+    warmup_steps = args.warmup_steps
+    decay_steps = args.decay_steps
 
     scheduler = torch.optim.lr_scheduler.ChainedScheduler([
-        LinearWarmupScheduler(optimizer, target_lr=args.learning_rate, num_steps=warmup_steps, current_step=(steps * args.curr_warmup_epoch)),
-        PolynomialDecayScheduler(optimizer, target=args.lr_scheduler_decay_target, power=args.lr_scheduler_decay_power, num_decay_steps=decay_steps, start_step=warmup_steps, current_step=(steps * args.curr_warmup_epoch))
+        LinearWarmupScheduler(optimizer, target_lr=args.learning_rate, num_steps=warmup_steps, current_step=(args.curr_warmup_step)),
+        PolynomialDecayScheduler(optimizer, target=args.lr_scheduler_decay_target, power=args.lr_scheduler_decay_power, num_decay_steps=decay_steps, start_step=warmup_steps, current_step=(args.curr_warmup_step))
     ])
-
-    train_dataset.warmup_steps = token_steps
 
     if args.pretrained_model_scheduler is not None:
         scheduler.load_state_dict(torch.load(args.pretrained_model_scheduler))
+
+    cropsize = args.cropsizes[0]
+    batch_size = args.batch_sizes[0]
+    accum_steps = args.accumulation_steps[0]
+
+    model.train()
 
     log = []
     best_loss = np.inf
     for epoch in range(args.epoch):
         train_dataset.rebuild()
+
+        if epoch < len(args.cropsizes):
+            cropsize = args.cropsizes[epoch]
+            batch_size = args.batch_sizes[epoch]
+            accum_steps = args.accumulation_steps[epoch]
+            print(f'increasing cropsize to {cropsize}, batch size to {batch_size}, accum steps to {accum_steps}')
+
+            train_dataset.cropsize = cropsize
+            train_dataloader = torch.utils.data.DataLoader(
+                dataset=train_dataset,
+                batch_size=batch_size,
+                shuffle=True,
+                num_workers=args.num_workers,
+                prefetch_factor=args.prefetch_factor
+            )
+
+            num_tokens = cropsize // args.token_size
+
+            mask_indices = []
+            for token in range(num_tokens):
+                if np.random.uniform() < args.mask_rate:
+                    mask_indices.append(token)
+
+            print(f'mask indices={mask_indices}')
+            
+            val_dataset = dataset.MaskedPretrainingDataset(
+                path=["C://cs2048_sr44100_hl1024_nf2048_of0_VALIDATION"],
+                is_validation=True,
+                cropsize=cropsize,
+                mixup_rate=args.mixup_rate,
+                mixup_alpha=args.mixup_alpha,
+                mask_rate=0,
+                next_frame_chunk_size=0,
+                mask_indices=mask_indices
+            )
+
+            val_dataloader = torch.utils.data.DataLoader(
+                dataset=val_dataset,
+                batch_size=1,
+                shuffle=False,
+                num_workers=2
+            )
         
         logger.info('# epoch {}'.format(epoch))
-        train_loss_mask = train_epoch(train_dataloader, model, device, optimizer, args.accumulation_steps, grad_scaler, args.progress_bar, lr_warmup=scheduler, epoch=epoch)
+        train_loss_mask = train_epoch(train_dataloader, model, device, optimizer, accum_steps, grad_scaler, args.progress_bar, lr_warmup=scheduler, epoch=epoch)
         val_loss_mask, val_token = validate_epoch(val_dataloader, model, device, grad_scaler)
 
         wandb.log({

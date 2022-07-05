@@ -232,6 +232,12 @@ class MaskedPretrainingDataset(torch.utils.data.Dataset):
         else:
             c = Xc
 
+        if X.shape[2] > self.cropsize:
+            start = np.random.randint(0, X.shape[2] - self.cropsize)
+            stop = start + self.cropsize
+            X = X[:,:,start:stop]
+            Y = Y[:,:,start:stop]
+
         if np.random.uniform() < self.mixup_rate and root and not self.is_validation:
             MX, _, _, _ = self.__getitem__(np.random.randint(len(self)), root=False)
             a = np.random.beta(self.mixup_alpha, self.mixup_alpha)
@@ -245,7 +251,7 @@ class MaskedPretrainingDataset(torch.utils.data.Dataset):
         if root:
             self.current_step = self.current_step + 1
             noise = np.random.uniform(0, 1, X.shape)
-            num_tokens = (self.cropsize + self.next_frame_chunk_size) // self.token_size
+            num_tokens = self.cropsize // self.token_size
                                     
             X = np.clip(np.abs(X) / c, 0, 1)
             Y = X.copy()
@@ -265,7 +271,7 @@ class MaskedPretrainingDataset(torch.utils.data.Dataset):
                             X[:, :, start:stop] = Y[:, :, start:stop]
 
             if len(starts) == 0:
-                num_tokens = (self.cropsize + self.next_frame_chunk_size) // self.token_size
+                num_tokens = self.cropsize // self.token_size
                 token = np.random.randint(0, num_tokens)
                 start = token * self.token_size
                 stop = start + self.token_size

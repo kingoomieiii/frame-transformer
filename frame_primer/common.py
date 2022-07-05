@@ -25,7 +25,7 @@ class MultibandFrameAttention(nn.Module):
         q = self.q_conv(self.q_proj(x).transpose(1,2)).transpose(1,2).reshape(b, w, self.num_bands, -1).permute(0,2,1,3).contiguous()
         k = self.k_conv(self.k_proj(x if mem is None else mem).transpose(1,2)).transpose(1,2).reshape(b, w, self.num_bands, -1).permute(0,2,3,1).contiguous()
         v = self.v_conv(self.v_proj(x if mem is None else mem).transpose(1,2)).transpose(1,2).reshape(b, w, self.num_bands, -1).permute(0,2,1,3).contiguous()
-        p = F.pad(torch.matmul(q,self.weight), (1,0)).transpose(2,3)[:,:,1:,:]
+        p = F.pad(torch.matmul(q,self.weight[:, :w]), (1,0)).transpose(2,3)[:,:,1:,:]
 
         with torch.cuda.amp.autocast_mode.autocast(enabled=False):
             qk = (torch.matmul(q,k)+p) / math.sqrt(c)
@@ -54,26 +54,26 @@ class FramePrimerEncoder(nn.Module):
 
         self.relu = nn.ReLU(inplace=True)
 
-        self.in_norm = nn.InstanceNorm2d(cropsize, affine=True)
+        self.in_norm = nn.BatchNorm2d(channels)
         self.in_project = nn.Linear(channels, 1, bias=bias)
 
-        self.norm1 = nn.InstanceNorm2d(cropsize, affine=True)
+        self.norm1 = nn.BatchNorm2d(1)
         self.attn = MultibandFrameAttention(num_bands, bins, cropsize)
         self.dropout1 = nn.Dropout(dropout) if dropout > 0 else nn.Identity()
 
-        self.norm2 = nn.InstanceNorm2d(cropsize, affine=True)
+        self.norm2 = nn.BatchNorm2d(1)
         self.linear1 = nn.Linear(bins, feedforward_dim, bias=bias)
         self.linear2 = nn.Linear(feedforward_dim, bins, bias=bias)
         self.dropout2 = nn.Dropout(dropout) if dropout > 0 else nn.Identity()
 
     def __call__(self, x, prev_qk=None):
-        x = self.in_project(self.relu(self.in_norm(x.transpose(1,3)))).squeeze(-1)
+        x = self.in_project(self.relu(self.in_norm(x).transpose(1,3))).squeeze(-1)
 
-        h = self.norm1(x.unsqueeze(-1)).squeeze(-1)
+        h = self.norm1(x.unsqueeze(-1).transpose(1,3)).transpose(1,3).squeeze(-1)
         h, prev_qk = self.attn(h, prev_qk=prev_qk)
         x = x + self.dropout1(h)
         
-        h = self.norm2(x.unsqueeze(-1)).squeeze(-1)
+        h = self.norm2(x.unsqueeze(-1).transpose(1,3)).transpose(1,3).squeeze(-1)
         h = self.linear2(torch.square(self.relu(self.linear1(h))))
         x = x + self.dropout2(h)
 
@@ -94,38 +94,38 @@ class FramePrimerDecoder(nn.Module):
 
         self.relu = nn.ReLU(inplace=True)
 
-        self.in_norm = nn.InstanceNorm2d(cropsize, affine=True)
+        self.in_norm = nn.BatchNorm2d(channels, affine=True)
         self.in_project = nn.Linear(channels, 1, bias=bias)
 
-        self.mem_norm = nn.InstanceNorm2d(cropsize, affine=True)
+        self.mem_norm = nn.BatchNorm2d(mem_channels, affine=True)
         self.mem_project = nn.Linear(mem_channels, 1, bias=bias)
 
-        self.norm1 = nn.InstanceNorm2d(cropsize, affine=True)
+        self.norm1 = nn.BatchNorm2d(1, affine=True)
         self.attn1 = MultibandFrameAttention(num_bands, bins, cropsize)
         self.dropout1 = nn.Dropout(dropout) if dropout > 0 else nn.Identity()
 
-        self.norm2 = nn.InstanceNorm2d(cropsize, affine=True)
+        self.norm2 = nn.BatchNorm2d(1, affine=True)
         self.attn2 = MultibandFrameAttention(num_bands, bins, cropsize)
         self.dropout2 = nn.Dropout(dropout) if dropout > 0 else nn.Identity()
 
-        self.norm3 = nn.InstanceNorm2d(cropsize, affine=True)
+        self.norm3 = nn.BatchNorm2d(1, affine=True)
         self.linear1 = nn.Linear(bins, feedforward_dim, bias=bias)
         self.linear2 = nn.Linear(feedforward_dim, bins, bias=bias)
         self.dropout3 = nn.Dropout(dropout) if dropout > 0 else nn.Identity()
 
     def __call__(self, x, mem=None, prev_qk1=None, prev_qk2=None):
-        x = self.in_project(self.relu(self.in_norm(x.transpose(1,3)))).squeeze(-1)
-        mem = self.mem_project(self.relu(self.mem_norm(mem.transpose(1,3)))).squeeze(-1)
+        x = self.in_project(self.relu(self.in_norm(x).transpose(1,3))).squeeze(-1)
+        mem = self.mem_project(self.relu(self.mem_norm(mem).transpose(1,3))).squeeze(-1)
 
-        h = self.norm1(x.unsqueeze(-1)).squeeze(-1)
+        h = self.norm1(x.unsqueeze(-1).transpose(1,3)).transpose(1,3).squeeze(-1)
         h, prev_qk1 = self.attn1(h, prev_qk=prev_qk1)
         x = x + self.dropout1(h)
 
-        h = self.norm2(x.unsqueeze(-1)).squeeze(-1)
+        h = self.norm2(x.unsqueeze(-1).transpose(1,3)).transpose(1,3).squeeze(-1)
         h, prev_qk2 = self.attn2(h, mem=mem, prev_qk=prev_qk2)
         x = x + self.dropout2(h)
         
-        h = self.norm3(x.unsqueeze(-1)).squeeze(-1)
+        h = self.norm3(x.unsqueeze(-1).transpose(1,3)).transpose(1,3).squeeze(-1)
         h = self.linear2(torch.square(self.relu(self.linear1(h))))
         x = x + self.dropout3(h)
 
@@ -140,7 +140,7 @@ class FrameConv(nn.Module):
             for _ in range(downsamples):
                 bins = ((bins - 1) // 2) + 1
 
-        self.norm = nn.InstanceNorm2d(cropsize, affine=True) if norm else None
+        self.norm = nn.BatchNorm2d(in_channels, affine=True) if norm else None
         self.activate = activate(inplace=True) if activate is not None else None
 
         self.conv = nn.Conv2d(
@@ -154,7 +154,7 @@ class FrameConv(nn.Module):
 
     def __call__(self, x):
         if self.norm is not None:
-            x = self.norm(x.transpose(1,3)).transpose(1,3)
+            x = self.norm(x)
 
         if self.activate is not None:
             x = self.activate(x)
