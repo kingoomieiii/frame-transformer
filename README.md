@@ -2,6 +2,12 @@
 
 This is a deep-learning-based tool to extract instrumental track from your songs.
 
+This is basically a junk personal fork, I will make a new fork when things are finished that are cleaner and more protected. Pretraining is for the most part done with the primer architecture, however I am still in the process of finetuning it. Because I was getting anxious and wanted to work on something new, for the next day or so I'm shifting to a new architecture; initial tests seem to point toward this being the best validation loss yet, but need to take it further to be able to make any reasonable assertion. Diagram of architecture is below, code is in frame_primer/frame_resnet.py.
+
+Currently experimenting with a new architecture that appears to be working quite well: 
+![image](https://user-images.githubusercontent.com/30326384/179087464-d90206dd-9302-4c44-a4e2-83d3967e9ff7.png)
+
+
 For the most part, this fork has converged on a final architecture that seems to have the most benefits. The current architecture is called a frame primer. It consists of a residual u-net modified to use frame convolutions, frame primer encoders and frame primer decoders. After each encoder in the u-net there is a sequence of densely connected frame primer encoders. Before each decoder, there is a sequence of densely connected frame primer decoders. All of the following files are located in the frame_primer folder. I am currently pretraining a model with 121,503,734 parameters on 61+ days of music. Each spectrogram in my dataset captures around 40 seconds of audio (2048 fft 1024 hl 2048 cropsize), and it is learning to unmask chunks of 64 frames with a mask rate of 0.2.
 
 Currently finalizing a pretraining run of a model with 150,617,664 parameters on ~~64.5~~ 70.6 days of music that is at ~~314,877 633,000 946,000~~ 1,001,000 optimization steps :D - will be training for at least 12 more hours, probably another 16 after that for a second epoch at the full sequence length of ~40 seconds. It is now training on a cropsize of 2048 after quite a few optimization steps at 512 and a few at 1024. My goal is to bring it up 1,206,497 steps. Next steps are finetuning on the vocal remover dataset, will do some experimenting with various methods of finetuning (LLRD, only training transformer modules, only training last N decoders, etc). After I finetune I will upload the finetuned model and the pretrained model. I will probably train another model to do some other task, likely some form of mix balancing tool.
