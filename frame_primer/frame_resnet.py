@@ -174,5 +174,6 @@ class FrameResUNet(nn.Module):
         h = self.dec2(h, e2)
         h = self.dec1(h, e1)
         h = self.out(h)
+        h = torch.sigmoid(h)
 
         return h
