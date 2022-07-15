@@ -4,7 +4,9 @@ This is a deep-learning-based tool to extract instrumental track from your songs
 
 This is basically a junk personal fork, I will make a new fork when things are finished that are cleaner and more protected. Pretraining is for the most part done with the primer architecture, however I am still in the process of finetuning it. Because I was getting anxious and wanted to work on something new, for the next day or so I'm shifting to a new architecture; initial tests seem to point toward this being the best validation loss yet, but need to take it further to be able to make any reasonable assertion. Diagram of architecture is below, code is in frame_primer/frame_resnet.py.
 
-Currently experimenting with a new architecture that appears to be working quite well: ![image](https://user-images.githubusercontent.com/30326384/179124562-83d1e4f8-6bde-46f5-8839-cc9c1b6fde71.png)
+Currently experimenting with a new architecture that appears to be working quite well:
+![image](https://user-images.githubusercontent.com/30326384/179124670-3e77cd24-b32c-400f-aeb3-6f0804cb12f9.png)
+
 
 For the most part, this fork has converged on a final architecture that seems to have the most benefits. The current architecture is called a frame primer. It consists of a residual u-net modified to use frame convolutions, frame primer encoders and frame primer decoders. After each encoder in the u-net there is a sequence of densely connected frame primer encoders. Before each decoder, there is a sequence of densely connected frame primer decoders. All of the following files are located in the frame_primer folder. I am currently pretraining a model with 121,503,734 parameters on 61+ days of music. Each spectrogram in my dataset captures around 40 seconds of audio (2048 fft 1024 hl 2048 cropsize), and it is learning to unmask chunks of 64 frames with a mask rate of 0.2.
 
