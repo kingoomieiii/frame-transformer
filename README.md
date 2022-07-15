@@ -5,7 +5,8 @@ This is a deep-learning-based tool to extract instrumental track from your songs
 This is basically a junk personal fork, I will make a new fork when things are finished that are cleaner and more protected. Pretraining is for the most part done with the primer architecture, however I am still in the process of finetuning it. Because I was getting anxious and wanted to work on something new, for the next day or so I'm shifting to a new architecture; initial tests seem to point toward this being the best validation loss yet, but need to take it further to be able to make any reasonable assertion. Diagram of architecture is below, code is in frame_primer/frame_resnet.py.
 
 Currently experimenting with a new architecture that appears to be working quite well: 
-![image](https://user-images.githubusercontent.com/30326384/179123937-46e8e45c-0474-4bf3-afc3-ec842464c067.png)
+![image](https://user-images.githubusercontent.com/30326384/179124427-54bb2406-784e-4fa6-a871-5076d696514c.png)
+
 
 
 
