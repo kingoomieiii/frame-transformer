@@ -8,7 +8,7 @@ Currently experimenting with a new architecture that appears to be working quite
 ![image](https://user-images.githubusercontent.com/30326384/179259765-af03fd48-1e3d-4880-8956-44a9c0fafcb5.png)
 
 Below is a diagram of the frame primer:
-![image](https://user-images.githubusercontent.com/30326384/179382615-c4f57c8c-f3c8-4980-a621-7b972690d138.png)
+![image](https://user-images.githubusercontent.com/30326384/179382679-4fcb089d-e355-45d0-84a7-bbd644d4cc89.png)
 
 For the most part, this fork has converged on a final architecture that seems to have the most benefits. The current architecture is called a frame primer. It consists of a residual u-net modified to use frame convolutions, frame primer encoders and frame primer decoders. After each encoder in the u-net there is a sequence of densely connected frame primer encoders. Before each decoder, there is a sequence of densely connected frame primer decoders. All of the following files are located in the frame_primer folder. I am currently pretraining a model with 121,503,734 parameters on 61+ days of music. Each spectrogram in my dataset captures around 40 seconds of audio (2048 fft 1024 hl 2048 cropsize), and it is learning to unmask chunks of 64 frames with a mask rate of 0.2.
 
