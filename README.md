@@ -4,9 +4,11 @@ This is a deep-learning-based tool to extract instrumental track from your songs
 
 This is basically a junk personal fork, I will make a new fork when things are finished that are cleaner and more protected. Pretraining is for the most part done with the primer architecture, however I am still in the process of finetuning it. Because I was getting anxious and wanted to work on something new, for the next day or so I'm shifting to a new architecture; initial tests seem to point toward this being the best validation loss yet, but need to take it further to be able to make any reasonable assertion. Diagram of architecture is below, code is in frame_primer/frame_resnet.py.
 
-Currently experimenting with a new architecture that appears to be working quite well: 
-![image](https://user-images.githubusercontent.com/30326384/179087464-d90206dd-9302-4c44-a4e2-83d3967e9ff7.png)
+Currently experimenting with a new architecture that appears to be working quite well. After adding back in skip attention to this new architecture it appears to be getting the lowest validation loss so far. Will upload the pretrained old architecture I guess, though I question how useful it'll be. Will likely end up pretraining this new architecture instead after a round of supervised training to make sure it works well. Edit: after some testing, it seems it doesn't really work better from what I can tell. It does well, however doesn't appear to be very different.
+![image](https://user-images.githubusercontent.com/30326384/179259765-af03fd48-1e3d-4880-8956-44a9c0fafcb5.png)
 
+Below is a diagram of the frame primer:
+![image](https://user-images.githubusercontent.com/30326384/179383225-623a846d-8a5d-4e9d-acaa-43ef39d26c61.png)
 
 For the most part, this fork has converged on a final architecture that seems to have the most benefits. The current architecture is called a frame primer. It consists of a residual u-net modified to use frame convolutions, frame primer encoders and frame primer decoders. After each encoder in the u-net there is a sequence of densely connected frame primer encoders. Before each decoder, there is a sequence of densely connected frame primer decoders. All of the following files are located in the frame_primer folder. I am currently pretraining a model with 121,503,734 parameters on 61+ days of music. Each spectrogram in my dataset captures around 40 seconds of audio (2048 fft 1024 hl 2048 cropsize), and it is learning to unmask chunks of 64 frames with a mask rate of 0.2.
 
