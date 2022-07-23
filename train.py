@@ -11,11 +11,15 @@ import torch
 import torch.nn as nn
 import torch.utils.data
 import wandb
+from frame_primer.common import FramePrimerDecoder
 
 from lib import dataset
 from tqdm import tqdm
 
-from frame_primer.frame_primer import FramePrimer
+from frame_primer.dataset_voxaug import VoxAugDataset
+
+from frame_primer.frame_primer import FramePrimer, FramePrimer2
+from frame_primer.frame_resnet import FrameResUNet
 from lib.lr_scheduler_linear_warmup import LinearWarmupScheduler
 from lib.lr_scheduler_polynomial_decay import PolynomialDecayScheduler
 
@@ -66,7 +70,7 @@ def train_epoch(dataloader, model, device, optimizer, accumulation_steps, progre
         with torch.cuda.amp.autocast_mode.autocast():
             pred = model(X_batch)
 
-        l1_loss = crit(pred * X_batch, y_batch) / accumulation_steps
+        l1_loss = crit(pred, y_batch) / accumulation_steps
         #q_loss = loss / accumulation_steps
 
         batch_loss = batch_loss + l1_loss
@@ -114,10 +118,8 @@ def train_epoch(dataloader, model, device, optimizer, accumulation_steps, progre
 
 def validate_epoch(dataloader, model, device):
     model.eval()
-    sum_loss = 0
     crit = nn.L1Loss()
-    
-    mag_sum = 0
+    sum_loss = 0
 
     with torch.no_grad():
         for X_batch, y_batch in dataloader:
@@ -126,66 +128,71 @@ def validate_epoch(dataloader, model, device):
 
             pred = model(X_batch)
 
-            mag_loss = crit(pred * X_batch, y_batch)
+            # shifting to familiar range for testing purposes
+            mag_loss = crit((pred + 1) * 0.5, (y_batch + 1) * 0.5)
 
             if torch.logical_or(mag_loss.isnan(), mag_loss.isinf()):
                 print('non-finite or nan validation loss; aborting')
                 quit()
             else:
-                mag_sum += mag_loss.item() * len(X_batch)
+                sum_loss += mag_loss.item() * len(X_batch)
 
-    return mag_sum / len(dataloader.dataset)
+    return sum_loss / len(dataloader.dataset)
 
 def main():
     p = argparse.ArgumentParser()
     p.add_argument('--id', type=str, default='')
-    p.add_argument('--channels', type=int, default=2)
-    p.add_argument('--depth', type=int, default=7)
-    p.add_argument('--num_transformer_blocks', type=int, default=2)    
-    p.add_argument('--num_bands', type=int, default=8)
-    p.add_argument('--feedforward_dim', type=int, default=4096)
-    p.add_argument('--bias', type=str, default='true')
-    p.add_argument('--embedding_size', type=int, default=8192)
-    p.add_argument('--weight_decay', type=float, default=0)
-    p.add_argument('--optimizer', type=str.lower, choices=['adam', 'adamw'], default='adamw')
-    p.add_argument('--amsgrad', type=str, default='false')
-    p.add_argument('--batchsize', '-B', type=int, default=1)
-    p.add_argument('--accumulation_steps', '-A', type=int, default=4)
-    p.add_argument('--gpu', '-g', type=int, default=-1)
     p.add_argument('--seed', '-s', type=int, default=51)
     p.add_argument('--sr', '-r', type=int, default=44100)
     p.add_argument('--hop_length', '-H', type=int, default=1024)
     p.add_argument('--n_fft', '-f', type=int, default=2048)
-    p.add_argument('--dataset', '-d', required=False)
-    p.add_argument('--cropsize', '-C', type=int, default=1024)
-    p.add_argument('--patches', '-p', type=int, default=16)
-    p.add_argument('--val_rate', '-v', type=float, default=0.2)
-    p.add_argument('--val_filelist', '-V', type=str, default=None)
-    p.add_argument('--val_batchsize', '-b', type=int, default=1)
-    p.add_argument('--val_cropsize', '-c', type=int, default=1024)
-    p.add_argument('--num_workers', '-w', type=int, default=4)
-    p.add_argument('--curr_warmup_epoch', type=int, default=0)
+    p.add_argument('--max_cropsize', type=int, default=2048)
+    p.add_argument('--pretrained_model', '-P', type=str, default=None)
+    p.add_argument('--mixup_rate', '-M', type=float, default=0)
+    p.add_argument('--mixup_alpha', '-a', type=float, default=0.4)
+    p.add_argument('--mixed_precision', type=str, default='false')
+    
     p.add_argument('--warmup_epoch', type=int, default=1)
-    p.add_argument('--epoch', '-E', type=int, default=42)
+    p.add_argument('--curr_warmup_epoch', type=int, default=0)
+
+    p.add_argument('--channels', type=int, default=2)
+    p.add_argument('--channel_scale', type=int, default=1)
+    p.add_argument('--depth', type=int, default=7)
+    p.add_argument('--feedforward_expansion', type=int, default=4)
+    p.add_argument('--num_res_blocks', type=int, default=3)
+    p.add_argument('--num_transformer_encoders', type=int, default=2)    
+    p.add_argument('--num_transformer_decoders', type=int, default=2)    
+    p.add_argument('--num_bands', type=int, default=8)
+    p.add_argument('--feedforward_dim', type=int, default=4096)
+    p.add_argument('--bias', type=str, default='true')
+    p.add_argument('--dropout', type=float, default=0.1)
+
+    p.add_argument('--cropsizes', type=str, default='512,1024,2048')
+    p.add_argument('--epochs', type=str, default='30,50,60')
+    p.add_argument('--batch_sizes', type=str, default='5,2,1')
+    p.add_argument('--accumulation_steps', '-A', type=str, default='1,2,4')
+
+    p.add_argument('--gpu', '-g', type=int, default=-1)
+    p.add_argument('--optimizer', type=str.lower, choices=['adam', 'adamw', 'sgd'], default='adamw')
+    p.add_argument('--amsgrad', type=str, default='false')
+    p.add_argument('--weight_decay', type=float, default=0)
+    p.add_argument('--num_workers', '-w', type=int, default=4)
+    p.add_argument('--epoch', '-E', type=int, default=16384)
     p.add_argument('--epoch_size', type=int, default=None)
     p.add_argument('--learning_rate', '-l', type=float, default=1e-4)
     p.add_argument('--lr_scheduler_decay_target', type=int, default=1e-7)
     p.add_argument('--lr_scheduler_decay_power', type=float, default=1.0)
-    p.add_argument('--lr_scheduler_current_step', type=int, default=0)
-    p.add_argument('--mixup_rate', '-M', type=float, default=0.5)
-    p.add_argument('--mixup_alpha', '-a', type=float, default=0.4)
-    p.add_argument('--pretrained_model', '-P', type=str, default=None)
     p.add_argument('--progress_bar', '-pb', type=str, default='true')
-    p.add_argument('--mixed_precision', type=str, default='false')
     p.add_argument('--force_voxaug', type=str, default='false')
-    p.add_argument('--save_all', type=str, default='false')
-    p.add_argument('--model_dir', type=str, default='G://')
+    p.add_argument('--save_all', type=str, default='true')
+    p.add_argument('--model_dir', type=str, default='J://')
     p.add_argument('--llrd', type=str, default='false')
     p.add_argument('--lock', type=str, default='false')
     p.add_argument('--debug', action='store_true')
     p.add_argument('--wandb_project', type=str, default='VOCAL-REMOVER')
     p.add_argument('--wandb_entity', type=str, default='carperbr')
     p.add_argument('--wandb_run_id', type=str, default=None)
+    p.add_argument('--prefetch_factor', type=int, default=2)
     args = p.parse_args()
 
     args.amsgrad = str.lower(args.amsgrad) == 'true'
@@ -196,120 +203,46 @@ def main():
     args.force_voxaug = str.lower(args.force_voxaug) == 'true'
     args.llrd = str.lower(args.llrd) == 'true'
     args.lock = str.lower(args.lock) == 'true'
-
-    config = {
-        "embedding_size": args.embedding_size,
-        "seed": args.seed,
-        "learning_rate": args.learning_rate,
-        "batchsize": args.batchsize,
-        "accumulation_steps": args.accumulation_steps,
-        "num_bands": args.num_bands,
-        "num_transformer_blocks": args.num_transformer_blocks,
-        "feedforward_dim": args.feedforward_dim,
-        "channels": args.channels,
-        "bias": args.bias,
-        "amsgrad": args.amsgrad,
-        "optimizer": args.optimizer,
-        "cropsize": args.cropsize,
-        "curr_warmup_epoch": args.curr_warmup_epoch,
-        "warmup_epoch": args.warmup_epoch,
-        "epoch": args.epoch,
-        "pretrained_model": args.pretrained_model,
-        "mixed_precision": args.mixed_precision,
-        "lock": args.lock
-    }
+    args.epochs = [int(epoch) for i, epoch in enumerate(args.epochs.split(','))]
+    args.cropsizes = [int(cropsize) for cropsize in args.cropsizes.split(',')]
+    args.batch_sizes = [int(batch_size) for batch_size in args.batch_sizes.split(',')]
+    args.accumulation_steps = [int(steps) for steps in args.accumulation_steps.split(',')]
     
-    wandb.init(project=args.wandb_project, entity=args.wandb_entity, config=config, id=args.wandb_run_id, resume="must" if args.wandb_run_id is not None else None)
+    wandb.init(project=args.wandb_project, entity=args.wandb_entity, config=args, id=args.wandb_run_id, resume="must" if args.wandb_run_id is not None else None)
 
-    logger.info(args)
+    print(args)
 
     random.seed(args.seed + 1)
     np.random.seed(args.seed + 1)
     torch.manual_seed(args.seed + 1)
 
-    train_dataset = dataset.VocalAugmentationDataset(
+    train_dataset = VoxAugDataset(
         path=[
             "C://cs2048_sr44100_hl1024_nf2048_of0",
             "D://cs2048_sr44100_hl1024_nf2048_of0",
-            "F://cs2048_sr44100_hl1024_nf2048_of0"
+            "F://cs2048_sr44100_hl1024_nf2048_of0",
+            "H://cs2048_sr44100_hl1024_nf2048_of0",
+            "J://cs2048_sr44100_hl1024_nf2048_of0",
         ],
         vocal_path="D://cs2048_sr44100_hl1024_nf2048_of0_VOCALS",
         is_validation=False,
         epoch_size=args.epoch_size,
-        cropsize=args.cropsize,
         mixup_rate=args.mixup_rate,
         mixup_alpha=args.mixup_alpha
-    )
-
-    train_dataloader = torch.utils.data.DataLoader(
-        dataset=train_dataset,
-        batch_size=args.batchsize,
-        shuffle=True,
-        num_workers=args.num_workers
     )
     
-    val_dataset = dataset.VocalAugmentationDataset(
-        path=["C://cs2048_sr44100_hl1024_nf2048_of0_VALIDATION"],
-        vocal_path=None,
-        is_validation=True,
-        epoch_size=args.epoch_size,
-        cropsize=args.cropsize,
-        mixup_rate=args.mixup_rate,
-        mixup_alpha=args.mixup_alpha
-    )
-
-    val_dataloader = torch.utils.data.DataLoader(
-        dataset=val_dataset,
-        batch_size=args.val_batchsize,
-        shuffle=False,
-        num_workers=args.num_workers
-    )
-
     random.seed(args.seed)
     np.random.seed(args.seed)
     torch.manual_seed(args.seed)
 
-    val_filelist = []
-    if args.val_filelist is not None:
-        with open(args.val_filelist, 'r', encoding='utf8') as f:
-            val_filelist = json.load(f)
-
-    for i, (X_fname, y_fname) in enumerate(val_filelist):
-        logger.info('{} {} {}'.format(i + 1, os.path.basename(X_fname), os.path.basename(y_fname)))
-
     device = torch.device('cpu')
-    #model = VQFPU(depth=args.depth, num_transformer_encoders=args.num_transformer_blocks, num_transformer_decoders=args.num_transformer_blocks, n_fft=args.n_fft, cropsize=args.cropsize, num_bands=args.num_bands, feedforward_dim=args.feedforward_dim, pretraining=False, embedding_size=args.embedding_size)
-    #model_pre = FramePrimer(n_fft=args.n_fft, feedforward_dim=args.feedforward_dim, num_bands=args.num_bands, num_transformer_blocks=args.num_transformer_blocks, cropsize=args.cropsize, bias=args.bias)
-    # model = FramePrimer(n_fft=args.n_fft, feedforward_dim=args.feedforward_dim, num_bands=args.num_bands, num_transformer_blocks=args.num_transformer_blocks, cropsize=args.cropsize, bias=args.bias, new_out=True)
-
-    # model.out = FramePrimer(channels=2 + args.num_transformer_blocks * 3, n_fft=args.n_fft, feedforward_dim=6144, num_bands=16, num_transformer_blocks=5, cropsize=args.cropsize, bias=args.bias)
-    # model.out_norm = nn.Identity() # nn.BatchNorm2d(2 + args.num_transformer_blocks * 3)
-
-    model = FramePrimer(channels=args.channels, depth=args.depth, num_transformer_encoders=args.num_transformer_blocks, num_transformer_decoders=args.num_transformer_blocks, n_fft=args.n_fft, cropsize=args.cropsize, num_bands=args.num_bands, feedforward_dim=args.feedforward_dim, bias=args.bias)
-
-    groups = []
-
+    
+    #model = FramePrimer(n_fft=args.n_fft, feedforward_dim=args.feedforward_dim, num_bands=args.num_bands, num_transformer_blocks=args.num_transformer_blocks, cropsize=args.cropsize, bias=args.bias, new_out=True)
+    model = FramePrimer2(channels=args.channels, scale_factor=args.channel_scale, feedforward_expansion=args.feedforward_expansion, depth=args.depth, num_transformer_blocks=args.num_transformer_encoders, n_fft=args.n_fft, cropsize=args.max_cropsize, num_bands=args.num_bands, bias=args.bias, dropout=args.dropout, num_res_blocks=args.num_res_blocks)
+   
     if args.pretrained_model is not None:
         model.load_state_dict(torch.load(args.pretrained_model, map_location=device))
-
-    # if args.llrd:
-    #     start_level = 0
-    #     for i, encoder in enumerate(model_pre.encoder):
-    #         print(f'lr for {i}: { args.learning_rate * (1 / (args.num_transformer_blocks - i))}')
-
-    #         if i >= start_level:
-    #             groups.append(
-    #                 { "params": filter(lambda p: p.requires_grad, encoder.parameters()), "lr": args.learning_rate * (1 / (args.num_transformer_blocks - i + 1))}
-    #             )
-
-    #     print(f'lr for out: {args.learning_rate}')
-    #     groups.append(
-    #         { "params": filter(lambda p: p.requires_grad, model_pre.out.parameters()), "lr": args.learning_rate }
-    #     )
-    # else:
-    model.encoder.requires_grad_(False)
-    model.transformer_encoder.requires_grad_(False)
-
+        
     groups = [
         { "params": filter(lambda p: p.requires_grad, model.parameters()), "lr": args.learning_rate }
     ]
@@ -329,7 +262,14 @@ def main():
             amsgrad=args.amsgrad,
             weight_decay=args.weight_decay
         )
-    else:
+    elif args.optimizer == 'sgd':
+        optimizer = torch.optim.SGD(
+            groups,
+            momentum=0.9,
+            nesterov=True,
+            weight_decay=args.weight_decay
+        )
+    elif args.optimizer == 'adamw':
         optimizer = torch.optim.AdamW(
             groups,
             lr=args.learning_rate,
@@ -337,9 +277,9 @@ def main():
             weight_decay=args.weight_decay
         )
 
-    steps = len(train_dataset) // (args.batchsize * args.accumulation_steps)
+    steps = len(train_dataset) // (args.batch_sizes[0] * args.accumulation_steps[0])
     warmup_steps = steps * args.warmup_epoch
-    decay_steps = steps * args.epoch + warmup_steps
+    decay_steps = steps * args.epochs[-1] + warmup_steps
 
     scheduler = torch.optim.lr_scheduler.ChainedScheduler([
         LinearWarmupScheduler(optimizer, target_lr=args.learning_rate, num_steps=warmup_steps, current_step=(steps * args.curr_warmup_epoch)),
@@ -348,42 +288,72 @@ def main():
 
     grad_scaler = torch.cuda.amp.grad_scaler.GradScaler() if args.mixed_precision else None
 
-    log = []
+    val_dataset = None
+    curr_idx = 0
+
     best_loss = np.inf
-    for epoch in range(args.epoch):
+    for epoch in range(args.curr_warmup_epoch, args.epochs[-1]+args.epoch):
         train_dataset.rebuild()
 
-        logger.info('# epoch {}'.format(epoch))
-        train_loss = train_epoch(train_dataloader, model, device, optimizer, args.accumulation_steps, args.progress_bar, args.mixup_rate, args.mixup_alpha, lr_warmup=scheduler, grad_scaler=grad_scaler)
+        if epoch > args.epochs[curr_idx] or val_dataset is None:
+            for i,e in enumerate(args.epochs):
+                if epoch > e:
+                    print(curr_idx)
+                    print(args.curr_warmup_epoch)
+                    print(e)
+                    curr_idx = i + 1
+            
+            curr_idx = min(curr_idx, len(args.cropsizes) - 1)
+            cropsize = args.cropsizes[curr_idx]
+            batch_size = args.batch_sizes[curr_idx]
+            accum_steps = args.accumulation_steps[curr_idx]
+            print(f'setting cropsize to {cropsize}, batch size to {batch_size}, accum steps to {accum_steps}')
+
+            train_dataset.cropsize = cropsize
+            train_dataloader = torch.utils.data.DataLoader(
+                dataset=train_dataset,
+                batch_size=batch_size,
+                shuffle=True,
+                num_workers=args.num_workers,
+                prefetch_factor=args.prefetch_factor
+            )
+    
+            val_dataset = dataset.VocalAugmentationDataset(
+                path=[f"C://cs{cropsize}_sr44100_hl1024_nf2048_of0_VALIDATION"],
+                vocal_path=None,
+                is_validation=True,
+                epoch_size=args.epoch_size,
+                cropsize=cropsize,
+                mixup_rate=args.mixup_rate,
+                mixup_alpha=args.mixup_alpha
+            )
+
+            val_dataloader = torch.utils.data.DataLoader(
+                dataset=val_dataset,
+                batch_size=1,
+                shuffle=False,
+                num_workers=args.num_workers
+            )
+
+        print('# epoch {}'.format(epoch))
+        train_loss = train_epoch(train_dataloader, model, device, optimizer, accum_steps, args.progress_bar, args.mixup_rate, args.mixup_alpha, lr_warmup=scheduler, grad_scaler=grad_scaler)
         val_loss_mag = validate_epoch(val_dataloader, model, device)
 
         wandb.log({
             'val_loss': val_loss_mag,
         })
 
-        logger.info(
+        print(
             '  * training loss = {:.6f}, validation loss mag = {:.6f}'
             .format(train_loss, val_loss_mag)
         )
 
-        if (val_loss_mag) < best_loss or args.save_all:
-            if (val_loss_mag) < best_loss:
-                best_loss = val_loss_mag
-                logger.info('  * best validation loss')
+        if (val_loss_mag) < best_loss:
+            best_loss = val_loss_mag
+            print('  * best validation loss')
 
-            model_path = f'{args.model_dir}models/model_iter{epoch}.remover.pth'
-            torch.save(model.state_dict(), model_path)
-
-        log.append([train_loss, val_loss_mag])
-        with open('loss_{}.json'.format(timestamp), 'w', encoding='utf8') as f:
-            json.dump(log, f, ensure_ascii=False)
-
+        model_path = f'{args.model_dir}models/model_iter{epoch}.remover.pth'
+        torch.save(model.state_dict(), model_path)
 
 if __name__ == '__main__':
-    timestamp = datetime.now().strftime('%Y.%m.%d-%H.%M.%S')
-    logger = setup_logger(__name__, 'train_{}.log'.format(timestamp))
-
-    try:
-        main()
-    except Exception as e:
-        logger.exception(e)
+    main()

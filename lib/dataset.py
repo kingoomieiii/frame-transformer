@@ -170,6 +170,59 @@ class VocalAutoregressiveDataset(torch.utils.data.Dataset):
 
         return X, Y
 
+class DenoisingPretrainingDataset(torch.utils.data.Dataset):
+    def __init__(self, path, gamma=0.3, epoch_size=None, cropsize=256):
+        self.epoch_size = epoch_size
+        self.cropsize = cropsize
+        self.gamma = gamma
+
+        self.curr_list = []
+        for mp in path:
+            mixes = [os.path.join(mp, f) for f in os.listdir(mp) if os.path.isfile(os.path.join(mp, f))]
+
+            for m in mixes:
+                self.curr_list.append(m)
+        
+        self.full_list = self.curr_list
+
+        self.rebuild()
+
+    def rebuild(self):
+        if self.epoch_size is not None:
+            end = math.ceil(len(self.full_list) * self.epoch_size)
+            random.shuffle(self.full_list)
+            self.curr_list = self.full_list[:end]
+
+    def __len__(self):
+        return len(self.curr_list)
+
+    def __getitem__(self, idx, root=True):
+        path = self.curr_list[idx % len(self.curr_list)]
+        data = np.load(str(path))
+        aug = 'Y' not in data.files
+        X, Xc = data['X'], data['c']
+        Y = X if aug else data['Y']
+        
+        if not self.is_validation:
+            c = Xc
+
+            if np.random.uniform() < 0.5:
+                X = X[::-1]
+                Y = Y[::-1]
+        else:
+            c = Xc
+
+        if X.shape[2] > self.cropsize:
+            start = np.random.randint(0, X.shape[2] - self.cropsize + 1)
+            stop = start + self.cropsize
+            X = X[:,:,start:stop]
+            Y = Y[:,:,start:stop]
+            
+        X = (np.abs(X) / c) * 2 - 1.0
+        E = np.random.normal(scale=self.gamma, size=X.shape)
+        
+        return X + E, E
+
 class MaskedPretrainingDataset(torch.utils.data.Dataset):
     def __init__(self, path, is_validation=False, mul=1, downsamples=0, epoch_size=None, pair_mul=1, slide=True, cropsize=256, mixup_rate=0, mixup_alpha=1, mask_rate=0.15, next_frame_chunk_size=16, token_size=16, target_token_size=32, current_step=0, num_steps=16000, start_step=0, mask_indices=[]):
         self.epoch_size = epoch_size
@@ -233,7 +286,7 @@ class MaskedPretrainingDataset(torch.utils.data.Dataset):
             c = Xc
 
         if X.shape[2] > self.cropsize:
-            start = np.random.randint(0, X.shape[2] - self.cropsize)
+            start = np.random.randint(0, X.shape[2] - self.cropsize + 1)
             stop = start + self.cropsize
             X = X[:,:,start:stop]
             Y = Y[:,:,start:stop]
@@ -291,12 +344,12 @@ class MaskedPretrainingDataset(torch.utils.data.Dataset):
         return X, Y, index_count, indices
 
 class VocalAugmentationDataset(torch.utils.data.Dataset):
-    def __init__(self, path=[], vocal_path="", is_validation=False, mul=1, downsamples=0, epoch_size=None, pair_mul=1, slide=True, cropsize=256, mixup_rate=0, mixup_alpha=1, include_phase=False, force_voxaug=False):
+    def __init__(self, path=[], vocal_path="", is_validation=False, mul=1, downsamples=0, epoch_size=None, cropsize=256, vocal_mixup_rate=0, mixup_rate=0, mixup_alpha=1, include_phase=False, force_voxaug=False):
         self.epoch_size = epoch_size
-        self.slide = slide
         self.mul = mul
         patch_list = []
         self.cropsize = cropsize
+        self.vocal_mixup_rate = vocal_mixup_rate
         self.mixup_rate = mixup_rate
         self.mixup_alpha = mixup_alpha
         self.include_phase = include_phase
@@ -339,7 +392,7 @@ class VocalAugmentationDataset(torch.utils.data.Dataset):
         vidx = np.random.randint(len(self.vocal_list))                
         vpath = self.vocal_list[vidx]
         vdata = np.load(str(vpath))
-        V, Vc = vdata['X'], vdata['c']
+        V = vdata['X']
 
         if np.random.uniform() < 0.5:
             V = V[::-1]
@@ -350,20 +403,11 @@ class VocalAugmentationDataset(torch.utils.data.Dataset):
             else:
                 V[1] = V[1] * 0
 
-        # if self.slide:
-        #     start = np.random.randint(0, V.shape[2] - self.cropsize)
-        #     stop = start + self.cropsize
-        #     V = V[:,:,start:stop]
+        if np.random.uniform() < self.vocal_mixup_rate and root:
+            V2 = self._get_vocals(root=False)
+            V = V + V2
 
-        if np.random.uniform() < 0.5 and root:
-            V2, Vc2 = self._get_vocals(root=False)
-            a = np.random.beta(1, 1)
-            inv = 1 - a
-
-            Vc = (Vc * a) + (Vc2 * inv)
-            V = (V * a) + (V2 * inv)
-
-        return V, Vc
+        return V
 
     def __getitem__(self, idx, root=True):
         path = self.curr_list[idx % len(self.curr_list)]
@@ -378,16 +422,10 @@ class VocalAugmentationDataset(torch.utils.data.Dataset):
                 aug = True
 
         if not self.is_validation:
-            # if self.slide:
-            #     start = np.random.randint(0, X.shape[2] - self.cropsize)
-            #     stop = start + self.cropsize
-            #     X = X[:,:,start:stop]
-            #     Y = Y[:,:,start:stop]
-
             if aug and np.random.uniform() > 0.02:
-                V, Vc = self._get_vocals()
+                V = self._get_vocals()
                 X = Y + V
-                c = np.max([Xc, Vc])
+                c = np.max([Xc, np.abs(X).max()])
             else:
                 c = Xc
 
@@ -400,6 +438,12 @@ class VocalAugmentationDataset(torch.utils.data.Dataset):
                 c = Xc
         else:
             c = Xc
+
+        if X.shape[2] > self.cropsize:
+            start = np.random.randint(0, X.shape[2] - self.cropsize + 1)
+            stop = start + self.cropsize
+            X = X[:,:,start:stop]
+            Y = Y[:,:,start:stop]
 
         X = np.clip(np.abs(X) / c, 0, 1)
         Y = np.clip(np.abs(Y) / c, 0, 1)
