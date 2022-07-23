@@ -68,13 +68,12 @@ def train_epoch(dataloader, model, device, optimizer, accumulation_steps, progre
         y_batch = y_batch.to(device)[:, :, :model.max_bin]
 
         with torch.cuda.amp.autocast_mode.autocast():
-            pred = model(X_batch)
+            pred = torch.sigmoid(model(X_batch))
 
-        l1_loss = crit(pred, y_batch) / accumulation_steps
-        #q_loss = loss / accumulation_steps
+        l1_loss = crit(X_batch * pred, y_batch) / accumulation_steps
 
         batch_loss = batch_loss + l1_loss
-        batch_qloss = batch_qloss# + q_loss
+        batch_qloss = batch_qloss
         accum_loss = l1_loss
 
         if grad_scaler is not None:
@@ -126,10 +125,9 @@ def validate_epoch(dataloader, model, device):
             X_batch = X_batch.to(device)[:, :, :model.max_bin]
             y_batch = y_batch.to(device)[:, :, :model.max_bin]
 
-            pred = model(X_batch)
+            pred = torch.sigmoid(model(X_batch))
 
-            # shifting to familiar range for testing purposes
-            mag_loss = crit((pred + 1) * 0.5, (y_batch + 1) * 0.5)
+            mag_loss = crit(X_batch * pred, y_batch)
 
             if torch.logical_or(mag_loss.isnan(), mag_loss.isinf()):
                 print('non-finite or nan validation loss; aborting')
@@ -193,6 +191,7 @@ def main():
     p.add_argument('--wandb_entity', type=str, default='carperbr')
     p.add_argument('--wandb_run_id', type=str, default=None)
     p.add_argument('--prefetch_factor', type=int, default=2)
+    p.add_argument('--cropsize', type=int, default=0)
     args = p.parse_args()
 
     args.amsgrad = str.lower(args.amsgrad) == 'true'
@@ -237,8 +236,9 @@ def main():
 
     device = torch.device('cpu')
     
-    #model = FramePrimer(n_fft=args.n_fft, feedforward_dim=args.feedforward_dim, num_bands=args.num_bands, num_transformer_blocks=args.num_transformer_blocks, cropsize=args.cropsize, bias=args.bias, new_out=True)
-    model = FramePrimer2(channels=args.channels, scale_factor=args.channel_scale, feedforward_expansion=args.feedforward_expansion, depth=args.depth, num_transformer_blocks=args.num_transformer_encoders, n_fft=args.n_fft, cropsize=args.max_cropsize, num_bands=args.num_bands, bias=args.bias, dropout=args.dropout, num_res_blocks=args.num_res_blocks)
+    #model = FramePrimer(n_fft=args.n_fft, feedforward_dim=args.feedforward_dim, num_bands=args.num_bands, num_transformer_encoders=0, num_transformer_decoders=args.num_transformer_blocks, cropsize=args.cropsize, bias=args.bias)
+    model = FramePrimer(channels=args.channels, scale_factor=args.channel_scale, feedforward_dim=args.feedforward_dim, depth=args.depth, num_transformer_encoders=args.num_transformer_encoders, num_transformer_decoders=args.num_transformer_decoders, n_fft=args.n_fft, cropsize=args.max_cropsize, num_bands=args.num_bands, bias=args.bias, dropout=args.dropout, num_res_blocks=args.num_res_blocks)
+    #model = FramePrimer2(channels=args.channels, scale_factor=args.channel_scale, feedforward_expansion=args.feedforward_expansion, depth=args.depth, num_transformer_blocks=args.num_transformer_encoders, n_fft=args.n_fft, cropsize=args.max_cropsize, num_bands=args.num_bands, bias=args.bias, dropout=args.dropout, num_res_blocks=args.num_res_blocks)
    
     if args.pretrained_model is not None:
         model.load_state_dict(torch.load(args.pretrained_model, map_location=device))
@@ -317,15 +317,11 @@ def main():
                 num_workers=args.num_workers,
                 prefetch_factor=args.prefetch_factor
             )
-    
-            val_dataset = dataset.VocalAugmentationDataset(
+
+            val_dataset = VoxAugDataset(
                 path=[f"C://cs{cropsize}_sr44100_hl1024_nf2048_of0_VALIDATION"],
                 vocal_path=None,
-                is_validation=True,
-                epoch_size=args.epoch_size,
-                cropsize=cropsize,
-                mixup_rate=args.mixup_rate,
-                mixup_alpha=args.mixup_alpha
+                is_validation=True
             )
 
             val_dataloader = torch.utils.data.DataLoader(

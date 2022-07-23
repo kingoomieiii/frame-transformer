@@ -65,9 +65,6 @@ class FramePrimerEncoder2(nn.Module):
         self.dropout2 = nn.Dropout(dropout) if dropout > 0 else nn.Identity()
 
     def __call__(self, x, prev_qk=None):
-        b,c,h,w = x.shape
-        x = x.transpose(1,3).reshape(b,w,h*c)
-
         z = self.norm1(x)
         z, prev_qk = self.attn(z, prev_qk=prev_qk)
         x = x + self.dropout1(z)
@@ -76,7 +73,7 @@ class FramePrimerEncoder2(nn.Module):
         z = self.linear2(torch.square(self.relu(self.linear1(z))))
         x = x + self.dropout2(z)
 
-        return x.reshape(b,w,h,c).transpose(1,3), prev_qk
+        return x, prev_qk
 
 class FramePrimerEncoder(nn.Module):
     def __init__(self, channels, bins=0, num_bands=4, cropsize=1024, feedforward_dim=2048, bias=False, dropout=0.1, downsamples=0, n_fft=2048, bottleneck=1, expansion=4):
@@ -94,7 +91,7 @@ class FramePrimerEncoder(nn.Module):
         self.relu = nn.ReLU(inplace=True)
         
         self.bottleneck = bottleneck
-        self.in_project = FrameConv(channels, self.bottleneck, downsamples=downsamples, n_fft=n_fft) if channels != self.bottleneck else nn.Identity()
+        self.in_project = nn.Conv2d(channels, 1, kernel_size=1, padding=0) if channels != self.bottleneck else nn.Identity()
 
         self.norm1 = nn.LayerNorm(bins * self.bottleneck)
         self.attn = MultibandFrameAttention(num_bands, bins * self.bottleneck, cropsize)
@@ -134,8 +131,8 @@ class FramePrimerDecoder(nn.Module):
 
         self.relu = nn.ReLU(inplace=True)
 
-        self.in_project = FrameConv(channels, 1, downsamples=downsamples, n_fft=n_fft)
-        self.mem_project = FrameConv(mem_channels, 1, downsamples=downsamples, n_fft=n_fft)
+        self.in_project = nn.Conv2d(channels, 1, kernel_size=1, padding=0)
+        self.mem_project = nn.Conv2d(mem_channels, 1, kernel_size=1, padding=0)
 
         self.norm1 = nn.LayerNorm(bins)
         self.attn1 = MultibandFrameAttention(num_bands, bins, cropsize)
