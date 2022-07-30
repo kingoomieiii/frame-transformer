@@ -57,7 +57,7 @@ class FramePrimerEncoder(nn.Module):
         self.num_bands = num_bands
         self.residual_attention = residual_attention
 
-        self.gelu = nn.GELU()
+        self.relu = nn.ReLU(inplace=True)
         
         self.bottleneck = bottleneck
         self.in_project = nn.Conv2d(channels, 1, kernel_size=1, padding=0)
@@ -79,7 +79,7 @@ class FramePrimerEncoder(nn.Module):
         x = x + self.dropout1(z)
         
         z = self.norm2(x)
-        z = self.linear2(self.gelu(self.linear1(z)))
+        z = self.linear2(torch.square(self.relu(self.linear1(z))))
         x = x + self.dropout2(z)
 
         if self.residual_attention:
@@ -104,7 +104,7 @@ class FramePrimerDecoder(nn.Module):
         self.num_bands = num_bands
         self.residual_attention = residual_attention
 
-        self.gelu = nn.GELU()
+        self.relu = nn.ReLU(inplace=True)
         self.in_project = nn.Conv2d(channels, 1, kernel_size=1, padding=0)
         self.skip_project = nn.Conv2d(mem_channels, 1, kernel_size=1, padding=0)
 
@@ -134,7 +134,7 @@ class FramePrimerDecoder(nn.Module):
         x = x + self.dropout2(h)
         
         h = self.norm3(x)
-        h = self.linear2(self.gelu(self.linear1(h)))
+        h = self.linear2(torch.square(self.relu(self.linear1(h))))
         x = x + self.dropout3(h)
 
         if self.residual_attention:
@@ -180,7 +180,7 @@ class FrameConv(nn.Module):
         return x
 
 class ResBlock(nn.Module):
-    def __init__(self, in_channels, out_channels, kernel_size=3, stride=1, padding=1, activate=nn.GELU, cropsize=1024, downsamples=0, n_fft=2048, column_kernel=True, column_stride=True):
+    def __init__(self, in_channels, out_channels, kernel_size=3, stride=1, padding=1, activate=nn.LeakyReLU, cropsize=1024, downsamples=0, n_fft=2048, column_kernel=True, column_stride=True):
         super(ResBlock, self).__init__()
 
         self.identity = nn.Conv2d(in_channels, out_channels, kernel_size=1, padding=0, stride=(stride, 1) if column_stride else stride) if in_channels != out_channels or stride > 1 else nn.Identity()
