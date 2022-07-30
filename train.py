@@ -18,10 +18,11 @@ from tqdm import tqdm
 
 from frame_primer.dataset_voxaug import VoxAugDataset
 
-from frame_primer.frame_primer import FramePrimer, FramePrimer2
+from frame_primer.frame_primer import FramePrimer
 from frame_primer.frame_resnet import FrameResUNet
 from lib.lr_scheduler_linear_warmup import LinearWarmupScheduler
 from lib.lr_scheduler_polynomial_decay import PolynomialDecayScheduler
+from lib.nets import CascadedPrimerNet
 
 def setup_logger(name, logfile='LOGFILENAME.log', out_dir='logs'):
     logger = logging.getLogger(name)
@@ -55,7 +56,7 @@ def mixup(X, Y, alpha=1):
     Y = Y * lam + Y2 * inv_lam
     return X, Y
 
-def train_epoch(dataloader, model, device, optimizer, accumulation_steps, progress_bar, mixup_rate, mixup_alpha, lr_warmup=None, grad_scaler=None):
+def train_epoch(dataloader, model, device, optimizer, accumulation_steps, progress_bar, mixup_rate, mixup_alpha, lr_warmup=None, grad_scaler=None, use_wandb=True):
     model.train()
     sum_loss = 0
     crit = nn.L1Loss()
@@ -70,7 +71,7 @@ def train_epoch(dataloader, model, device, optimizer, accumulation_steps, progre
         with torch.cuda.amp.autocast_mode.autocast():
             pred = torch.sigmoid(model(X_batch))
 
-        l1_loss = crit(X_batch * pred, y_batch) / accumulation_steps
+        l1_loss = crit((X_batch + 1) * 0.5 * pred, (y_batch + 1) * 0.5) / accumulation_steps
 
         batch_loss = batch_loss + l1_loss
         batch_qloss = batch_qloss
@@ -85,9 +86,10 @@ def train_epoch(dataloader, model, device, optimizer, accumulation_steps, progre
             if progress_bar:
                 pbar.set_description(f'{str(batch_loss.item())}')
 
-            wandb.log({
-                'loss': batch_loss.item()
-            })
+            if use_wandb:
+                wandb.log({
+                    'loss': batch_loss.item()
+                })
 
             if grad_scaler is not None:
                 grad_scaler.unscale_(optimizer)
@@ -127,7 +129,7 @@ def validate_epoch(dataloader, model, device):
 
             pred = torch.sigmoid(model(X_batch))
 
-            mag_loss = crit(X_batch * pred, y_batch)
+            mag_loss = crit((X_batch + 1) * 0.5 * pred, (y_batch + 1) * 0.5)
 
             if torch.logical_or(mag_loss.isnan(), mag_loss.isinf()):
                 print('non-finite or nan validation loss; aborting')
@@ -149,6 +151,7 @@ def main():
     p.add_argument('--mixup_rate', '-M', type=float, default=0)
     p.add_argument('--mixup_alpha', '-a', type=float, default=0.4)
     p.add_argument('--mixed_precision', type=str, default='false')
+    p.add_argument('--column_kernel', type=str, default='true')
     
     p.add_argument('--warmup_epoch', type=int, default=1)
     p.add_argument('--curr_warmup_epoch', type=int, default=0)
@@ -167,8 +170,8 @@ def main():
 
     p.add_argument('--cropsizes', type=str, default='512,1024,2048')
     p.add_argument('--epochs', type=str, default='30,50,60')
-    p.add_argument('--batch_sizes', type=str, default='5,2,1')
-    p.add_argument('--accumulation_steps', '-A', type=str, default='1,2,4')
+    p.add_argument('--batch_sizes', type=str, default='1,2,1')
+    p.add_argument('--accumulation_steps', '-A', type=str, default='4,2,4')
 
     p.add_argument('--gpu', '-g', type=int, default=-1)
     p.add_argument('--optimizer', type=str.lower, choices=['adam', 'adamw', 'sgd'], default='adamw')
@@ -187,6 +190,7 @@ def main():
     p.add_argument('--llrd', type=str, default='false')
     p.add_argument('--lock', type=str, default='false')
     p.add_argument('--debug', action='store_true')
+    p.add_argument('--wandb', type=str, default='true')
     p.add_argument('--wandb_project', type=str, default='VOCAL-REMOVER')
     p.add_argument('--wandb_entity', type=str, default='carperbr')
     p.add_argument('--wandb_run_id', type=str, default=None)
@@ -194,6 +198,7 @@ def main():
     p.add_argument('--cropsize', type=int, default=0)
     args = p.parse_args()
 
+    args.column_kernel = str.lower(args.column_kernel) == 'true'
     args.amsgrad = str.lower(args.amsgrad) == 'true'
     args.progress_bar = str.lower(args.progress_bar) == 'true'
     args.bias = str.lower(args.bias) == 'true'
@@ -202,12 +207,14 @@ def main():
     args.force_voxaug = str.lower(args.force_voxaug) == 'true'
     args.llrd = str.lower(args.llrd) == 'true'
     args.lock = str.lower(args.lock) == 'true'
+    args.wandb = str.lower(args.wandb) == 'true'
     args.epochs = [int(epoch) for i, epoch in enumerate(args.epochs.split(','))]
     args.cropsizes = [int(cropsize) for cropsize in args.cropsizes.split(',')]
     args.batch_sizes = [int(batch_size) for batch_size in args.batch_sizes.split(',')]
     args.accumulation_steps = [int(steps) for steps in args.accumulation_steps.split(',')]
     
-    wandb.init(project=args.wandb_project, entity=args.wandb_entity, config=args, id=args.wandb_run_id, resume="must" if args.wandb_run_id is not None else None)
+    if args.wandb:
+        wandb.init(project=args.wandb_project, entity=args.wandb_entity, config=args, id=args.wandb_run_id, resume="must" if args.wandb_run_id is not None else None)
 
     print(args)
 
@@ -222,8 +229,14 @@ def main():
             "F://cs2048_sr44100_hl1024_nf2048_of0",
             "H://cs2048_sr44100_hl1024_nf2048_of0",
             "J://cs2048_sr44100_hl1024_nf2048_of0",
+            "K://cs2048_sr44100_hl1024_nf2048_of0_PAIRS",
+            "K://cs2048_sr44100_hl1024_nf2048_of0",
         ],
-        vocal_path="D://cs2048_sr44100_hl1024_nf2048_of0_VOCALS",
+        vocal_path=[
+            "D://cs2048_sr44100_hl1024_nf2048_of0_VOCALS",
+            "J://cs2048_sr44100_hl1024_nf2048_of0_VOCALS",
+            "K://cs2048_sr44100_hl1024_nf2048_of0_VOCALS",
+        ],
         is_validation=False,
         epoch_size=args.epoch_size,
         mixup_rate=args.mixup_rate,
@@ -237,9 +250,11 @@ def main():
     device = torch.device('cpu')
     
     #model = FramePrimer(n_fft=args.n_fft, feedforward_dim=args.feedforward_dim, num_bands=args.num_bands, num_transformer_encoders=0, num_transformer_decoders=args.num_transformer_blocks, cropsize=args.cropsize, bias=args.bias)
-    model = FramePrimer(channels=args.channels, scale_factor=args.channel_scale, feedforward_dim=args.feedforward_dim, depth=args.depth, num_transformer_encoders=args.num_transformer_encoders, num_transformer_decoders=args.num_transformer_decoders, n_fft=args.n_fft, cropsize=args.max_cropsize, num_bands=args.num_bands, bias=args.bias, dropout=args.dropout, num_res_blocks=args.num_res_blocks)
+    #model = FramePrimer(channels=args.channels, scale_factor=args.channel_scale, feedforward_dim=args.feedforward_dim, depth=args.depth, num_transformer_encoders=args.num_transformer_encoders, num_transformer_decoders=args.num_transformer_decoders, n_fft=args.n_fft, cropsize=args.max_cropsize, num_bands=args.num_bands, bias=args.bias, dropout=args.dropout, num_res_blocks=args.num_res_blocks, column_kernel=args.column_kernel)
     #model = FramePrimer2(channels=args.channels, scale_factor=args.channel_scale, feedforward_expansion=args.feedforward_expansion, depth=args.depth, num_transformer_blocks=args.num_transformer_encoders, n_fft=args.n_fft, cropsize=args.max_cropsize, num_bands=args.num_bands, bias=args.bias, dropout=args.dropout, num_res_blocks=args.num_res_blocks)
    
+    model = CascadedPrimerNet(args.n_fft, args.max_cropsize)
+
     if args.pretrained_model is not None:
         model.load_state_dict(torch.load(args.pretrained_model, map_location=device))
         
@@ -332,12 +347,13 @@ def main():
             )
 
         print('# epoch {}'.format(epoch))
-        train_loss = train_epoch(train_dataloader, model, device, optimizer, accum_steps, args.progress_bar, args.mixup_rate, args.mixup_alpha, lr_warmup=scheduler, grad_scaler=grad_scaler)
+        train_loss = train_epoch(train_dataloader, model, device, optimizer, accum_steps, args.progress_bar, args.mixup_rate, args.mixup_alpha, lr_warmup=scheduler, grad_scaler=grad_scaler, use_wandb=args.wandb)
         val_loss_mag = validate_epoch(val_dataloader, model, device)
 
-        wandb.log({
-            'val_loss': val_loss_mag,
-        })
+        if args.wandb:
+            wandb.log({
+                'val_loss': val_loss_mag,
+            })
 
         print(
             '  * training loss = {:.6f}, validation loss mag = {:.6f}'

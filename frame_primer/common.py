@@ -40,99 +40,73 @@ class MultibandFrameAttention(nn.Module):
 
         return o, qk
 
-class FramePrimerEncoder2(nn.Module):
-    def __init__(self, channels, num_bands=4, cropsize=1024, bias=False, dropout=0.1, downsamples=0, n_fft=2048, expansion=4):
-        super(FramePrimerEncoder2, self).__init__()
-
-        bins = n_fft // 2
-        if downsamples > 0:
-            for _ in range(downsamples):
-                bins = ((bins - 1) // 2) + 1
-
-        self.bins = bins
-        self.cropsize = cropsize
-        self.num_bands = num_bands
-
-        self.relu = nn.ReLU(inplace=True)
-        
-        self.norm1 = nn.LayerNorm(bins * channels)
-        self.attn = MultibandFrameAttention(channels, bins * channels, cropsize)
-        self.dropout1 = nn.Dropout(dropout) if dropout > 0 else nn.Identity()
-
-        self.norm2 = nn.LayerNorm(bins * channels)
-        self.linear1 = nn.Linear(bins * channels, bins * channels * expansion, bias=bias)
-        self.linear2 = nn.Linear(bins * channels * expansion, bins * channels, bias=bias)
-        self.dropout2 = nn.Dropout(dropout) if dropout > 0 else nn.Identity()
-
-    def __call__(self, x, prev_qk=None):
-        z = self.norm1(x)
-        z, prev_qk = self.attn(z, prev_qk=prev_qk)
-        x = x + self.dropout1(z)
-        
-        z = self.norm2(x)
-        z = self.linear2(torch.square(self.relu(self.linear1(z))))
-        x = x + self.dropout2(z)
-
-        return x, prev_qk
-
 class FramePrimerEncoder(nn.Module):
-    def __init__(self, channels, bins=0, num_bands=4, cropsize=1024, feedforward_dim=2048, bias=False, dropout=0.1, downsamples=0, n_fft=2048, bottleneck=1, expansion=4):
+    def __init__(self, channels, bins=0, num_bands=4, cropsize=1024, feedforward_dim=2048, bias=False, dropout=0.1, downsamples=0, n_fft=2048, bottleneck=1, downsample_cropsize=False, residual_attention=True):
         super(FramePrimerEncoder, self).__init__()
 
         bins = n_fft // 2
         if downsamples > 0:
             for _ in range(downsamples):
-                bins = ((bins - 1) // 2) + 1
+                bins = bins // 2
+
+                if downsample_cropsize:
+                    cropsize = cropsize // 2
 
         self.bins = bins
         self.cropsize = cropsize
         self.num_bands = num_bands
+        self.residual_attention = residual_attention
 
-        self.relu = nn.ReLU(inplace=True)
+        self.gelu = nn.GELU()
         
         self.bottleneck = bottleneck
-        self.in_project = nn.Conv2d(channels, 1, kernel_size=1, padding=0) if channels != self.bottleneck else nn.Identity()
+        self.in_project = nn.Conv2d(channels, 1, kernel_size=1, padding=0)
 
         self.norm1 = nn.LayerNorm(bins * self.bottleneck)
         self.attn = MultibandFrameAttention(num_bands, bins * self.bottleneck, cropsize)
         self.dropout1 = nn.Dropout(dropout) if dropout > 0 else nn.Identity()
 
         self.norm2 = nn.LayerNorm(bins * self.bottleneck)
-        self.linear1 = nn.Linear(bins * self.bottleneck, bins * self.bottleneck * expansion, bias=bias)
-        self.linear2 = nn.Linear(bins * self.bottleneck * expansion, bins * self.bottleneck, bias=bias)
+        self.linear1 = nn.Linear(bins * self.bottleneck, feedforward_dim, bias=bias)
+        self.linear2 = nn.Linear(feedforward_dim, bins * self.bottleneck, bias=bias)
         self.dropout2 = nn.Dropout(dropout) if dropout > 0 else nn.Identity()
 
     def __call__(self, x, prev_qk=None):
-        b,c,h,w = x.shape
-        x = self.in_project(x).transpose(1,3).reshape(b,w,h*self.bottleneck)
+        x = self.in_project(x).transpose(1,3).squeeze(-1)
 
         z = self.norm1(x)
         z, prev_qk = self.attn(z, prev_qk=prev_qk)
         x = x + self.dropout1(z)
         
         z = self.norm2(x)
-        z = self.linear2(torch.square(self.relu(self.linear1(z))))
+        z = self.linear2(self.gelu(self.linear1(z)))
         x = x + self.dropout2(z)
 
-        return x.transpose(1,2).reshape(b,self.bottleneck,h,w), prev_qk
+        if self.residual_attention:
+            return x.transpose(1,2).unsqueeze(1), prev_qk
+        
+        return x.transpose(1,2).unsqueeze(1)
 
 class FramePrimerDecoder(nn.Module):
-    def __init__(self, channels, mem_channels, bins=0, num_bands=4, cropsize=1024, feedforward_dim=2048, bias=False, dropout=0.1, downsamples=0, n_fft=2048):
+    def __init__(self, channels, mem_channels, bins=0, num_bands=4, cropsize=1024, feedforward_dim=2048, bias=False, dropout=0.1, downsamples=0, n_fft=2048, downsample_cropsize=False, residual_attention=True):
         super(FramePrimerDecoder, self).__init__()
 
         bins = n_fft // 2
         if downsamples > 0:
             for _ in range(downsamples):
-                bins = ((bins - 1) // 2) + 1
+                bins = bins // 2
+
+                if downsample_cropsize:
+                    cropsize = cropsize // 2
 
         self.bins = bins
         self.cropsize = cropsize
         self.num_bands = num_bands
+        self.residual_attention = residual_attention
 
-        self.relu = nn.ReLU(inplace=True)
-
+        self.gelu = nn.GELU()
         self.in_project = nn.Conv2d(channels, 1, kernel_size=1, padding=0)
-        self.mem_project = nn.Conv2d(mem_channels, 1, kernel_size=1, padding=0)
+        self.skip_project = nn.Conv2d(mem_channels, 1, kernel_size=1, padding=0)
 
         self.norm1 = nn.LayerNorm(bins)
         self.attn1 = MultibandFrameAttention(num_bands, bins, cropsize)
@@ -147,42 +121,48 @@ class FramePrimerDecoder(nn.Module):
         self.linear2 = nn.Linear(feedforward_dim, bins, bias=bias)
         self.dropout3 = nn.Dropout(dropout) if dropout > 0 else nn.Identity()
 
-    def __call__(self, x, mem=None, prev_qk1=None, prev_qk2=None):
+    def __call__(self, x, skip=None, prev_qk1=None, prev_qk2=None):
         x = self.in_project(x).transpose(1,3).squeeze(-1)
-        mem = self.mem_project(mem).transpose(1,3).squeeze(-1)
+        skip = self.skip_project(skip).transpose(1,3).squeeze(-1)
 
         h = self.norm1(x)
         h, prev_qk1 = self.attn1(h, prev_qk=prev_qk1)
         x = x + self.dropout1(h)
 
         h = self.norm2(x)
-        h, prev_qk2 = self.attn2(h, mem=mem, prev_qk=prev_qk2)
+        h, prev_qk2 = self.attn2(h, mem=skip, prev_qk=prev_qk2)
         x = x + self.dropout2(h)
         
         h = self.norm3(x)
-        h = self.linear2(torch.square(self.relu(self.linear1(h))))
+        h = self.linear2(self.gelu(self.linear1(h)))
         x = x + self.dropout3(h)
 
-        return x.transpose(1,2).unsqueeze(1), prev_qk1, prev_qk2
+        if self.residual_attention:
+            return x.transpose(1,2).unsqueeze(1), prev_qk1, prev_qk2
+
+        return x.transpose(1,2).unsqueeze(1)
 
 class FrameConv(nn.Module):
-    def __init__(self, in_channels, out_channels, kernel_size=3, stride=1, padding=1, dilation=1, groups=1, activate=nn.SiLU, norm=True, cropsize=1024, downsamples=0, n_fft=2048, dropout=None):
+    def __init__(self, in_channels, out_channels, kernel_size=3, stride=1, padding=1, groups=1, activate=nn.GELU, norm=True, downsamples=0, n_fft=2048, column_kernel=True, column_stride=True):
         super(FrameConv, self).__init__()
 
-        bins = (n_fft // 2)
+        bins = n_fft // 2
         if downsamples > 0:
             for _ in range(downsamples):
-                bins = ((bins - 1) // 2) + 1
+                bins = bins // 2
+
+        self.downsamples = downsamples
+        self.bins = bins
+        self.in_channels = in_channels
 
         self.norm = nn.LayerNorm(bins * in_channels) if norm else None
-        self.activate = activate(inplace=True) if activate is not None else None
+        self.activate = activate() if activate is not None else None
 
         self.conv = nn.Conv2d(
                 in_channels, out_channels,
-                kernel_size=(kernel_size, 1),
-                padding=(padding, 0),
-                stride=(stride, 1),
-                dilation=(dilation, 1),
+                kernel_size=(kernel_size, 1) if column_kernel else kernel_size,
+                padding=(padding, 0) if column_kernel else padding,
+                stride=(stride, 1) if column_stride else stride,
                 groups=groups,
                 bias=False)
 
@@ -200,12 +180,12 @@ class FrameConv(nn.Module):
         return x
 
 class ResBlock(nn.Module):
-    def __init__(self, in_channels, out_channels, kernel_size=3, stride=1, padding=1, activ=nn.SiLU, cropsize=1024, downsamples=0, n_fft=2048):
+    def __init__(self, in_channels, out_channels, kernel_size=3, stride=1, padding=1, activate=nn.GELU, cropsize=1024, downsamples=0, n_fft=2048, column_kernel=True, column_stride=True):
         super(ResBlock, self).__init__()
 
-        self.identity = nn.Conv2d(in_channels, out_channels, kernel_size=1, padding=0, stride=(stride, 1)) if in_channels != out_channels or stride > 1 else nn.Identity()
-        self.conv1 = FrameConv(in_channels, out_channels, kernel_size, 1, padding, activate=activ, cropsize=cropsize, downsamples=downsamples, n_fft=n_fft)
-        self.conv2 = FrameConv(out_channels, out_channels, kernel_size, stride, padding, activate=activ, cropsize=cropsize, downsamples=downsamples, n_fft=n_fft)
+        self.identity = nn.Conv2d(in_channels, out_channels, kernel_size=1, padding=0, stride=(stride, 1) if column_stride else stride) if in_channels != out_channels or stride > 1 else nn.Identity()
+        self.conv1 = FrameConv(in_channels, out_channels, kernel_size, 1, padding, activate=activate, downsamples=downsamples, n_fft=n_fft, column_kernel=column_kernel, column_stride=column_stride)
+        self.conv2 = FrameConv(out_channels, out_channels, kernel_size, stride, padding, activate=activate, downsamples=downsamples, n_fft=n_fft, column_kernel=column_kernel, column_stride=column_stride)
 
     def __call__(self, x):
         h = self.conv1(x)
@@ -215,10 +195,10 @@ class ResBlock(nn.Module):
         return h
         
 class FrameEncoder(nn.Module):
-    def __init__(self, in_channels, out_channels, kernel_size=3, stride=1, padding=1, activ=nn.SiLU, cropsize=1024, downsamples=0, n_fft=2048, num_res_blocks=1):
+    def __init__(self, in_channels, out_channels, kernel_size=3, stride=1, padding=1, downsamples=0, n_fft=2048, num_res_blocks=1, column_kernel=True, column_stride=True):
         super(FrameEncoder, self).__init__()
 
-        self.body = nn.Sequential(*[ResBlock(in_channels if i == 0 else out_channels, out_channels, kernel_size=kernel_size, padding=padding, stride=stride if i == num_res_blocks - 1 else 1, cropsize=cropsize, downsamples=downsamples, n_fft=n_fft) for i in range(0, num_res_blocks)])
+        self.body = nn.Sequential(*[ResBlock(in_channels if i == 0 else out_channels, out_channels, kernel_size=kernel_size, padding=padding, stride=stride if i == num_res_blocks - 1 else 1, downsamples=downsamples, n_fft=n_fft, column_kernel=column_kernel, column_stride=column_stride) for i in range(0, num_res_blocks)])
         
     def __call__(self, x):
         h = self.body(x)
@@ -226,11 +206,11 @@ class FrameEncoder(nn.Module):
         return h
 
 class FrameDecoder(nn.Module):
-    def __init__(self, in_channels, out_channels, kernel_size=3, padding=1, upsample=True, activ=nn.SiLU, norm=True, dropout=False, cropsize=1024, downsamples=0, n_fft=2048, num_res_blocks=1):
+    def __init__(self, in_channels, out_channels, kernel_size=3, padding=1, downsamples=0, n_fft=2048, num_res_blocks=1, upsample=True, column_kernel=True, column_stride=True):
         super(FrameDecoder, self).__init__()
 
-        self.upsample = nn.Upsample(scale_factor=(2,1), mode='bilinear', align_corners=True) if upsample else nn.Identity()
-        self.body = nn.Sequential(*[ResBlock(in_channels if i == 0 else out_channels, out_channels, kernel_size=kernel_size, padding=padding, cropsize=cropsize, downsamples=downsamples, n_fft=n_fft) for i in range(0, num_res_blocks)])
+        self.upsample = nn.Upsample(scale_factor=(2,1) if column_stride else 2, mode='bilinear', align_corners=True) if upsample else nn.Identity()
+        self.body = nn.Sequential(*[ResBlock(in_channels if i == 0 else out_channels, out_channels, kernel_size=kernel_size, padding=padding, downsamples=downsamples, n_fft=n_fft, column_kernel=column_kernel) for i in range(0, num_res_blocks)])
 
     def __call__(self, x, skip=None):
         x = self.upsample(x)
