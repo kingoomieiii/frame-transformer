@@ -156,15 +156,14 @@ def main():
     p.add_argument('--warmup_epoch', type=int, default=1)
     p.add_argument('--curr_warmup_epoch', type=int, default=0)
 
-    p.add_argument('--channels', type=int, default=2)
+    p.add_argument('--channels', type=int, default=16)
     p.add_argument('--channel_scale', type=int, default=1)
-    p.add_argument('--depth', type=int, default=7)
-    p.add_argument('--feedforward_expansion', type=int, default=4)
-    p.add_argument('--num_res_blocks', type=int, default=3)
-    p.add_argument('--num_transformer_encoders', type=int, default=2)    
-    p.add_argument('--num_transformer_decoders', type=int, default=2)    
-    p.add_argument('--num_bands', type=int, default=8)
-    p.add_argument('--feedforward_dim', type=int, default=4096)
+    p.add_argument('--depth', type=int, default=6)
+    p.add_argument('--num_res_blocks', type=int, default=1) # per encoder/decoder
+    p.add_argument('--num_transformer_encoders', type=int, default=1) # per layer of u-net
+    p.add_argument('--num_transformer_decoders', type=int, default=1) # per layer of u-net
+    p.add_argument('--num_bands', type=int, default=16) # going to retitle this to heads, not really bands given the q,k,v projections
+    p.add_argument('--feedforward_dim', type=int, default=12288) # probabably an absurd feedforward dim, however a large feedforward dim was talked about in the primer paper as being useful (I think it was 7x there)
     p.add_argument('--bias', type=str, default='true')
     p.add_argument('--dropout', type=float, default=0.1)
 
@@ -178,7 +177,7 @@ def main():
     p.add_argument('--amsgrad', type=str, default='false')
     p.add_argument('--weight_decay', type=float, default=0)
     p.add_argument('--num_workers', '-w', type=int, default=4)
-    p.add_argument('--epoch', '-E', type=int, default=16384)
+    p.add_argument('--epoch', '-E', type=int, default=60)
     p.add_argument('--epoch_size', type=int, default=None)
     p.add_argument('--learning_rate', '-l', type=float, default=1e-4)
     p.add_argument('--lr_scheduler_decay_target', type=int, default=1e-7)
@@ -249,11 +248,7 @@ def main():
 
     device = torch.device('cpu')
     
-    #model = FramePrimer(n_fft=args.n_fft, feedforward_dim=args.feedforward_dim, num_bands=args.num_bands, num_transformer_encoders=0, num_transformer_decoders=args.num_transformer_blocks, cropsize=args.cropsize, bias=args.bias)
-    #model = FramePrimer(channels=args.channels, scale_factor=args.channel_scale, feedforward_dim=args.feedforward_dim, depth=args.depth, num_transformer_encoders=args.num_transformer_encoders, num_transformer_decoders=args.num_transformer_decoders, n_fft=args.n_fft, cropsize=args.max_cropsize, num_bands=args.num_bands, bias=args.bias, dropout=args.dropout, num_res_blocks=args.num_res_blocks, column_kernel=args.column_kernel)
-    #model = FramePrimer2(channels=args.channels, scale_factor=args.channel_scale, feedforward_expansion=args.feedforward_expansion, depth=args.depth, num_transformer_blocks=args.num_transformer_encoders, n_fft=args.n_fft, cropsize=args.max_cropsize, num_bands=args.num_bands, bias=args.bias, dropout=args.dropout, num_res_blocks=args.num_res_blocks)
-   
-    model = CascadedPrimerNet(args.n_fft, args.max_cropsize)
+    model = FramePrimer(channels=args.channels, scale_factor=args.channel_scale, feedforward_dim=args.feedforward_dim, depth=args.depth, num_transformer_encoders=args.num_transformer_encoders, num_transformer_decoders=args.num_transformer_decoders, n_fft=args.n_fft, cropsize=args.max_cropsize, num_bands=args.num_bands, bias=args.bias, dropout=args.dropout, num_res_blocks=args.num_res_blocks, column_kernel=args.column_kernel)
 
     if args.pretrained_model is not None:
         model.load_state_dict(torch.load(args.pretrained_model, map_location=device))
