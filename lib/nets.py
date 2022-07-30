@@ -220,6 +220,6 @@ class CascadedPrimerNet(nn.Module):
         l2 = self.stg2_full(torch.cat((x, l1), dim=1))
         l3 = self.stg3_full(torch.cat((x, l1, l2), dim=1))
 
-        mask = torch.sigmoid(self.out(l3))
+        mask = self.out(l3)
 
         return mask
