@@ -180,7 +180,7 @@ class FrameConv(nn.Module):
         return x
 
 class ResBlock(nn.Module):
-    def __init__(self, in_channels, out_channels, kernel_size=3, stride=1, padding=1, activate=nn.LeakyReLU, cropsize=1024, downsamples=0, n_fft=2048, column_kernel=True, column_stride=True):
+    def __init__(self, in_channels, out_channels, kernel_size=3, stride=1, padding=1, activate=nn.GELU, cropsize=1024, downsamples=0, n_fft=2048, column_kernel=True, column_stride=True):
         super(ResBlock, self).__init__()
 
         self.identity = nn.Conv2d(in_channels, out_channels, kernel_size=1, padding=0, stride=(stride, 1) if column_stride else stride) if in_channels != out_channels or stride > 1 else nn.Identity()
