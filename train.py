@@ -18,7 +18,7 @@ from tqdm import tqdm
 
 from frame_primer.dataset_voxaug import VoxAugDataset
 
-from frame_primer.frame_primer import FramePrimer
+from frame_primer.frame_primer import FramePrimer, FrameTransformer, FramePrimer2
 from frame_primer.frame_resnet import FrameResUNet
 from lib.lr_scheduler_linear_warmup import LinearWarmupScheduler
 from lib.lr_scheduler_polynomial_decay import PolynomialDecayScheduler
@@ -223,13 +223,13 @@ def main():
 
     train_dataset = VoxAugDataset(
         path=[
-            "C://cs2048_sr44100_hl1024_nf2048_of0",
-            "D://cs2048_sr44100_hl1024_nf2048_of0",
-            "F://cs2048_sr44100_hl1024_nf2048_of0",
-            "H://cs2048_sr44100_hl1024_nf2048_of0",
-            "J://cs2048_sr44100_hl1024_nf2048_of0",
+            # "C://cs2048_sr44100_hl1024_nf2048_of0",
+            # "D://cs2048_sr44100_hl1024_nf2048_of0",
+            # "F://cs2048_sr44100_hl1024_nf2048_of0",
+            # "H://cs2048_sr44100_hl1024_nf2048_of0",
+            # "J://cs2048_sr44100_hl1024_nf2048_of0",
             "K://cs2048_sr44100_hl1024_nf2048_of0_PAIRS",
-            "K://cs2048_sr44100_hl1024_nf2048_of0",
+            # "K://cs2048_sr44100_hl1024_nf2048_of0",
         ],
         vocal_path=[
             "D://cs2048_sr44100_hl1024_nf2048_of0_VOCALS",
@@ -248,7 +248,7 @@ def main():
 
     device = torch.device('cpu')
     
-    model = FramePrimer(channels=args.channels, scale_factor=args.channel_scale, feedforward_dim=args.feedforward_dim, depth=args.depth, num_transformer_encoders=args.num_transformer_encoders, num_transformer_decoders=args.num_transformer_decoders, n_fft=args.n_fft, cropsize=args.max_cropsize, num_bands=args.num_bands, bias=args.bias, dropout=args.dropout, num_res_blocks=args.num_res_blocks, column_kernel=args.column_kernel)
+    model = FramePrimer2(channels=args.channels, scale_factor=args.channel_scale, feedforward_dim=args.feedforward_dim, depth=args.depth, num_transformer_encoders=args.num_transformer_encoders, num_transformer_decoders=args.num_transformer_decoders, n_fft=args.n_fft, cropsize=args.max_cropsize, num_bands=args.num_bands, bias=args.bias, dropout=args.dropout, num_res_blocks=args.num_res_blocks, column_kernel=args.column_kernel)
 
     if args.pretrained_model is not None:
         model.load_state_dict(torch.load(args.pretrained_model, map_location=device))
@@ -347,6 +347,7 @@ def main():
 
         if args.wandb:
             wandb.log({
+                'train_loss': train_loss,
                 'val_loss': val_loss_mag,
             })
 
