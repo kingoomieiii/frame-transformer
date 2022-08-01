@@ -5,16 +5,16 @@ import torch.nn.functional as F
 import math
 
 class MultibandFrameAttention(nn.Module):
-    def __init__(self, num_bands, bins, cropsize, kernel_size=3, padding=1, bias=False, channels=1):
+    def __init__(self, num_bands, bins, cropsize, kernel_size=3, padding=1, bias=False):
         super().__init__()
 
         self.num_bands = num_bands
         self.q_proj = nn.Linear(bins, bins, bias=bias)
-        self.q_conv = nn.Conv2d(bins, bins, kernel_size=(3,1), padding=(1,0), groups=bins)
+        self.q_conv = nn.Conv2d(bins, bins, kernel_size=(kernel_size,1), padding=(padding,0), groups=bins)
         self.k_proj = nn.Linear(bins, bins, bias=bias)
-        self.k_conv = nn.Conv2d(bins, bins, kernel_size=(3,1), padding=(1,0), groups=bins)
+        self.k_conv = nn.Conv2d(bins, bins, kernel_size=(kernel_size,1), padding=(padding,0), groups=bins)
         self.v_proj = nn.Linear(bins, bins, bias=bias)
-        self.v_conv = nn.Conv2d(bins, bins, kernel_size=(3,1), padding=(1,0), groups=bins)
+        self.v_conv = nn.Conv2d(bins, bins, kernel_size=(kernel_size,1), padding=(padding,0), groups=bins)
         self.o_proj = nn.Linear(bins, bins, bias=bias)
 
         self.weight = nn.Parameter(torch.empty(bins // num_bands, cropsize))
@@ -24,8 +24,8 @@ class MultibandFrameAttention(nn.Module):
         b,c,w,h = x.shape
 
         q = self.q_conv(self.q_proj(x).transpose(1,3)).transpose(1,3).reshape(b, c, w, self.num_bands, -1).permute(0,1,3,2,4)
-        k = self.k_conv(self.k_proj(x).transpose(1,3)).transpose(1,3).reshape(b, c, w, self.num_bands, -1).permute(0,1,3,4,2)
-        v = self.v_conv(self.v_proj(x).transpose(1,3)).transpose(1,3).reshape(b, c, w, self.num_bands, -1).permute(0,1,3,2,4)
+        k = self.k_conv(self.k_proj(x if mem is None else mem).transpose(1,3)).transpose(1,3).reshape(b, c, w, self.num_bands, -1).permute(0,1,3,4,2)
+        v = self.v_conv(self.v_proj(x if mem is None else mem).transpose(1,3)).transpose(1,3).reshape(b, c, w, self.num_bands, -1).permute(0,1,3,2,4)
         p = F.pad(torch.matmul(q,self.weight[:, :w]), (1,0)).transpose(3,4)[:,:,:,1:,:]
 
         with torch.cuda.amp.autocast_mode.autocast(enabled=False):
