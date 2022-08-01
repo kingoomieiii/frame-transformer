@@ -18,7 +18,7 @@ from tqdm import tqdm
 
 from frame_primer.dataset_voxaug import VoxAugDataset
 
-from frame_primer.frame_primer import FramePrimer, FrameTransformer, FramePrimer2
+from frame_primer.frame_primer import FramePrimer, FramePrimer2
 from frame_primer.frame_resnet import FrameResUNet
 from lib.lr_scheduler_linear_warmup import LinearWarmupScheduler
 from lib.lr_scheduler_polynomial_decay import PolynomialDecayScheduler
