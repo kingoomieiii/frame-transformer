@@ -67,8 +67,8 @@ class FramePrimer2(nn.Module):
         self.output_bin = n_fft // 2 + 1
         self.channels = channels
 
-        bottlenecks = [1, 2, 4, 6, 8, 10]
-        bands = [16, 16, 8, 4, 2, 1]
+        bottlenecks = [1, 2, 4, 8, 12, 14]
+        bands = [16, 16, 16, 8, 4, 2]
 
         self.enc1 = FrameEncoder(in_channels, channels, n_fft=n_fft, downsamples=0, stride=1, column_kernel=False, kernel_size=3, padding=1, num_res_blocks=num_res_blocks)
         self.enc1_primer = FramePrimerEncoder(channels, num_bands=bands[0], n_fft=n_fft, feedforward_dim=feedforward_dim, downsamples=0, dropout=dropout, bottleneck=bottlenecks[0])

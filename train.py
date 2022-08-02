@@ -62,6 +62,7 @@ def train_epoch(dataloader, model, device, optimizer, accumulation_steps, progre
     crit = nn.L1Loss()
     batch_loss = 0
     batch_qloss = 0
+    batches = 0
 
     pbar = tqdm(dataloader) if progress_bar else dataloader
     for itr, (X_batch, y_batch) in enumerate(pbar):
@@ -71,7 +72,7 @@ def train_epoch(dataloader, model, device, optimizer, accumulation_steps, progre
         with torch.cuda.amp.autocast_mode.autocast():
             pred = torch.sigmoid(model(X_batch))
 
-        l1_loss = crit((X_batch + 1) * 0.5 * pred, (y_batch + 1) * 0.5) / accumulation_steps
+        l1_loss = crit(X_batch * pred, y_batch) / accumulation_steps
 
         batch_loss = batch_loss + l1_loss
         batch_qloss = batch_qloss
@@ -93,7 +94,7 @@ def train_epoch(dataloader, model, device, optimizer, accumulation_steps, progre
 
             if grad_scaler is not None:
                 grad_scaler.unscale_(optimizer)
-                torch.nn.utils.clip_grad.clip_grad_norm_(model.parameters(), 1)
+                torch.nn.utils.clip_grad.clip_grad_norm_(model.parameters(), 0.5)
                 grad_scaler.step(optimizer)
                 grad_scaler.update()
             else:
@@ -103,19 +104,21 @@ def train_epoch(dataloader, model, device, optimizer, accumulation_steps, progre
                 lr_warmup.step()
 
             model.zero_grad()
+            batches = batches + 1
+            sum_loss = sum_loss + batch_loss
             batch_loss = 0
             batch_qloss = 0
 
-        sum_loss += accum_loss.item() * len(X_batch) * accumulation_steps
+        #sum_loss += accum_loss.item() * len(X_batch) * accumulation_steps
 
-    # the rest batch
-    if (itr + 1) % accumulation_steps != 0:
-        # grad_scaler.unscale_(optimizer)
-        # clip_grad_norm_(model.parameters(), 0.5)
-        optimizer.step()
-        model.zero_grad()
+    # # the rest batch
+    # if (itr + 1) % accumulation_steps != 0:
+    #     # grad_scaler.unscale_(optimizer)
+    #     # clip_grad_norm_(model.parameters(), 0.5)
+    #     optimizer.step()
+    #     model.zero_grad()
 
-    return sum_loss / len(dataloader.dataset)
+    return sum_loss / batches
 
 def validate_epoch(dataloader, model, device):
     model.eval()
@@ -129,7 +132,7 @@ def validate_epoch(dataloader, model, device):
 
             pred = torch.sigmoid(model(X_batch))
 
-            mag_loss = crit((X_batch + 1) * 0.5 * pred, (y_batch + 1) * 0.5)
+            mag_loss = crit(X_batch * pred, y_batch)
 
             if torch.logical_or(mag_loss.isnan(), mag_loss.isinf()):
                 print('non-finite or nan validation loss; aborting')
@@ -164,6 +167,7 @@ def main():
     p.add_argument('--num_transformer_decoders', type=int, default=1) # per layer of u-net
     p.add_argument('--num_bands', type=int, default=16) # going to retitle this to heads, not really bands given the q,k,v projections
     p.add_argument('--feedforward_dim', type=int, default=12288) # probabably an absurd feedforward dim, however a large feedforward dim was talked about in the primer paper as being useful (I think it was 7x there)
+    p.add_argument('--feedforward_expansion', type=int, default=12)
     p.add_argument('--bias', type=str, default='true')
     p.add_argument('--dropout', type=float, default=0.1)
 
@@ -229,7 +233,7 @@ def main():
             # "H://cs2048_sr44100_hl1024_nf2048_of0",
             # "J://cs2048_sr44100_hl1024_nf2048_of0",
             "K://cs2048_sr44100_hl1024_nf2048_of0_PAIRS",
-            # "K://cs2048_sr44100_hl1024_nf2048_of0",
+            #"K://cs2048_sr44100_hl1024_nf2048_of0",
         ],
         vocal_path=[
             "D://cs2048_sr44100_hl1024_nf2048_of0_VOCALS",
@@ -248,7 +252,7 @@ def main():
 
     device = torch.device('cpu')
     
-    model = FramePrimer2(channels=args.channels, scale_factor=args.channel_scale, feedforward_dim=args.feedforward_dim, depth=args.depth, num_transformer_encoders=args.num_transformer_encoders, num_transformer_decoders=args.num_transformer_decoders, n_fft=args.n_fft, cropsize=args.max_cropsize, num_bands=args.num_bands, bias=args.bias, dropout=args.dropout, num_res_blocks=args.num_res_blocks, column_kernel=args.column_kernel)
+    model = FramePrimer2(channels=args.channels, feedforward_dim=args.feedforward_dim, n_fft=args.n_fft, dropout=args.dropout, num_res_blocks=args.num_res_blocks, column_kernel=args.column_kernel)
 
     if args.pretrained_model is not None:
         model.load_state_dict(torch.load(args.pretrained_model, map_location=device))
