@@ -11,6 +11,7 @@ class MultibandFrameAttention(nn.Module):
         super().__init__()
 
         self.num_bands = num_bands
+        self.rotary_embedding = RotaryEmbedding(dim = bins // num_bands // 2)
         self.q_proj = nn.Linear(bins, bins, bias=bias)
         self.q_conv = nn.Conv2d(bins, bins, kernel_size=(kernel_size,1), padding=(padding,0), groups=bins)
         self.k_proj = nn.Linear(bins, bins, bias=bias)
@@ -19,18 +20,14 @@ class MultibandFrameAttention(nn.Module):
         self.v_conv = nn.Conv2d(bins, bins, kernel_size=(kernel_size,1), padding=(padding,0), groups=bins)
         self.o_proj = nn.Linear(bins, bins, bias=bias)
 
-    def forward(self, x, mem=None, prev_qk=None, rotary_embedding: RotaryEmbedding = None):
+    def forward(self, x, mem=None):
         b,c,w,h = x.shape
-        q = rotary_embedding.rotate_queries_or_keys(self.q_conv(self.q_proj(x).transpose(1,3)).transpose(1,3).reshape(b, c, w, self.num_bands, -1).permute(0,1,3,2,4))
-        k = rotary_embedding.rotate_queries_or_keys(self.k_conv(self.k_proj(x if mem is None else mem).transpose(1,3)).transpose(1,3).reshape(b, c, w, self.num_bands, -1).permute(0,1,3,2,4)).transpose(3,4)
+        q = self.rotary_embedding.rotate_queries_or_keys(self.q_conv(self.q_proj(x).transpose(1,3)).transpose(1,3).reshape(b, c, w, self.num_bands, -1).permute(0,1,3,2,4))
+        k = self.rotary_embedding.rotate_queries_or_keys(self.k_conv(self.k_proj(x if mem is None else mem).transpose(1,3)).transpose(1,3).reshape(b, c, w, self.num_bands, -1).permute(0,1,3,2,4)).transpose(3,4)
         v = self.v_conv(self.v_proj(x if mem is None else mem).transpose(1,3)).transpose(1,3).reshape(b, c, w, self.num_bands, -1).permute(0,1,3,2,4)
 
         with torch.cuda.amp.autocast_mode.autocast(enabled=False):
             qk = torch.matmul(q,k) / math.sqrt(h)
-
-            if prev_qk is not None:
-                qk = qk + prev_qk
-
             a = torch.matmul(F.softmax(qk, dim=-1),v).transpose(2,3).reshape(b,c,w,-1).contiguous()
                 
         o = self.o_proj(a)
@@ -63,11 +60,11 @@ class FramePrimerEncoder(nn.Module):
         self.linear2 = nn.Linear(feedforward_dim, bins, bias=bias)
         self.dropout2 = nn.Dropout(dropout) if dropout > 0 else nn.Identity()
 
-    def __call__(self, x, rotary_embedding=None):
+    def __call__(self, x):
         x = self.in_project(x).transpose(2,3)
 
         z = self.norm1(x)
-        z = self.attn(z, rotary_embedding=rotary_embedding)
+        z = self.attn(z)
         x = x + self.dropout1(z)
         
         z = self.norm2(x)
@@ -106,16 +103,16 @@ class FramePrimerDecoder(nn.Module):
         self.linear2 = nn.Linear(feedforward_dim, bins, bias=bias)
         self.dropout3 = nn.Dropout(dropout) if dropout > 0 else nn.Identity()
 
-    def __call__(self, x, skip=None, rotary_embedding=None):
+    def __call__(self, x, skip=None):
         x = self.in_project(x).transpose(2,3)
         skip = self.skip_project(skip).transpose(2,3)
 
         z = self.norm1(x)
-        z = self.attn1(z, rotary_embedding=rotary_embedding)
+        z = self.attn1(z)
         x = x + self.dropout1(z)
 
         z = self.norm2(x)
-        z = self.attn2(z, mem=skip, rotary_embedding=rotary_embedding)
+        z = self.attn2(z, mem=skip)
         x = x + self.dropout2(z)
         
         z = self.norm3(x)
