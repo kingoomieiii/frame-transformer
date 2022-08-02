@@ -4,6 +4,8 @@ from torch import nn
 import torch.nn.functional as F
 import math
 
+from frame_primer.rotary_embedding_torch import RotaryEmbedding
+
 class MultibandFrameAttention(nn.Module):
     def __init__(self, num_bands, bins, cropsize, kernel_size=3, padding=1, bias=False):
         super().__init__()
@@ -17,19 +19,14 @@ class MultibandFrameAttention(nn.Module):
         self.v_conv = nn.Conv2d(bins, bins, kernel_size=(kernel_size,1), padding=(padding,0), groups=bins)
         self.o_proj = nn.Linear(bins, bins, bias=bias)
 
-        self.weight = nn.Parameter(torch.empty(bins // num_bands, cropsize))
-        nn.init.normal_(self.weight)
-
-    def forward(self, x, mem=None, prev_qk=None):
+    def forward(self, x, mem=None, prev_qk=None, rotary_embedding: RotaryEmbedding = None):
         b,c,w,h = x.shape
-
-        q = self.q_conv(self.q_proj(x).transpose(1,3)).transpose(1,3).reshape(b, c, w, self.num_bands, -1).permute(0,1,3,2,4)
-        k = self.k_conv(self.k_proj(x if mem is None else mem).transpose(1,3)).transpose(1,3).reshape(b, c, w, self.num_bands, -1).permute(0,1,3,4,2)
+        q = rotary_embedding.rotate_queries_or_keys(self.q_conv(self.q_proj(x).transpose(1,3)).transpose(1,3).reshape(b, c, w, self.num_bands, -1).permute(0,1,3,2,4))
+        k = rotary_embedding.rotate_queries_or_keys(self.k_conv(self.k_proj(x if mem is None else mem).transpose(1,3)).transpose(1,3).reshape(b, c, w, self.num_bands, -1).permute(0,1,3,4,2))
         v = self.v_conv(self.v_proj(x if mem is None else mem).transpose(1,3)).transpose(1,3).reshape(b, c, w, self.num_bands, -1).permute(0,1,3,2,4)
-        p = F.pad(torch.matmul(q,self.weight[:, :w]), (1,0)).transpose(3,4)[:,:,:,1:,:]
 
         with torch.cuda.amp.autocast_mode.autocast(enabled=False):
-            qk = (torch.matmul(q,k)+p) / math.sqrt(h)
+            qk = torch.matmul(q,k) / math.sqrt(h)
 
             if prev_qk is not None:
                 qk = qk + prev_qk
@@ -38,10 +35,10 @@ class MultibandFrameAttention(nn.Module):
                 
         o = self.o_proj(a)
 
-        return o, qk
+        return o
 
 class FramePrimerEncoder(nn.Module):
-    def __init__(self, channels, bins=0, num_bands=4, cropsize=1024, feedforward_dim=2048, bias=False, dropout=0.1, downsamples=0, n_fft=2048, bottleneck=1, downsample_cropsize=False, residual_attention=True):
+    def __init__(self, channels, bins=0, num_bands=4, cropsize=1024, feedforward_expansion=12, feedforward_dim=2048, bias=False, dropout=0.1, downsamples=0, n_fft=2048, bottleneck=1, downsample_cropsize=False, residual_attention=True):
         super(FramePrimerEncoder, self).__init__()
 
         bins = n_fft // 2
@@ -63,7 +60,7 @@ class FramePrimerEncoder(nn.Module):
         self.in_project = nn.Conv2d(channels, self.bottleneck, kernel_size=1, padding=0)
 
         self.norm1 = nn.LayerNorm(bins)
-        self.attn = MultibandFrameAttention(num_bands, bins, cropsize)
+        self.attn = MultibandFrameAttention(num_bands, bins, cropsize, kernel_size=3, padding=1)
         self.dropout1 = nn.Dropout(dropout) if dropout > 0 else nn.Identity()
 
         self.norm2 = nn.LayerNorm(bins)
@@ -71,11 +68,11 @@ class FramePrimerEncoder(nn.Module):
         self.linear2 = nn.Linear(feedforward_dim, bins, bias=bias)
         self.dropout2 = nn.Dropout(dropout) if dropout > 0 else nn.Identity()
 
-    def __call__(self, x, prev_qk=None):
+    def __call__(self, x, rotary_embedding=None):
         x = self.in_project(x).transpose(2,3)
 
         z = self.norm1(x)
-        z, prev_qk = self.attn(z, prev_qk=prev_qk)
+        z = self.attn(z, rotary_embedding=rotary_embedding)
         x = x + self.dropout1(z)
         
         z = self.norm2(x)
@@ -85,7 +82,7 @@ class FramePrimerEncoder(nn.Module):
         return x.transpose(2,3)
 
 class FramePrimerDecoder(nn.Module):
-    def __init__(self, channels, mem_channels, bins=0, num_bands=4, cropsize=1024, feedforward_dim=2048, bias=False, dropout=0.1, downsamples=0, n_fft=2048, downsample_cropsize=False, residual_attention=True, bottleneck=1):
+    def __init__(self, channels, mem_channels, bins=0, num_bands=4, cropsize=1024, feedforward_expansion=12, feedforward_dim=2048, bias=False, dropout=0.1, downsamples=0, n_fft=2048, downsample_cropsize=False, residual_attention=True, bottleneck=1):
         super(FramePrimerDecoder, self).__init__()
 
         bins = n_fft // 2
@@ -107,11 +104,11 @@ class FramePrimerDecoder(nn.Module):
         self.skip_project = nn.Conv2d(mem_channels, self.bottleneck, kernel_size=1, padding=0)
 
         self.norm1 = nn.LayerNorm(bins)
-        self.attn1 = MultibandFrameAttention(num_bands, bins, cropsize)
+        self.attn1 = MultibandFrameAttention(num_bands, bins, cropsize, kernel_size=3, padding=1)
         self.dropout1 = nn.Dropout(dropout) if dropout > 0 else nn.Identity()
 
         self.norm2 = nn.LayerNorm(bins)
-        self.attn2 = MultibandFrameAttention(num_bands, bins, cropsize)
+        self.attn2 = MultibandFrameAttention(num_bands, bins, cropsize, kernel_size=3, padding=1)
         self.dropout2 = nn.Dropout(dropout) if dropout > 0 else nn.Identity()
 
         self.norm3 = nn.LayerNorm(bins)
@@ -119,16 +116,16 @@ class FramePrimerDecoder(nn.Module):
         self.linear2 = nn.Linear(feedforward_dim, bins, bias=bias)
         self.dropout3 = nn.Dropout(dropout) if dropout > 0 else nn.Identity()
 
-    def __call__(self, x, skip=None, prev_qk1=None, prev_qk2=None):
+    def __call__(self, x, skip=None, rotary_embedding=None):
         x = self.in_project(x).transpose(2,3)
         skip = self.skip_project(skip).transpose(2,3)
 
         z = self.norm1(x)
-        z, prev_qk1 = self.attn1(z, prev_qk=prev_qk1)
+        z = self.attn1(z, rotary_embedding=rotary_embedding)
         x = x + self.dropout1(z)
 
         z = self.norm2(x)
-        z, prev_qk2 = self.attn2(z, mem=skip, prev_qk=prev_qk2)
+        z = self.attn2(z, mem=skip, rotary_embedding=rotary_embedding)
         x = x + self.dropout2(z)
         
         z = self.norm3(x)
