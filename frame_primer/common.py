@@ -7,7 +7,7 @@ import math
 from frame_primer.rotary_embedding_torch import RotaryEmbedding
 
 class MultibandFrameAttention(nn.Module):
-    def __init__(self, num_bands, bins, cropsize, kernel_size=3, padding=1, bias=False):
+    def __init__(self, num_bands, bins, kernel_size=3, padding=1, bias=False):
         super().__init__()
 
         self.num_bands = num_bands
@@ -22,7 +22,7 @@ class MultibandFrameAttention(nn.Module):
     def forward(self, x, mem=None, prev_qk=None, rotary_embedding: RotaryEmbedding = None):
         b,c,w,h = x.shape
         q = rotary_embedding.rotate_queries_or_keys(self.q_conv(self.q_proj(x).transpose(1,3)).transpose(1,3).reshape(b, c, w, self.num_bands, -1).permute(0,1,3,2,4))
-        k = rotary_embedding.rotate_queries_or_keys(self.k_conv(self.k_proj(x if mem is None else mem).transpose(1,3)).transpose(1,3).reshape(b, c, w, self.num_bands, -1).permute(0,1,3,4,2))
+        k = rotary_embedding.rotate_queries_or_keys(self.k_conv(self.k_proj(x if mem is None else mem).transpose(1,3)).transpose(1,3).reshape(b, c, w, self.num_bands, -1).permute(0,1,3,2,4)).transpose(3,4)
         v = self.v_conv(self.v_proj(x if mem is None else mem).transpose(1,3)).transpose(1,3).reshape(b, c, w, self.num_bands, -1).permute(0,1,3,2,4)
 
         with torch.cuda.amp.autocast_mode.autocast(enabled=False):
@@ -38,7 +38,7 @@ class MultibandFrameAttention(nn.Module):
         return o
 
 class FramePrimerEncoder(nn.Module):
-    def __init__(self, channels, bins=0, num_bands=4, cropsize=1024, feedforward_expansion=12, feedforward_dim=2048, bias=False, dropout=0.1, downsamples=0, n_fft=2048, bottleneck=1, downsample_cropsize=False, residual_attention=True):
+    def __init__(self, channels, bins=0, num_bands=4, feedforward_dim=2048, bias=False, dropout=0.1, downsamples=0, n_fft=2048, bottleneck=1):
         super(FramePrimerEncoder, self).__init__()
 
         bins = n_fft // 2
@@ -46,13 +46,8 @@ class FramePrimerEncoder(nn.Module):
             for _ in range(downsamples):
                 bins = bins // 2
 
-                if downsample_cropsize:
-                    cropsize = cropsize // 2
-
         self.bins = bins
-        self.cropsize = cropsize
         self.num_bands = num_bands
-        self.residual_attention = residual_attention
 
         self.relu = nn.ReLU(inplace=True)
         
@@ -60,7 +55,7 @@ class FramePrimerEncoder(nn.Module):
         self.in_project = nn.Conv2d(channels, self.bottleneck, kernel_size=1, padding=0)
 
         self.norm1 = nn.LayerNorm(bins)
-        self.attn = MultibandFrameAttention(num_bands, bins, cropsize, kernel_size=3, padding=1)
+        self.attn = MultibandFrameAttention(num_bands, bins, kernel_size=3, padding=1)
         self.dropout1 = nn.Dropout(dropout) if dropout > 0 else nn.Identity()
 
         self.norm2 = nn.LayerNorm(bins)
@@ -82,7 +77,7 @@ class FramePrimerEncoder(nn.Module):
         return x.transpose(2,3)
 
 class FramePrimerDecoder(nn.Module):
-    def __init__(self, channels, mem_channels, bins=0, num_bands=4, cropsize=1024, feedforward_expansion=12, feedforward_dim=2048, bias=False, dropout=0.1, downsamples=0, n_fft=2048, downsample_cropsize=False, residual_attention=True, bottleneck=1):
+    def __init__(self, channels, mem_channels, bins=0, num_bands=4, feedforward_dim=2048, bias=False, dropout=0.1, downsamples=0, n_fft=2048, bottleneck=1):
         super(FramePrimerDecoder, self).__init__()
 
         bins = n_fft // 2
@@ -90,25 +85,20 @@ class FramePrimerDecoder(nn.Module):
             for _ in range(downsamples):
                 bins = bins // 2
 
-                if downsample_cropsize:
-                    cropsize = cropsize // 2
-
         self.bottleneck = bottleneck
         self.bins = bins
-        self.cropsize = cropsize
         self.num_bands = num_bands
-        self.residual_attention = residual_attention
 
         self.relu = nn.ReLU(inplace=True)
         self.in_project = nn.Conv2d(channels, self.bottleneck, kernel_size=1, padding=0)
         self.skip_project = nn.Conv2d(mem_channels, self.bottleneck, kernel_size=1, padding=0)
 
         self.norm1 = nn.LayerNorm(bins)
-        self.attn1 = MultibandFrameAttention(num_bands, bins, cropsize, kernel_size=3, padding=1)
+        self.attn1 = MultibandFrameAttention(num_bands, bins, kernel_size=3, padding=1)
         self.dropout1 = nn.Dropout(dropout) if dropout > 0 else nn.Identity()
 
         self.norm2 = nn.LayerNorm(bins)
-        self.attn2 = MultibandFrameAttention(num_bands, bins, cropsize, kernel_size=3, padding=1)
+        self.attn2 = MultibandFrameAttention(num_bands, bins, kernel_size=3, padding=1)
         self.dropout2 = nn.Dropout(dropout) if dropout > 0 else nn.Identity()
 
         self.norm3 = nn.LayerNorm(bins)
