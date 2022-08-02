@@ -105,7 +105,7 @@ def train_epoch(dataloader, model, device, optimizer, accumulation_steps, progre
 
             model.zero_grad()
             batches = batches + 1
-            sum_loss = sum_loss + batch_loss
+            sum_loss = sum_loss + batch_loss.item()
             batch_loss = 0
             batch_qloss = 0
 
@@ -227,13 +227,13 @@ def main():
 
     train_dataset = VoxAugDataset(
         path=[
-            # "C://cs2048_sr44100_hl1024_nf2048_of0",
-            # "D://cs2048_sr44100_hl1024_nf2048_of0",
-            # "F://cs2048_sr44100_hl1024_nf2048_of0",
-            # "H://cs2048_sr44100_hl1024_nf2048_of0",
-            # "J://cs2048_sr44100_hl1024_nf2048_of0",
+            "C://cs2048_sr44100_hl1024_nf2048_of0",
+            "D://cs2048_sr44100_hl1024_nf2048_of0",
+            "F://cs2048_sr44100_hl1024_nf2048_of0",
+            "H://cs2048_sr44100_hl1024_nf2048_of0",
+            "J://cs2048_sr44100_hl1024_nf2048_of0",
             "K://cs2048_sr44100_hl1024_nf2048_of0_PAIRS",
-            #"K://cs2048_sr44100_hl1024_nf2048_of0",
+            "K://cs2048_sr44100_hl1024_nf2048_of0",
         ],
         vocal_path=[
             "D://cs2048_sr44100_hl1024_nf2048_of0_VOCALS",
