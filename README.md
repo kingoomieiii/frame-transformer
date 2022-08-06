@@ -9,6 +9,7 @@ Current training has been paused, I have a teaser checkpoint here: https://mega.
 Still working on comparing this fork to the original repo. This current graph shows four runs: ![image](https://user-images.githubusercontent.com/30326384/183269188-31100335-4627-4d6d-b1a6-ff0864a60aca.png)
 
 Run details:
+
 drawn-mountain-926 is a run on my full dataset with the frame primer architecture 118,155,192 parameters FramePrimer2(channels=16, feedforward_dim=12288, n_fft=2048, dropout=0.1, num_res_blocks=1, num_bands=[16, 16, 16, 8, 4, 2], bottlenecks=[1, 2, 4, 8, 12, 14])
 
 pleasant-gorge-925 is tsurumeso's architecture that obviously heavily heavily inspired mine. 129,170,978 parameters - CascadedNet(args.n_fft, 96, 512)
