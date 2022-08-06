@@ -10,10 +10,12 @@ Still working on comparing this fork to the original repo. This current graph sh
 
 Run details:
 drawn-mountain-926 is a run on my full dataset with the frame primer architecture 118,155,192 parameters FramePrimer2(channels=16, feedforward_dim=12288, n_fft=2048, dropout=0.1, num_res_blocks=1, num_bands=[16, 16, 16, 8, 4, 2], bottlenecks=[1, 2, 4, 8, 12, 14])
+
 pleasant-gorge-925 is tsurumeso's architecture that obviously heavily heavily inspired mine. 129,170,978 parameters - CascadedNet(args.n_fft, 96, 512)
 
 smaller dataset tests:
 silvery-butterfly-923 is my architecture on a small subset of the dataset (768 songs I think).
+
 logical-thunder-922 is tsurumeso's architecture on a small subset of the dataset as above
 
 Validation loss is actually quite similar between the two architectures with the frame primer doing better on the full dataset while tsurumeso's architecture does better on a smaller dataset (0.001655 for tsurumeso's vs 0.001638 for mine). That being said, I need to train my architecture out to another epoch to compare the drop in validation loss between the two and compare the rate of convergence. Next test I want to carry out is going to be a similar setup to tsurumeso's architecture with a frame primer encoder and frame primer decoder following encoder 2 and decoder 2 respectively.
