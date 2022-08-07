@@ -6,7 +6,7 @@ Have changed the architecture once more, new frame primer variant is getting far
 
 Current training has been paused, I have a teaser checkpoint here: https://mega.nz/file/m45HmLJZ#J8eQqrI1zJcUvX8Imyu8OTF_YeOnjd5FRVOxIMIz91M - this is at the 12th mini epoch, so it would have seen the full dataset at most 3 times (though really far less with augmentations). I did notice a few notes partially removed when listening to music with fretless bass and have since purchased 5 solo bass albums that feature fretless bass to alleviate this issue; I will be continuing training from this checkpoint but resetting the learning rate decay so that it has a chance to see the new material with its highest learning rate. Hyperparameters for this model are: { channels = 16, num_bands=[16, 16, 16, 8, 4, 2], bottlenecks=[1, 2, 4, 8, 12, 14], feedforward_dim = 12288, dropout 0.1, cropsize 512, adam, no amsgrad, no weight decay, max learning rate of 1e-4, num_res_blocks = 1 }
 
-Still working on comparing this fork to the original repo. This current graph shows four runs: ![image](https://user-images.githubusercontent.com/30326384/183269188-31100335-4627-4d6d-b1a6-ff0864a60aca.png)
+Still working on comparing this fork to the original repo. This current graph shows four runs: ![image](https://user-images.githubusercontent.com/30326384/183276706-242271c0-b519-4349-9d71-1cbaa10d2589.png)
 
 Run details:
 
@@ -19,7 +19,7 @@ silvery-butterfly-923 is my architecture on a small subset of the dataset (768 s
 
 logical-thunder-922 is tsurumeso's architecture on a small subset of the dataset as above
 
-Validation loss is actually quite similar between the two architectures with the frame primer doing better on the full dataset while tsurumeso's architecture does better on a smaller dataset (0.001655 for tsurumeso's vs 0.001638 for mine) which I think is pretty normal for transformers and their variants. That being said, I need to train my architecture out to another epoch to compare the drop in validation loss between the two and compare the rate of convergence; previous runs on a smaller dataset show a larger validation loss drop between 1st and 2nd epoch with the frame primer, but this is on a slightly different dataset so this only leads me to suspect mine will continue to slightly outperform the original on huge datasets (which not many people are crazy like me and willing to hook up like 6 ssds to their computer and spend the equivalent of weeks scrounging the internet for data lol). Next test I want to carry out is going to be a similar setup to tsurumeso's architecture with a frame primer encoder and frame primer decoder following encoder 2 and decoder 2 respectively.
+Validation loss is actually quite similar between the two architectures with the frame primer doing better on the full dataset while tsurumeso's architecture does better on a smaller dataset. The validation loss for both architectures is dropping at an equal rate currently on the larger dataset, will need to take training further with both however after 33,243K batches the frame primer is currently doing marginally better than a large version of the cascade net. Given the difference in output between the two architectures, this seems to imply that a combination of the two would produce the best results.
 
 After I finsih training further, I will start on a full pretraining session using the frame primer architecture. Given that it seems to do better with much more data, pretraining should unlock even more potential.
 
