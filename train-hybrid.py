@@ -12,7 +12,7 @@ import torch.nn as nn
 import torch.utils.data
 import wandb
 
-from lib import dataset
+from lib import dataset, nets, spec_utils
 from tqdm import tqdm
 
 from frame_primer.dataset_voxaug import VoxAugDataset
@@ -67,9 +67,14 @@ def train_epoch(dataloader, model, device, optimizer, accumulation_steps, progre
         y_batch = y_batch.to(device)[:, :, :model.max_bin]
 
         with torch.cuda.amp.autocast_mode.autocast():
-            pred = torch.sigmoid(model(X_batch))
+            pred, aux = model(X_batch)
 
-        l1_loss = crit(X_batch * pred, y_batch) / accumulation_steps
+        loss_main = crit(pred * X_batch, y_batch)
+        loss_aux = crit(aux * X_batch, y_batch)
+
+        l1_loss = (loss_main * 0.8 + loss_aux * 0.2) / accumulation_steps
+
+        #l1_loss = crit(X_batch * pred, y_batch) / accumulation_steps
 
         batch_loss = batch_loss + l1_loss
         batch_qloss = batch_qloss
@@ -127,15 +132,12 @@ def validate_epoch(dataloader, model, device):
             X_batch = X_batch.to(device)[:, :, :model.max_bin]
             y_batch = y_batch.to(device)[:, :, :model.max_bin]
 
-            pred = torch.sigmoid(model(X_batch))
+            pred = model.predict(X_batch)
 
-            mag_loss = crit(X_batch * pred, y_batch)
+            y_batch = spec_utils.crop_center(y_batch, pred)
+            loss = crit(pred, y_batch)
 
-            if torch.logical_or(mag_loss.isnan(), mag_loss.isinf()):
-                print('non-finite or nan validation loss; aborting')
-                quit()
-            else:
-                sum_loss += mag_loss.item() * len(X_batch)
+            sum_loss += loss.item() * len(X_batch)
 
     return sum_loss / len(dataloader.dataset)
 
@@ -159,12 +161,10 @@ def main():
     p.add_argument('--channels', type=int, default=16)
     p.add_argument('--channel_scale', type=int, default=1)
     p.add_argument('--depth', type=int, default=6)
-    p.add_argument('--num_res_blocks', type=int, default=1) # per encoder/decoder
-    p.add_argument('--num_transformer_encoders', type=int, default=1) # per layer of u-net
-    p.add_argument('--num_transformer_decoders', type=int, default=1) # per layer of u-net
-    p.add_argument('--num_bands', type=int, default=16) # going to retitle this to heads, not really bands given the q,k,v projections
-    p.add_argument('--feedforward_dim', type=int, default=12288) # probabably an absurd feedforward dim, however a large feedforward dim was talked about in the primer paper as being useful (I think it was 7x there)
-    p.add_argument('--feedforward_expansion', type=int, default=12)
+    p.add_argument('--num_primer_blocks', type=int, default=4) # per layer of u-net
+    p.add_argument('--num_heads', type=int, default=8) # going to retitle this to heads, not really bands given the q,k,v projections
+    p.add_argument('--feedforward_dim', type=int, default=6144) # probabably an absurd feedforward dim, however a large feedforward dim was talked about in the primer paper as being useful (I think it was 7x there)
+    p.add_argument('--attention_channels', type=int, default=1)
     p.add_argument('--bias', type=str, default='true')
     p.add_argument('--dropout', type=float, default=0.1)
 
@@ -173,11 +173,11 @@ def main():
     p.add_argument('--batch_sizes', type=str, default='1,2,1')
     p.add_argument('--accumulation_steps', '-A', type=str, default='4,2,4')
 
-    p.add_argument('--gpu', '-g', type=int, default=-1)
+    p.add_argument('--gpu', '-g', type=int, default=0)
     p.add_argument('--optimizer', type=str.lower, choices=['adam', 'adamw', 'sgd'], default='adamw')
     p.add_argument('--amsgrad', type=str, default='false')
     p.add_argument('--weight_decay', type=float, default=0)
-    p.add_argument('--num_workers', '-w', type=int, default=4)
+    p.add_argument('--num_workers', '-w', type=int, default=5)
     p.add_argument('--epoch', '-E', type=int, default=60)
     p.add_argument('--epoch_size', type=int, default=None)
     p.add_argument('--learning_rate', '-l', type=float, default=1e-4)
@@ -229,8 +229,8 @@ def main():
             "F://cs2048_sr44100_hl1024_nf2048_of0",
             "H://cs2048_sr44100_hl1024_nf2048_of0",
             "J://cs2048_sr44100_hl1024_nf2048_of0",
-            "K://cs2048_sr44100_hl1024_nf2048_of0_PAIRS",
             "J://cs2048_sr44100_hl1024_nf2048_of0_PAIRS",
+            "K://cs2048_sr44100_hl1024_nf2048_of0_PAIRS",
             "K://cs2048_sr44100_hl1024_nf2048_of0",
         ],
         vocal_path=[
@@ -249,8 +249,10 @@ def main():
     torch.manual_seed(args.seed)
 
     device = torch.device('cpu')
+
+    model = nets.CascadedPrimerNet(args.n_fft, args.channels, 0, num_primer_blocks=args.num_primer_blocks, num_heads=args.num_heads, feedforward_dim=args.feedforward_dim, dropout=args.dropout, attention_channels=args.attention_channels)
     
-    model = FramePrimer2(channels=args.channels, feedforward_dim=args.feedforward_dim, n_fft=args.n_fft, dropout=args.dropout, num_res_blocks=args.num_res_blocks)
+    #model = FramePrimer2(channels=args.channels, feedforward_dim=args.feedforward_dim, n_fft=args.n_fft, dropout=args.dropout, num_res_blocks=args.num_res_blocks)
 
     if args.pretrained_model is not None:
         model.load_state_dict(torch.load(args.pretrained_model, map_location=device))

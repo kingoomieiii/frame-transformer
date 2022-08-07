@@ -45,11 +45,11 @@ class FramePrimerEncoder(nn.Module):
 
         self.bins = bins
         self.num_bands = num_bands
+        self.bottleneck = bottleneck
+
+        self.in_project = nn.Conv2d(channels, self.bottleneck, kernel_size=1, padding=0)
 
         self.relu = nn.ReLU(inplace=True)
-        
-        self.bottleneck = bottleneck
-        self.in_project = nn.Conv2d(channels, self.bottleneck, kernel_size=1, padding=0)
 
         self.norm1 = nn.LayerNorm(bins)
         self.attn = MultibandFrameAttention(num_bands, bins, kernel_size=3, padding=1)
@@ -82,13 +82,14 @@ class FramePrimerDecoder(nn.Module):
             for _ in range(downsamples):
                 bins = bins // 2
 
-        self.bottleneck = bottleneck
         self.bins = bins
         self.num_bands = num_bands
+        self.bottleneck = bottleneck
 
-        self.relu = nn.ReLU(inplace=True)
         self.in_project = nn.Conv2d(channels, self.bottleneck, kernel_size=1, padding=0)
         self.skip_project = nn.Conv2d(mem_channels, self.bottleneck, kernel_size=1, padding=0)
+
+        self.relu = nn.ReLU(inplace=True)
 
         self.norm1 = nn.LayerNorm(bins)
         self.attn1 = MultibandFrameAttention(num_bands, bins, kernel_size=3, padding=1)
@@ -120,151 +121,6 @@ class FramePrimerDecoder(nn.Module):
         x = x + self.dropout3(z)
 
         return x.transpose(2,3)
-
-class FrameTransformerEncoder(nn.Module):
-    def __init__(self, channels, bins=0, num_bands=4, cropsize=1024, feedforward_dim=2048, bias=False, dropout=0.1, downsamples=0, n_fft=2048):
-        super(FrameTransformerEncoder, self).__init__()
-
-        bins = n_fft // 2
-        if downsamples > 0:
-            for _ in range(downsamples):
-                bins = ((bins - 1) // 2) + 1
-
-        self.bins = bins
-        self.cropsize = cropsize
-        self.num_bands = num_bands
-
-        self.in_project = nn.Conv2d(channels, 1, kernel_size=1, padding=0)
-
-        self.relu = nn.ReLU(inplace=True)
-
-        self.norm1 = nn.LayerNorm(bins)
-        self.glu = nn.Sequential(
-            nn.Linear(bins, bins * 2, bias=bias),
-            nn.GLU())
-        self.dropout1 = nn.Dropout(dropout) if dropout > 0 else nn.Identity()
-
-        self.norm2 = nn.LayerNorm(bins)
-        self.conv1L = nn.Conv1d(bins, feedforward_dim, kernel_size=1, padding=0, bias=bias)
-        self.conv1R =  nn.Conv1d(bins, feedforward_dim // 8, kernel_size=3, padding=1, bias=bias)
-        self.norm3 = nn.LayerNorm(feedforward_dim)
-        self.conv2 = nn.Sequential(
-            nn.Conv1d(feedforward_dim, feedforward_dim, kernel_size=9, padding=4, groups=feedforward_dim, bias=bias),
-            nn.Conv1d(feedforward_dim, bins, kernel_size=1, padding=0, bias=bias))
-        self.dropout2 = nn.Dropout(dropout) if dropout > 0 else nn.Identity()
-
-        self.norm4 = nn.LayerNorm(bins)
-        self.attn = MultibandFrameAttention(num_bands, bins, cropsize, bias=bias)
-        self.dropout3 = nn.Dropout(dropout) if dropout > 0 else nn.Identity()
-
-        self.norm5 = nn.LayerNorm(bins)
-        self.conv3 = nn.Linear(bins, feedforward_dim, bias=bias)
-        self.conv4 = nn.Linear(feedforward_dim, bins, bias=bias)
-        self.dropout4 = nn.Dropout(dropout) if dropout > 0 else nn.Identity()
-
-    def __call__(self, x, prev_qk=None):
-        x = self.in_project(x).transpose(1,3).squeeze(-1)
-
-        h = self.norm1(x)
-        h = self.glu(h)
-        x = x + self.dropout1(h)
-
-        h = self.norm2(x)
-        hL = torch.square(self.relu(self.conv1L(h.transpose(1,2)).transpose(1,2)))
-        hR = torch.square(self.relu(self.conv1R(h.transpose(1,2)).transpose(1,2)))
-        h = self.norm3(hL + F.pad(hR, (0, hL.shape[2]-hR.shape[2])))
-        h = self.dropout2(self.conv2(h.transpose(1,2)).transpose(1,2))
-        x = x + h
-
-        h = self.norm4(x)
-        h, prev_qk = self.attn(h, prev_qk=prev_qk)
-        x = x + self.dropout3(h)
-
-        h = self.norm5(x)
-        h = self.conv4(torch.square(self.relu(self.conv3(h))))
-        x = x + self.dropout4(h)
-
-        return x.transpose(1,2).unsqueeze(1), prev_qk
-
-class FrameTransformerDecoder(nn.Module):
-    def __init__(self, channels, skip_channels, num_bands=4, cropsize=1024, n_fft=2048, feedforward_dim=2048, downsamples=0, bias=False, dropout=0.1):
-        super(FrameTransformerDecoder, self).__init__()
-
-        bins = (n_fft // 2)
-        if downsamples > 0:
-            for _ in range(downsamples):
-                bins = ((bins - 1) // 2) + 1
-
-        self.bins = bins
-        self.cropsize = cropsize
-        self.num_bands = num_bands
-
-        self.in_project = nn.Conv2d(channels, 1, kernel_size=1, padding=0, bias=bias)
-        self.skip_project = nn.Conv2d(skip_channels, 1, kernel_size=1, padding=0, bias=bias)
-
-        self.relu = nn.ReLU(inplace=True)
-
-        self.norm1 = nn.LayerNorm(bins)
-        self.self_attn1 = MultibandFrameAttention(num_bands, bins, cropsize, bias=bias)
-        self.skip_attn1 = MultibandFrameAttention(num_bands, bins, cropsize, bias=bias)
-        self.dropout1 = nn.Dropout(dropout) if dropout > 0 else nn.Identity()
-
-        self.norm2 = nn.LayerNorm(bins)
-        self.conv1L = nn.Sequential(
-            nn.Conv1d(bins, bins, kernel_size=11, padding=5, groups=bins, bias=bias),
-            nn.Conv1d(bins, feedforward_dim // 2, kernel_size=1, padding=0, bias=bias))
-        self.conv1R = nn.Sequential(
-            nn.Conv1d(bins, bins, kernel_size=7, padding=3, groups=bins, bias=bias),
-            nn.Conv1d(bins, feedforward_dim // 8, kernel_size=1, padding=0, bias=bias))
-        self.norm3 = nn.LayerNorm(feedforward_dim // 2)
-        self.conv2 = nn.Sequential(
-            nn.Conv1d(feedforward_dim // 2, feedforward_dim // 2, kernel_size=7, padding=3, groups=feedforward_dim // 2, bias=bias),
-            nn.Conv1d(feedforward_dim // 2, bins, kernel_size=1, padding=0, bias=bias))
-        self.dropout2 = nn.Dropout(dropout) if dropout > 0 else nn.Identity()
-
-        self.norm4 = nn.LayerNorm(bins)
-        self.self_attn2 = MultibandFrameAttention(num_bands, bins, cropsize, bias=bias)
-        self.norm4 = nn.LayerNorm(bins)
-        self.dropout3 = nn.Dropout(dropout) if dropout > 0 else nn.Identity()
-
-        self.norm5 = nn.LayerNorm(bins)
-        self.skip_attn2 = MultibandFrameAttention(num_bands, bins, cropsize, bias=bias)
-        self.dropout4 = nn.Dropout(dropout) if dropout > 0 else nn.Identity()
-
-        self.norm6 = nn.LayerNorm(bins)
-        self.conv3 = nn.Linear(bins, feedforward_dim, bias=bias)
-        self.conv4 = nn.Linear(feedforward_dim, bins, bias=bias)
-        self.dropout5 = nn.Dropout(dropout) if dropout > 0 else nn.Identity()
-
-    def __call__(self, x, skip, prev_qk1=None, prev_qk2=None):
-        x = self.in_project(x).transpose(1,3).squeeze(-1)
-        skip = self.skip_project(skip).transpose(1,3).squeeze(-1)
-
-        h = self.norm1(x)
-        hs, prev_qk1 = self.self_attn1(h, prev_qk=prev_qk1)
-        hm, prev_qk2 = self.skip_attn1(h, mem=skip, prev_qk=prev_qk2)
-        x = x + self.dropout1(hs + hm)
-
-        h = self.norm2(x)
-        hL = self.relu(self.conv1L(h.transpose(1,2)).transpose(1,2))
-        hR = self.conv1R(h.transpose(1,2)).transpose(1,2)
-        h = self.norm3(hL + F.pad(hR, (0, hL.shape[2]-hR.shape[2])))
-        h = self.dropout2(self.conv2(h.transpose(1,2)).transpose(1,2))
-        x = x + h
-
-        h = self.norm4(x)
-        h, prev_qk1 = self.self_attn2(h, prev_qk=prev_qk1)
-        x = x + self.dropout3(h)
-
-        h = self.norm5(x)
-        h, prev_qk2 = self.skip_attn2(h, mem=skip, prev_qk=prev_qk2)
-        x = x + self.dropout4(h)
-
-        h = self.norm6(x)
-        h = self.conv4(torch.square(self.relu(self.conv3(h))))
-        x = x + self.dropout5(h)
-
-        return x.transpose(1,2).unsqueeze(1), prev_qk1, prev_qk2
 
 class FrameConv(nn.Module):
     def __init__(self, in_channels, out_channels, kernel_size=3, stride=1, padding=1, groups=1, activate=nn.GELU, norm=True, downsamples=0, n_fft=2048, column_kernel=True, column_stride=True):
