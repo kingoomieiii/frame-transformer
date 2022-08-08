@@ -6,14 +6,16 @@ import math
 import librosa
 import numpy as np
 import soundfile as sf
-import torch
 from tqdm import tqdm
+from frame_primer.frame_primer import FramePrimer2
+from frame_primer.frame_resnet import FrameResUNet
 
 from lib import dataset
 from lib import nets
 from lib import spec_utils
 from lib import utils
 
+import torch
 import torch.nn.functional as F
 import torch.nn as nn
 
@@ -65,9 +67,9 @@ class Separator(object):
                 X_batch_prev = X_dataset_prev[i: i + self.batchsize]
                 X_batch_next = X_dataset_next[i: i + self.batchsize]
                 X_batch = X_dataset[i: i + self.batchsize]
-                X_batch = torch.from_numpy(X_batch).to(self.device)
-                X_batch_prev = torch.from_numpy(X_batch_prev).to(self.device)
-                X_batch_next = torch.from_numpy(X_batch_next).to(self.device)
+                X_batch = torch.from_numpy(X_batch).to(self.device)[:, :, :1024]
+                X_batch_prev = torch.from_numpy(X_batch_prev).to(self.device)[:, :, :1024]
+                X_batch_next = torch.from_numpy(X_batch_next).to(self.device)[:, :, :1024]
 
                 pred = self.model(X_batch)
                 pred = pred.detach().cpu().numpy()
@@ -104,6 +106,7 @@ class Separator(object):
         beg = (mask[:, :, :self.cropsize // 2] + mask_prev[:, :, :self.cropsize // 2]) / 2
 
         mask = np.concatenate((beg, avg_slice, end), axis=2)
+        mask = np.pad(mask, ((0,0), (0,1), (0, 0)))
 
         return mask
 
@@ -123,15 +126,17 @@ class Separator(object):
             # To reduce the overhead, dataloader is not used.
             for i in tqdm(range(0, patches, self.batchsize)):
                 X_batch = X_dataset[i: i + self.batchsize]
-                X_batch = torch.from_numpy(X_batch).to(self.device)
+                X_batch = torch.from_numpy(X_batch).to(self.device)[:, :, :1024]
 
-                pred, _ = self.model(X_batch)
+                pred = torch.sigmoid(self.model(X_batch))
 
                 pred = pred.detach().cpu().numpy()
                 pred = np.concatenate(pred, axis=2)
                 mask.append(pred)
 
             mask = np.concatenate(mask, axis=2)
+
+        mask = np.pad(mask, ((0,0), (0,1), (0, 0)))
 
         return mask
 
@@ -158,7 +163,10 @@ class Separator(object):
         X_mag_pad = np.pad(X_mag, ((0, 0), (0, 0), (pad_l, pad_r)), mode='constant')
         X_mag_pad /= X_mag_pad.max()
 
-        mask = self._separate(X_mag_pad, roi_size)
+        if sliding:
+            mask = self._separate_sliding(X_mag_pad, roi_size)
+        else:
+            mask = self._separate(X_mag_pad, roi_size)
 
         mask = mask[:, :, :n_frame]
         y_spec, v_spec = self._postprocess(mask, X_mag, X_phase)
@@ -191,32 +199,47 @@ class Separator(object):
 def main():
     p = argparse.ArgumentParser()
     p.add_argument('--gpu', '-g', type=int, default=-1)
-    p.add_argument('--pretrained_model', '-P', type=str, default='E://models/model_iter0.pth')
+    p.add_argument('--pretrained_model', '-P', type=str, default='G://models/model_iter2.remover.pth')
     p.add_argument('--input', '-i', required=True)
     p.add_argument('--output', '-o', type=str, default="")
+    p.add_argument('--num_res_encoders', type=int, default=4)
+    p.add_argument('--num_res_decoders', type=int, default=4)
     p.add_argument('--sr', '-r', type=int, default=44100)
     p.add_argument('--n_fft', '-f', type=int, default=2048)
     p.add_argument('--hop_length', '-H', type=int, default=1024)
     p.add_argument('--batchsize', '-B', type=int, default=1)
-    p.add_argument('--cropsize', '-c', type=int, default=1024)
+    p.add_argument('--cropsize', '-c', type=int, default=512)
     p.add_argument('--output_image', '-I', action='store_true')
     p.add_argument('--postprocess', '-p', action='store_true')
     p.add_argument('--num_encoders', type=int, default=2)
     p.add_argument('--num_decoders', type=int, default=13)
     p.add_argument('--tta', '-t', action='store_true')
     p.add_argument('--sliding_tta', '-st', action='store_true')
-    p.add_argument('--channels', type=int, default=2)
     p.add_argument('--depth', type=int, default=7)
     p.add_argument('--num_transformer_blocks', type=int, default=2)    
     p.add_argument('--num_bands', type=int, default=8)
-    p.add_argument('--feedforward_dim', type=int, default=4096)
     p.add_argument('--bias', type=str, default='true')
+
+    p.add_argument('--channels', type=int, default=16)
+    p.add_argument('--num_res_blocks', type=int, default=1)
+    p.add_argument('--num_transformer_encoders', type=int, default=1) # per layer of u-net
+    p.add_argument('--num_transformer_decoders', type=int, default=1) # per layer of u-net
+    p.add_argument('--feedforward_dim', type=int, default=12288) # probabably an absurd feedforward dim, however a large feedforward dim was talked about in the primer paper as being useful (I think it was 7x there)
+    p.add_argument('--dropout', type=float, default=0.1)
+
     args = p.parse_args()
 
     print('loading model...', end=' ')
     device = torch.device('cpu')    
-    model = FrameTransformerUnet(channels=args.channels, n_fft=args.n_fft, depth=args.depth, num_transformer_blocks=args.num_transformer_blocks ,num_bands=args.num_bands, feedforward_dim=args.feedforward_dim, bias=args.bias, cropsize=args.cropsize)
+    # model = FrameTransformerUnet(channels=args.channels, n_fft=args.n_fft, depth=args.depth, num_transformer_blocks=args.num_transformer_blocks ,num_bands=args.num_bands, feedforward_dim=args.feedforward_dim, bias=args.bias, cropsize=args.cropsize)
+    #model = FramePrimer(n_fft=args.n_fft, depth=args.depth, feedforward_dim=args.feedforward_dim, num_bands=args.num_bands, num_transformer_blocks=args.num_transformer_encoders, cropsize=args.cropsize, bias=args.bias, new_out=True)
+    # model.out = nets.PrimerNet(2 + args.num_transformer_blocks * 3, 2, num_primer_blocks=6, num_bands=8, cropsize=args.cropsize, n_fft=args.n_fft, feedforward_dim=4096) #FramePrimer(channels=2 + args.num_transformer_blocks * 3, n_fft=args.n_fft, feedforward_dim=4096, num_bands=8, num_transformer_blocks=6, cropsize=args.cropsize, bias=args.bias) #nn.Linear(2 + args.num_transformer_blocks * 3, 2) # ResUNet(channels=2 + args.num_transformer_blocks * 3, depth=5, num_res_blocks=1) #ResUNet(channels=2 + args.num_transformer_blocks * 3, depth=5, num_res_blocks=1)
+    # model.out_norm = nn.Identity() # nn.BatchNorm2d(2 + args.num_transformer_blocks * 3)  
+    model = FramePrimer2(channels=args.channels, feedforward_dim=args.feedforward_dim, n_fft=args.n_fft, dropout=0, num_res_blocks=args.num_res_blocks)
+    
+    #model = FrameResUNet(2, 8, cropsize=args.cropsize, n_fft=args.n_fft, num_res_encoders=args.num_res_encoders, num_res_decoders=args.num_res_decoders, num_bands=args.num_bands)
     model.load_state_dict(torch.load(args.pretrained_model, map_location=device))
+
     if torch.cuda.is_available() and args.gpu >= 0:
         device = torch.device('cuda:{}'.format(args.gpu))
         model.to(device)
@@ -245,7 +268,7 @@ def main():
 
         for file in tqdm(copy):
             basename = os.path.splitext(os.path.basename(file))[0]
-            shutil.copyfile(file, '{}{}_Instruments.wav'.format(output_folder, basename))
+            shutil.copyfile(file, '{}/{}_Instruments.wav'.format(output_folder, basename))
 
         for file in tqdm(convert):
             print('loading wave source...', end=' ')
@@ -271,12 +294,12 @@ def main():
             print('inverse stft of instruments...', end=' ')
             wave = spec_utils.spectrogram_to_wave(y_spec, hop_length=args.hop_length)
             print('done')
-            sf.write('{}{}_Instruments.wav'.format(output_folder, basename), wave.T, sr)
+            sf.write('{}/{}_Instruments.wav'.format(output_folder, basename), wave.T, sr)
 
             print('inverse stft of vocals...', end=' ')
             wave = spec_utils.spectrogram_to_wave(v_spec, hop_length=args.hop_length)
             print('done')
-            sf.write('{}{}_Vocals.wav'.format(output_folder, basename), wave.T, sr)
+            sf.write('{}/{}_Vocals.wav'.format(output_folder, basename), wave.T, sr)
 
             if args.output_image:
                 image = spec_utils.spectrogram_to_image(y_spec)
