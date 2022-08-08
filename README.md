@@ -6,6 +6,8 @@ Have changed the architecture once more, new frame primer variant is getting far
 
 Current training has been paused, I have a teaser checkpoint here: https://mega.nz/file/m45HmLJZ#J8eQqrI1zJcUvX8Imyu8OTF_YeOnjd5FRVOxIMIz91M - this is at the 12th mini epoch, so it would have seen the full dataset at most 3 times (though really far less with augmentations). I did notice a few notes partially removed when listening to music with fretless bass and have since purchased 5 solo bass albums that feature fretless bass to alleviate this issue; I will be continuing training from this checkpoint but resetting the learning rate decay so that it has a chance to see the new material with its highest learning rate. Hyperparameters for this model are: { channels = 16, num_bands=[16, 16, 16, 8, 4, 2], bottlenecks=[1, 2, 4, 8, 12, 14], feedforward_dim = 12288, dropout 0.1, cropsize 512, adam, no amsgrad, no weight decay, max learning rate of 1e-4, num_res_blocks = 1 }
 
+Here is an example of this model at the above checkpoint, specifically chosen for the fretless bass at the beginning that seems to throw most vocal removers off (keep in mind I've restarted training with even more data and have far lower first epoch validation loss): https://youtu.be/k30zjqC2Ij0
+
 Still working on comparing this fork to the original repo. This current graph shows four runs: ![image](https://user-images.githubusercontent.com/30326384/183276706-242271c0-b519-4349-9d71-1cbaa10d2589.png)
 
 Run details:
