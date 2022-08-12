@@ -24,14 +24,15 @@ class Separator(object):
         self.cropsize = cropsize
         self.postprocess = postprocess
 
-    def _separate(self, X_mag_pad, roi_size, cropsize=None):
+    def _separate(self, X_mag_pad, cropsize=None, padding=None):
         X_dataset = []
-        patches = (X_mag_pad.shape[2] - 2 * self.offset) // roi_size
         cropsize = self.cropsize if cropsize is None else cropsize
-        X_mag_pad = np.pad(X_mag_pad, ((0, 0), (0, 0), (cropsize // 2, cropsize // 2)), mode='constant')
+        padding = cropsize // 2 if padding is None else padding
+        patches = X_mag_pad.shape[2] // cropsize
+        X_mag_pad = np.pad(X_mag_pad, ((0, 0), (0, 0), (padding, padding)), mode='constant')
         for i in range(patches):
-            start = (i * roi_size) + cropsize // 2
-            X_mag_crop = X_mag_pad[:, :, (start - cropsize // 2):(start + self.cropsize + cropsize // 2)]
+            start = (i * cropsize) + padding
+            X_mag_crop = X_mag_pad[:, :, (start - padding):(start + cropsize + padding)]
             X_dataset.append(X_mag_crop)
 
         X_dataset = np.asarray(X_dataset)
@@ -44,8 +45,10 @@ class Separator(object):
                 X_batch = X_dataset[i: i + self.batchsize]
                 X_batch = torch.from_numpy(X_batch).to(self.device)[:, :, :1024]
 
-                pred = torch.sigmoid(self.model(X_batch))
-                pred = pred[:, :, :, (cropsize // 2):-(cropsize // 2)]
+                with torch.cuda.amp.autocast_mode.autocast():
+                    pred = torch.sigmoid(self.model(X_batch))
+
+                pred = pred[:, :, :, (padding):-(padding)]
 
                 pred = pred.detach().cpu().numpy()
                 pred = np.concatenate(pred, axis=2)
@@ -73,37 +76,36 @@ class Separator(object):
 
         return y_spec, v_spec, m_spec
 
-    def separate(self, X_spec):
+    def separate(self, X_spec, padding=None):
         X_mag, X_phase = self._preprocess(X_spec)
 
         n_frame = X_mag.shape[2]
-        pad_l, pad_r, roi_size = dataset.make_padding(n_frame, self.cropsize, self.offset)
+        pad_l, pad_r, _ = dataset.make_padding(n_frame, self.cropsize, 0)
         X_mag_pad = np.pad(X_mag, ((0, 0), (0, 0), (pad_l, pad_r)), mode='constant')
         X_mag_pad /= X_mag_pad.max()
 
-        mask = self._separate(X_mag_pad, roi_size)
+        mask = self._separate(X_mag_pad, self.cropsize, padding)
 
         mask = mask[:, :, :n_frame]
         y_spec, v_spec, m_spec = self._postprocess(mask, X_mag, X_phase)
 
         return y_spec, v_spec, m_spec
 
-    def separate_tta(self, X_spec, cropsizes=[128, 256, 512, 1024]):
+    def separate_tta(self, X_spec, cropsize=256, paddings=[256, 512, 1024]):
         X_mag, X_phase = self._preprocess(X_spec)
 
         n_frame = X_mag.shape[2]
-        pad_l, pad_r, roi_size = dataset.make_padding(n_frame, self.cropsize, self.offset)
+        pad_l, pad_r, _ = dataset.make_padding(n_frame, cropsize, 0)
         X_mag_pad = np.pad(X_mag, ((0, 0), (0, 0), (pad_l, pad_r)), mode='constant')
         X_mag_pad /= X_mag_pad.max()
 
-        mask = np.zeros_like(X_mag_pad)
+        mask = np.zeros_like(X_mag)
 
-        for cropsize in cropsizes:
-            mask += self._separate(X_mag_pad, roi_size, cropsize)
+        for padding in paddings:
+            mask += self._separate(X_mag_pad, cropsize, padding)[:, :, :n_frame]
 
-        mask = mask / len(cropsizes)
+        mask = mask / len(paddings)
 
-        mask = self._separate(X_mag_pad, roi_size)
         y_spec, v_spec, m_spec = self._postprocess(mask, X_mag, X_phase)
 
         return y_spec, v_spec, m_spec
@@ -121,6 +123,7 @@ def main():
     p.add_argument('--hop_length', '-H', type=int, default=1024)
     p.add_argument('--batchsize', '-B', type=int, default=1)
     p.add_argument('--cropsize', '-c', type=int, default=512)
+    p.add_argument('--padding', type=int, default=1024)
     p.add_argument('--output_image', '-I', action='store_true')
     p.add_argument('--postprocess', '-p', action='store_true')
     p.add_argument('--num_encoders', type=int, default=2)
@@ -195,9 +198,9 @@ def main():
             sp = Separator(model, device, args.batchsize, args.cropsize, args.postprocess)
 
             if args.tta:
-                y_spec, v_spec, m_spec = sp.separate_tta(X_spec, cropsizes=args.cropsizes)
+                y_spec, v_spec, m_spec = sp.separate_tta(X_spec, cropsize=args.cropsize)
             else:
-                y_spec, v_spec, m_spec = sp.separate(X_spec)
+                y_spec, v_spec, m_spec = sp.separate(X_spec, padding=args.padding)
 
             print('inverse stft of instruments...', end=' ')
             wave = spec_utils.spectrogram_to_wave(y_spec, hop_length=args.hop_length)
@@ -242,7 +245,7 @@ def main():
         if args.tta:
             y_spec, v_spec, m_spec = sp.separate_tta(X_spec, cropsizes=args.cropsizes)
         else:
-            y_spec, v_spec, m_spec = sp.separate(X_spec)
+            y_spec, v_spec, m_spec = sp.separate(X_spec, padding=args.padding)
 
         print('inverse stft of instruments...', end=' ')
         wave = spec_utils.spectrogram_to_wave(y_spec, hop_length=args.hop_length)
