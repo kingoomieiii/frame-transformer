@@ -1,28 +1,18 @@
 import argparse
 import os
-
 import shutil
-import math
 import librosa
 import numpy as np
 import soundfile as sf
-from tqdm import tqdm
-from frame_primer.frame_primer import FramePrimer2
-from frame_primer.frame_resnet import FrameResUNet
-
-from lib import dataset
-from lib import nets
-from lib import spec_utils
-from lib import utils
-
 import torch
-import torch.nn.functional as F
-import torch.nn as nn
-
 import json
 
-from lib.frame_transformer import FrameTransformer
-from lib.frame_transformer_unet import FrameTransformerUnet as FrameTransformerUnet
+from tqdm import tqdm
+from frame_primer.frame_primer import FramePrimer2
+
+from lib import dataset
+from lib import spec_utils
+from lib import utils
 
 class Separator(object):
 
@@ -34,88 +24,14 @@ class Separator(object):
         self.cropsize = cropsize
         self.postprocess = postprocess
 
-    def _separate_sliding(self, X_mag_pad, roi_size):
-        X_dataset = []
-        X_dataset_prev = []
-        X_dataset_next = []
-
-        patches = (X_mag_pad.shape[2] - 2 * self.offset) // roi_size
-
-        X_mag_prev = np.pad(X_mag_pad, ((0,0), (0,0), (self.cropsize//2,0)))[:,:,:-(self.cropsize //2)]
-        X_mag_next = np.pad(X_mag_pad, ((0,0), (0,0), (0,self.cropsize//2)))[:,:,(self.cropsize // 2):]
-
-        for i in range(patches):
-            start = i * roi_size
-            X_mag_crop = X_mag_pad[:, :, start:start + self.cropsize]
-            X_prev_crop = X_mag_prev[:, :, start:start + self.cropsize]
-            X_next_crop = X_mag_next[:, :, start:start + self.cropsize]
-            X_dataset.append(X_mag_crop)
-            X_dataset_prev.append(X_prev_crop)
-            X_dataset_next.append(X_next_crop)
-
-        X_dataset = np.asarray(X_dataset)
-        X_dataset_prev = np.asarray(X_dataset_prev)
-        X_dataset_next = np.asarray(X_dataset_next)
-
-        self.model.eval()
-        with torch.no_grad():
-            mask = []
-            mask_prev = []
-            mask_next = []
-            # To reduce the overhead, dataloader is not used.
-            for i in tqdm(range(0, patches, self.batchsize)):
-                X_batch_prev = X_dataset_prev[i: i + self.batchsize]
-                X_batch_next = X_dataset_next[i: i + self.batchsize]
-                X_batch = X_dataset[i: i + self.batchsize]
-                X_batch = torch.from_numpy(X_batch).to(self.device)[:, :, :1024]
-                X_batch_prev = torch.from_numpy(X_batch_prev).to(self.device)[:, :, :1024]
-                X_batch_next = torch.from_numpy(X_batch_next).to(self.device)[:, :, :1024]
-
-                pred = self.model(X_batch)
-                pred = pred.detach().cpu().numpy()
-                pred = np.concatenate(pred, axis=2)
-                mask.append(pred)
-
-                pred_prev = self.model(X_batch_prev)
-                pred_prev = pred_prev.detach().cpu().numpy()
-                pred_prev = np.concatenate(pred_prev, axis=2)
-                mask_prev.append(pred_prev)
-
-                pred_next = self.model(X_batch_next)
-                pred_next = pred_next.detach().cpu().numpy()
-                pred_next = np.concatenate(pred_next, axis=2)
-                mask_next.append(pred_next)
-
-            mask = np.concatenate(mask, axis=2)
-            mask_prev = np.concatenate(mask_prev, axis=2)
-            mask_next = np.concatenate(mask_next, axis=2)
-
-        mask_prev = np.pad(mask_prev[:, :, (self.cropsize // 2):], ((0,0), (0,0), (0,self.cropsize // 2)))
-        mask_next = np.pad(mask_next[:, :, :-(self.cropsize // 2)], ((0,0), (0,0), ((self.cropsize // 2), 0)))
-        
-        mask_slice = mask[:, :, self.cropsize//2:-self.cropsize//2]
-        prev_slice = mask_prev[:, :, self.cropsize//2:-self.cropsize//2]
-        next_slice = mask_next[:, :, self.cropsize//2:-self.cropsize//2]
-
-        avg_slice = (mask_slice + prev_slice + next_slice) / 3.0
-
-        mask_prev[:, :, -(self.cropsize // 2):] = mask[:, :, -(self.cropsize // 2):]
-        end = (mask[:, :, -(self.cropsize // 2):] + mask_next[:, :, -(self.cropsize // 2):]) / 2
-
-        mask_next[:, :, :self.cropsize // 2] = mask[:, :, :self.cropsize // 2]
-        beg = (mask[:, :, :self.cropsize // 2] + mask_prev[:, :, :self.cropsize // 2]) / 2
-
-        mask = np.concatenate((beg, avg_slice, end), axis=2)
-        mask = np.pad(mask, ((0,0), (0,1), (0, 0)))
-
-        return mask
-
-    def _separate(self, X_mag_pad, roi_size):
+    def _separate(self, X_mag_pad, roi_size, cropsize=None):
         X_dataset = []
         patches = (X_mag_pad.shape[2] - 2 * self.offset) // roi_size
+        cropsize = self.cropsize if cropsize is None else cropsize
+        X_mag_pad = np.pad(X_mag_pad, ((0, 0), (0, 0), (cropsize // 2, cropsize // 2)), mode='constant')
         for i in range(patches):
-            start = i * roi_size
-            X_mag_crop = X_mag_pad[:, :, start:start + self.cropsize]
+            start = (i * roi_size) + cropsize // 2
+            X_mag_crop = X_mag_pad[:, :, (start - cropsize // 2):(start + self.cropsize + cropsize // 2)]
             X_dataset.append(X_mag_crop)
 
         X_dataset = np.asarray(X_dataset)
@@ -129,6 +45,7 @@ class Separator(object):
                 X_batch = torch.from_numpy(X_batch).to(self.device)[:, :, :1024]
 
                 pred = torch.sigmoid(self.model(X_batch))
+                pred = pred[:, :, :, (cropsize // 2):-(cropsize // 2)]
 
                 pred = pred.detach().cpu().numpy()
                 pred = np.concatenate(pred, axis=2)
@@ -152,28 +69,11 @@ class Separator(object):
 
         y_spec = mask * X_mag * np.exp(1.j * X_phase)
         v_spec = (1 - mask) * X_mag * np.exp(1.j * X_phase)
+        m_spec = mask * 255
 
-        return y_spec, v_spec
+        return y_spec, v_spec, m_spec
 
-    def separate(self, X_spec, sliding=False):
-        X_mag, X_phase = self._preprocess(X_spec)
-
-        n_frame = X_mag.shape[2]
-        pad_l, pad_r, roi_size = dataset.make_padding(n_frame, self.cropsize, self.offset)
-        X_mag_pad = np.pad(X_mag, ((0, 0), (0, 0), (pad_l, pad_r)), mode='constant')
-        X_mag_pad /= X_mag_pad.max()
-
-        if sliding:
-            mask = self._separate_sliding(X_mag_pad, roi_size)
-        else:
-            mask = self._separate(X_mag_pad, roi_size)
-
-        mask = mask[:, :, :n_frame]
-        y_spec, v_spec = self._postprocess(mask, X_mag, X_phase)
-
-        return y_spec, v_spec
-
-    def separate_tta(self, X_spec):
+    def separate(self, X_spec):
         X_mag, X_phase = self._preprocess(X_spec)
 
         n_frame = X_mag.shape[2]
@@ -183,18 +83,30 @@ class Separator(object):
 
         mask = self._separate(X_mag_pad, roi_size)
 
-        pad_l += roi_size // 2
-        pad_r += roi_size // 2
+        mask = mask[:, :, :n_frame]
+        y_spec, v_spec, m_spec = self._postprocess(mask, X_mag, X_phase)
+
+        return y_spec, v_spec, m_spec
+
+    def separate_tta(self, X_spec, cropsizes=[128, 256, 512, 1024]):
+        X_mag, X_phase = self._preprocess(X_spec)
+
+        n_frame = X_mag.shape[2]
+        pad_l, pad_r, roi_size = dataset.make_padding(n_frame, self.cropsize, self.offset)
         X_mag_pad = np.pad(X_mag, ((0, 0), (0, 0), (pad_l, pad_r)), mode='constant')
         X_mag_pad /= X_mag_pad.max()
 
-        mask_tta = self._separate(X_mag_pad, roi_size)
-        mask_tta = mask_tta[:, :, roi_size // 2:]
-        mask = (mask[:, :, :n_frame] + mask_tta[:, :, :n_frame]) * 0.5
+        mask = np.zeros_like(X_mag_pad)
 
-        y_spec, v_spec = self._postprocess(mask, X_mag, X_phase)
+        for cropsize in cropsizes:
+            mask += self._separate(X_mag_pad, roi_size, cropsize)
 
-        return y_spec, v_spec
+        mask = mask / len(cropsizes)
+
+        mask = self._separate(X_mag_pad, roi_size)
+        y_spec, v_spec, m_spec = self._postprocess(mask, X_mag, X_phase)
+
+        return y_spec, v_spec, m_spec
 
 def main():
     p = argparse.ArgumentParser()
@@ -214,9 +126,9 @@ def main():
     p.add_argument('--num_encoders', type=int, default=2)
     p.add_argument('--num_decoders', type=int, default=13)
     p.add_argument('--tta', '-t', action='store_true')
-    p.add_argument('--sliding_tta', '-st', action='store_true')
+    p.add_argument('--cropsizes', type=str, default='128,256,512,1024')
     p.add_argument('--depth', type=int, default=7)
-    p.add_argument('--num_transformer_blocks', type=int, default=2)    
+    p.add_argument('--num_transformer_blocks', type=int, default=2)
     p.add_argument('--num_bands', type=int, default=8)
     p.add_argument('--bias', type=str, default='true')
 
@@ -229,15 +141,11 @@ def main():
 
     args = p.parse_args()
 
+    args.cropsizes = [int(cropsize) for cropsize in args.cropsizes.split(',')]
+
     print('loading model...', end=' ')
-    device = torch.device('cpu')    
-    # model = FrameTransformerUnet(channels=args.channels, n_fft=args.n_fft, depth=args.depth, num_transformer_blocks=args.num_transformer_blocks ,num_bands=args.num_bands, feedforward_dim=args.feedforward_dim, bias=args.bias, cropsize=args.cropsize)
-    #model = FramePrimer(n_fft=args.n_fft, depth=args.depth, feedforward_dim=args.feedforward_dim, num_bands=args.num_bands, num_transformer_blocks=args.num_transformer_encoders, cropsize=args.cropsize, bias=args.bias, new_out=True)
-    # model.out = nets.PrimerNet(2 + args.num_transformer_blocks * 3, 2, num_primer_blocks=6, num_bands=8, cropsize=args.cropsize, n_fft=args.n_fft, feedforward_dim=4096) #FramePrimer(channels=2 + args.num_transformer_blocks * 3, n_fft=args.n_fft, feedforward_dim=4096, num_bands=8, num_transformer_blocks=6, cropsize=args.cropsize, bias=args.bias) #nn.Linear(2 + args.num_transformer_blocks * 3, 2) # ResUNet(channels=2 + args.num_transformer_blocks * 3, depth=5, num_res_blocks=1) #ResUNet(channels=2 + args.num_transformer_blocks * 3, depth=5, num_res_blocks=1)
-    # model.out_norm = nn.Identity() # nn.BatchNorm2d(2 + args.num_transformer_blocks * 3)  
+    device = torch.device('cpu')  
     model = FramePrimer2(channels=args.channels, feedforward_dim=args.feedforward_dim, n_fft=args.n_fft, dropout=0, num_res_blocks=args.num_res_blocks)
-    
-    #model = FrameResUNet(2, 8, cropsize=args.cropsize, n_fft=args.n_fft, num_res_encoders=args.num_res_encoders, num_res_decoders=args.num_res_decoders, num_bands=args.num_bands)
     model.load_state_dict(torch.load(args.pretrained_model, map_location=device))
 
     if torch.cuda.is_available() and args.gpu >= 0:
@@ -287,9 +195,9 @@ def main():
             sp = Separator(model, device, args.batchsize, args.cropsize, args.postprocess)
 
             if args.tta:
-                y_spec, v_spec = sp.separate_tta(X_spec)
+                y_spec, v_spec, m_spec = sp.separate_tta(X_spec, cropsizes=args.cropsizes)
             else:
-                y_spec, v_spec = sp.separate(X_spec, args.sliding_tta)
+                y_spec, v_spec, m_spec = sp.separate(X_spec)
 
             print('inverse stft of instruments...', end=' ')
             wave = spec_utils.spectrogram_to_wave(y_spec, hop_length=args.hop_length)
@@ -302,10 +210,17 @@ def main():
             sf.write('{}/{}_Vocals.wav'.format(output_folder, basename), wave.T, sr)
 
             if args.output_image:
-                image = spec_utils.spectrogram_to_image(y_spec)
-                utils.imwrite('{}{}_Instruments.jpg'.format(output_folder, basename), image)
-                image = spec_utils.spectrogram_to_image(v_spec)
-                utils.imwrite('{}{}_Vocals.jpg'.format(output_folder, basename), image)
+                try:
+                    image = spec_utils.spectrogram_to_image(y_spec)
+                    utils.imwrite('{}{}_Instruments.jpg'.format(output_folder, basename), image)
+                    image = spec_utils.spectrogram_to_image(v_spec)
+                    utils.imwrite('{}{}_Vocals.jpg'.format(output_folder, basename), image)
+                    image = np.uint8(m_spec)
+                    image = np.pad(image, ((0,1), (0,0), (0,0)))
+                    image = image.transpose(1, 2, 0)
+                    utils.imwrite('{}{}_Mask.jpg'.format(output_folder, basename), image)
+                except:
+                    pass
             
     else:
         print('loading wave source...', end=' ')
@@ -325,9 +240,9 @@ def main():
         sp = Separator(model, device, args.batchsize, args.cropsize, args.postprocess)
 
         if args.tta:
-            y_spec, v_spec = sp.separate_tta(X_spec)
+            y_spec, v_spec, m_spec = sp.separate_tta(X_spec, cropsizes=args.cropsizes)
         else:
-            y_spec, v_spec = sp.separate(X_spec)
+            y_spec, v_spec, m_spec = sp.separate(X_spec)
 
         print('inverse stft of instruments...', end=' ')
         wave = spec_utils.spectrogram_to_wave(y_spec, hop_length=args.hop_length)

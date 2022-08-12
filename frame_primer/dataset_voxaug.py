@@ -19,7 +19,10 @@ class VoxAugDataset(torch.utils.data.Dataset):
         self.use_noise = use_noise
         self.gamma = gamma
         self.sigma = sigma
-
+        
+        if self.force_voxaug:
+            print('# Forcing vocal augmentations')
+        
         patch_list = []
         self.vocal_list = []
 
@@ -66,6 +69,11 @@ class VoxAugDataset(torch.utils.data.Dataset):
         vdata = np.load(str(vpath))
         V = vdata['X']
 
+        if V.shape[2] > self.cropsize:
+            start = np.random.randint(0, V.shape[2] - self.cropsize + 1)
+            stop = start + self.cropsize
+            V = V[:,:,start:stop]
+
         if np.random.uniform() < 0.5:
             V = V[::-1]
 
@@ -88,7 +96,16 @@ class VoxAugDataset(torch.utils.data.Dataset):
         X, Xc = data['X'], data['c']
         Y = X if aug else data['Y']
 
+        if X.shape[2] > self.cropsize:
+            start = np.random.randint(0, X.shape[2] - self.cropsize + 1)
+            stop = start + self.cropsize
+            X = X[:,:,start:stop]
+            Y = Y[:,:,start:stop]
+
         if not self.is_validation:
+            if self.force_voxaug:
+                X, aug = Y, True
+
             if aug and np.random.uniform() > 0.02:
                 V = self._get_vocals()
                 X = Y + V
@@ -106,12 +123,6 @@ class VoxAugDataset(torch.utils.data.Dataset):
         else:
             c = Xc
 
-        if X.shape[2] > self.cropsize:
-            start = np.random.randint(0, X.shape[2] - self.cropsize + 1)
-            stop = start + self.cropsize
-            X = X[:,:,start:stop]
-            Y = Y[:,:,start:stop]
-
         if np.random.uniform() < self.mixup_rate and root and not self.is_validation:
             MX, MY = self.__getitem__(np.random.randint(len(self)), root=False)
             a = np.random.beta(self.mixup_alpha, self.mixup_alpha)
@@ -119,7 +130,7 @@ class VoxAugDataset(torch.utils.data.Dataset):
             Y = Y * a + (1 - a) * MY
             
         if root:
-            X = np.clip(np.abs(X) / c, 0, 1) * 2 - 1.0
-            Y = np.clip(np.abs(Y) / c, 0, 1) * 2 - 1.0
+            X = (np.clip(np.abs(X) / c, 0, 1) * 2) - 1
+            Y = np.clip(np.abs(Y) / c, 0, 1)
 
         return X, Y

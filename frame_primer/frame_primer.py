@@ -4,8 +4,10 @@ import torch.nn.functional as F
 import math
 from frame_primer.common import FrameDecoder, FrameEncoder, FramePrimerEncoder, FramePrimerDecoder
 
+from lib.layers import ASPPModule
+
 class FramePrimer2(nn.Module):
-    def __init__(self, in_channels=2, channels=2, dropout=0.1, n_fft=2048, feedforward_dim=2048, num_res_blocks=1, num_bands=[16, 16, 16, 8, 4, 2], bottlenecks=[1, 2, 4, 8, 12, 14]):
+    def __init__(self, in_channels=2, channels=2, dropout=0.1, n_fft=2048, feedforward_dim=2048, num_res_blocks=1, num_heads=[8, 8, 8, 4, 4, 4], num_attn_channels=[2, 4, 4, 8, 12, 14]): #num_bands=[16, 16, 16, 8, 4, 2], bottlenecks=[1, 2, 4, 8, 12, 14]):
         super(FramePrimer2, self).__init__()
 
         self.max_bin = n_fft // 2
@@ -13,39 +15,39 @@ class FramePrimer2(nn.Module):
         self.channels = channels
 
         self.enc1 = FrameEncoder(in_channels, channels, n_fft=n_fft, downsamples=0, stride=1, column_kernel=False, kernel_size=3, padding=1, num_res_blocks=num_res_blocks)
-        self.enc1_primer = FramePrimerEncoder(channels, num_bands=num_bands[0], n_fft=n_fft, feedforward_dim=feedforward_dim, downsamples=0, dropout=dropout, bottleneck=bottlenecks[0])
+        self.enc1_primer = FramePrimerEncoder(channels, num_bands=num_heads[0], n_fft=n_fft, feedforward_dim=feedforward_dim, downsamples=0, dropout=dropout, bottleneck=num_attn_channels[0])
 
-        self.enc2 = FrameEncoder(channels + bottlenecks[0], channels * 2, n_fft=n_fft, downsamples=0, stride=2, column_kernel=False, kernel_size=3, padding=1, num_res_blocks=num_res_blocks)
-        self.enc2_primer = FramePrimerEncoder(channels * 2, num_bands=num_bands[1], n_fft=n_fft, feedforward_dim=feedforward_dim, downsamples=1, dropout=dropout, bottleneck=bottlenecks[1])
+        self.enc2 = FrameEncoder(channels + num_attn_channels[0], channels * 2, n_fft=n_fft, downsamples=0, stride=2, column_kernel=False, kernel_size=3, padding=1, num_res_blocks=num_res_blocks)
+        self.enc2_primer = FramePrimerEncoder(channels * 2, num_bands=num_heads[1], n_fft=n_fft, feedforward_dim=feedforward_dim, downsamples=1, dropout=dropout, bottleneck=num_attn_channels[1])
 
-        self.enc3 = FrameEncoder(channels * 2 + bottlenecks[1], channels * 4, n_fft=n_fft, downsamples=1, stride=2, column_kernel=False, kernel_size=3, padding=1, num_res_blocks=num_res_blocks)
-        self.enc3_primer = FramePrimerEncoder(channels * 4, num_bands=num_bands[2], n_fft=n_fft, feedforward_dim=feedforward_dim, downsamples=2, dropout=dropout, bottleneck=bottlenecks[2])
+        self.enc3 = FrameEncoder(channels * 2 + num_attn_channels[1], channels * 4, n_fft=n_fft, downsamples=1, stride=2, column_kernel=False, kernel_size=3, padding=1, num_res_blocks=num_res_blocks)
+        self.enc3_primer = FramePrimerEncoder(channels * 4, num_bands=num_heads[2], n_fft=n_fft, feedforward_dim=feedforward_dim, downsamples=2, dropout=dropout, bottleneck=num_attn_channels[2])
 
-        self.enc4 = FrameEncoder(channels * 4 + bottlenecks[2], channels * 6, n_fft=n_fft, downsamples=2, stride=2, column_kernel=False, kernel_size=3, padding=1, num_res_blocks=num_res_blocks)
-        self.enc4_primer = FramePrimerEncoder(channels * 6, num_bands=num_bands[3], n_fft=n_fft, feedforward_dim=feedforward_dim, downsamples=3, dropout=dropout, bottleneck=bottlenecks[3])
+        self.enc4 = FrameEncoder(channels * 4 + num_attn_channels[2], channels * 6, n_fft=n_fft, downsamples=2, stride=2, column_kernel=False, kernel_size=3, padding=1, num_res_blocks=num_res_blocks)
+        self.enc4_primer = FramePrimerEncoder(channels * 6, num_bands=num_heads[3], n_fft=n_fft, feedforward_dim=feedforward_dim, downsamples=3, dropout=dropout, bottleneck=num_attn_channels[3])
 
-        self.enc5 = FrameEncoder(channels * 6 + bottlenecks[3], channels * 8, n_fft=n_fft, downsamples=3, stride=2, column_kernel=False, kernel_size=3, padding=1, num_res_blocks=num_res_blocks)
-        self.enc5_primer = FramePrimerEncoder(channels * 8, num_bands=num_bands[4], n_fft=n_fft, feedforward_dim=feedforward_dim, downsamples=4, dropout=dropout, bottleneck=bottlenecks[4])
+        self.enc5 = FrameEncoder(channels * 6 + num_attn_channels[3], channels * 8, n_fft=n_fft, downsamples=3, stride=2, column_kernel=False, kernel_size=3, padding=1, num_res_blocks=num_res_blocks)
+        self.enc5_primer = FramePrimerEncoder(channels * 8, num_bands=num_heads[4], n_fft=n_fft, feedforward_dim=feedforward_dim, downsamples=4, dropout=dropout, bottleneck=num_attn_channels[4])
 
-        self.enc6 = FrameEncoder(channels * 8 + bottlenecks[4], channels * 10, n_fft=n_fft, downsamples=4, stride=2, column_kernel=False, kernel_size=3, padding=1, num_res_blocks=num_res_blocks)
-        self.enc6_primer = FramePrimerEncoder(channels * 10, num_bands=num_bands[5], n_fft=n_fft, feedforward_dim=feedforward_dim, downsamples=5, dropout=dropout, bottleneck=bottlenecks[5])
+        self.enc6 = FrameEncoder(channels * 8 + num_attn_channels[4], channels * 10, n_fft=n_fft, downsamples=4, stride=2, column_kernel=False, kernel_size=3, padding=1, num_res_blocks=num_res_blocks)
+        self.enc6_primer = FramePrimerEncoder(channels * 10, num_bands=num_heads[5], n_fft=n_fft, feedforward_dim=feedforward_dim, downsamples=5, dropout=dropout, bottleneck=num_attn_channels[5])
 
-        self.dec5 = FrameDecoder(channels * (10 + 8) + bottlenecks[5] + bottlenecks[4], channels * 8, n_fft=n_fft, downsamples=4, column_kernel=False, kernel_size=3, padding=1, num_res_blocks=num_res_blocks)
-        self.dec5_primer = FramePrimerDecoder(channels * 8, channels * 8 + bottlenecks[4], num_bands=num_bands[4], n_fft=n_fft, feedforward_dim=feedforward_dim, downsamples=4, dropout=dropout, bottleneck=bottlenecks[4])
+        self.dec5 = FrameDecoder(channels * (10 + 8) + num_attn_channels[5] + num_attn_channels[4], channels * 8, n_fft=n_fft, downsamples=4, column_kernel=False, kernel_size=3, padding=1, num_res_blocks=num_res_blocks)
+        self.dec5_primer = FramePrimerDecoder(channels * 8, channels * 8 + num_attn_channels[4], num_bands=num_heads[4], n_fft=n_fft, feedforward_dim=feedforward_dim, downsamples=4, dropout=dropout, bottleneck=num_attn_channels[4])
 
-        self.dec4 = FrameDecoder(channels * (8 + 6) + bottlenecks[4] + bottlenecks[3], channels * 6, n_fft=n_fft, downsamples=3, column_kernel=False, kernel_size=3, padding=1, num_res_blocks=num_res_blocks)
-        self.dec4_primer = FramePrimerDecoder(channels * 6, channels * 6 + bottlenecks[3], num_bands=num_bands[3], n_fft=n_fft, feedforward_dim=feedforward_dim, downsamples=3, dropout=dropout, bottleneck=bottlenecks[3])
+        self.dec4 = FrameDecoder(channels * (8 + 6) + num_attn_channels[4] + num_attn_channels[3], channels * 6, n_fft=n_fft, downsamples=3, column_kernel=False, kernel_size=3, padding=1, num_res_blocks=num_res_blocks)
+        self.dec4_primer = FramePrimerDecoder(channels * 6, channels * 6 + num_attn_channels[3], num_bands=num_heads[3], n_fft=n_fft, feedforward_dim=feedforward_dim, downsamples=3, dropout=dropout, bottleneck=num_attn_channels[3])
 
-        self.dec3 = FrameDecoder(channels * (6 + 4) + bottlenecks[3] + bottlenecks[2], channels * 4, n_fft=n_fft, downsamples=2, column_kernel=False, kernel_size=3, padding=1, num_res_blocks=num_res_blocks)
-        self.dec3_primer = FramePrimerDecoder(channels * 4, channels * 4 + bottlenecks[2], num_bands=num_bands[2], n_fft=n_fft, feedforward_dim=feedforward_dim, downsamples=2, dropout=dropout, bottleneck=bottlenecks[2])
+        self.dec3 = FrameDecoder(channels * (6 + 4) + num_attn_channels[3] + num_attn_channels[2], channels * 4, n_fft=n_fft, downsamples=2, column_kernel=False, kernel_size=3, padding=1, num_res_blocks=num_res_blocks)
+        self.dec3_primer = FramePrimerDecoder(channels * 4, channels * 4 + num_attn_channels[2], num_bands=num_heads[2], n_fft=n_fft, feedforward_dim=feedforward_dim, downsamples=2, dropout=dropout, bottleneck=num_attn_channels[2])
 
-        self.dec2 = FrameDecoder(channels * (4 + 2) + bottlenecks[2] + bottlenecks[1], channels * 2, n_fft=n_fft, downsamples=1, column_kernel=False, kernel_size=3, padding=1, num_res_blocks=num_res_blocks)
-        self.dec2_primer = FramePrimerDecoder(channels * 2, channels * 2 + bottlenecks[1], num_bands=num_bands[1], n_fft=n_fft, feedforward_dim=feedforward_dim, downsamples=1, dropout=dropout, bottleneck=bottlenecks[1])
+        self.dec2 = FrameDecoder(channels * (4 + 2) + num_attn_channels[2] + num_attn_channels[1], channels * 2, n_fft=n_fft, downsamples=1, column_kernel=False, kernel_size=3, padding=1, num_res_blocks=num_res_blocks)
+        self.dec2_primer = FramePrimerDecoder(channels * 2, channels * 2 + num_attn_channels[1], num_bands=num_heads[1], n_fft=n_fft, feedforward_dim=feedforward_dim, downsamples=1, dropout=dropout, bottleneck=num_attn_channels[1])
 
-        self.dec1 = FrameDecoder(channels * (2 + 1) + bottlenecks[1] + bottlenecks[0], channels * 1, n_fft=n_fft, downsamples=0, column_kernel=False, kernel_size=3, padding=1, num_res_blocks=num_res_blocks)
-        self.dec1_primer = FramePrimerDecoder(channels * 1, channels * 1 + bottlenecks[0], num_bands=num_bands[0], n_fft=n_fft, feedforward_dim=feedforward_dim, downsamples=0, dropout=dropout, bottleneck=bottlenecks[0])
+        self.dec1 = FrameDecoder(channels * (2 + 1) + num_attn_channels[1] + num_attn_channels[0], channels * 1, n_fft=n_fft, downsamples=0, column_kernel=False, kernel_size=3, padding=1, num_res_blocks=num_res_blocks)
+        self.dec1_primer = FramePrimerDecoder(channels * 1, channels * 1 + num_attn_channels[0], num_bands=num_heads[0], n_fft=n_fft, feedforward_dim=feedforward_dim, downsamples=0, dropout=dropout, bottleneck=num_attn_channels[0])
 
-        self.out = nn.Conv2d(channels + 1, in_channels, kernel_size=1, padding=0)
+        self.out = nn.Conv2d(channels + num_attn_channels[0], in_channels, kernel_size=1, padding=0)
 
     def __call__(self, x):
         e1 = self.enc1(x)

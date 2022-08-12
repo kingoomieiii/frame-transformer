@@ -69,7 +69,7 @@ def train_epoch(dataloader, model, device, optimizer, accumulation_steps, progre
         with torch.cuda.amp.autocast_mode.autocast():
             pred = torch.sigmoid(model(X_batch))
 
-        l1_loss = crit(X_batch * pred, y_batch) / accumulation_steps
+        l1_loss = crit((X_batch + 1) * 0.5 * pred, y_batch) / accumulation_steps
 
         batch_loss = batch_loss + l1_loss
         batch_qloss = batch_qloss
@@ -129,7 +129,7 @@ def validate_epoch(dataloader, model, device):
 
             pred = torch.sigmoid(model(X_batch))
 
-            mag_loss = crit(X_batch * pred, y_batch)
+            mag_loss = crit((X_batch + 1) * 0.5 * pred, y_batch)
 
             if torch.logical_or(mag_loss.isnan(), mag_loss.isinf()):
                 print('non-finite or nan validation loss; aborting')
@@ -169,9 +169,9 @@ def main():
     p.add_argument('--dropout', type=float, default=0.1)
 
     p.add_argument('--cropsizes', type=str, default='512,1024,2048')
-    p.add_argument('--epochs', type=str, default='12,50,60')
+    p.add_argument('--epochs', type=str, default='24,50,24')
     p.add_argument('--batch_sizes', type=str, default='1,2,1')
-    p.add_argument('--accumulation_steps', '-A', type=str, default='4,2,4')
+    p.add_argument('--accumulation_steps', '-A', type=str, default='8,2,4')
 
     p.add_argument('--gpu', '-g', type=int, default=-1)
     p.add_argument('--optimizer', type=str.lower, choices=['adam', 'adamw', 'sgd'], default='adamw')
@@ -181,7 +181,7 @@ def main():
     p.add_argument('--epoch', '-E', type=int, default=60)
     p.add_argument('--epoch_size', type=int, default=None)
     p.add_argument('--learning_rate', '-l', type=float, default=1e-4)
-    p.add_argument('--lr_scheduler_decay_target', type=int, default=1e-7)
+    p.add_argument('--lr_scheduler_decay_target', type=int, default=1e-10)
     p.add_argument('--lr_scheduler_decay_power', type=float, default=1.0)
     p.add_argument('--progress_bar', '-pb', type=str, default='true')
     p.add_argument('--force_voxaug', type=str, default='false')
@@ -241,7 +241,8 @@ def main():
         is_validation=False,
         epoch_size=args.epoch_size,
         mixup_rate=args.mixup_rate,
-        mixup_alpha=args.mixup_alpha
+        mixup_alpha=args.mixup_alpha,
+        force_voxaug=args.force_voxaug
     )
     
     random.seed(args.seed)
@@ -302,6 +303,8 @@ def main():
 
     val_dataset = None
     curr_idx = 0
+
+    print(f'{args.epochs[-1]} epochs')
 
     best_loss = np.inf
     for epoch in range(args.curr_warmup_epoch, args.epochs[-1]+args.epoch):

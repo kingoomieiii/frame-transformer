@@ -6,7 +6,7 @@ import math
 
 from frame_primer.rotary_embedding_torch import RotaryEmbedding
 
-class MultibandFrameAttention(nn.Module):
+class MultichannelMultiheadAttention(nn.Module):
     def __init__(self, num_bands, bins, kernel_size=3, padding=1, bias=False):
         super().__init__()
 
@@ -52,7 +52,7 @@ class FramePrimerEncoder(nn.Module):
         self.relu = nn.ReLU(inplace=True)
 
         self.norm1 = nn.LayerNorm(bins)
-        self.attn = MultibandFrameAttention(num_bands, bins, kernel_size=3, padding=1)
+        self.attn = MultichannelMultiheadAttention(num_bands, bins, kernel_size=3, padding=1)
         self.dropout1 = nn.Dropout(dropout) if dropout > 0 else nn.Identity()
 
         self.norm2 = nn.LayerNorm(bins)
@@ -92,11 +92,11 @@ class FramePrimerDecoder(nn.Module):
         self.relu = nn.ReLU(inplace=True)
 
         self.norm1 = nn.LayerNorm(bins)
-        self.attn1 = MultibandFrameAttention(num_bands, bins, kernel_size=3, padding=1)
+        self.attn1 = MultichannelMultiheadAttention(num_bands, bins, kernel_size=3, padding=1)
         self.dropout1 = nn.Dropout(dropout) if dropout > 0 else nn.Identity()
 
         self.norm2 = nn.LayerNorm(bins)
-        self.attn2 = MultibandFrameAttention(num_bands, bins, kernel_size=3, padding=1)
+        self.attn2 = MultichannelMultiheadAttention(num_bands, bins, kernel_size=3, padding=1)
         self.dropout2 = nn.Dropout(dropout) if dropout > 0 else nn.Identity()
 
         self.norm3 = nn.LayerNorm(bins)
@@ -175,7 +175,7 @@ class ResBlock(nn.Module):
         return h
         
 class FrameEncoder(nn.Module):
-    def __init__(self, in_channels, out_channels, kernel_size=3, stride=1, padding=1, downsamples=0, n_fft=2048, num_res_blocks=1, column_kernel=True, column_stride=True):
+    def __init__(self, in_channels, out_channels, kernel_size=3, stride=1, padding=1, downsamples=0, n_fft=2048, num_res_blocks=1, column_kernel=False, column_stride=True):
         super(FrameEncoder, self).__init__()
 
         self.body = nn.Sequential(*[ResBlock(in_channels if i == 0 else out_channels, out_channels, kernel_size=kernel_size, padding=padding, stride=stride if i == num_res_blocks - 1 else 1, downsamples=downsamples, n_fft=n_fft, column_kernel=column_kernel, column_stride=column_stride) for i in range(0, num_res_blocks)])
@@ -186,7 +186,7 @@ class FrameEncoder(nn.Module):
         return h
 
 class FrameDecoder(nn.Module):
-    def __init__(self, in_channels, out_channels, kernel_size=3, padding=1, downsamples=0, n_fft=2048, num_res_blocks=1, upsample=True, column_kernel=True, column_stride=True):
+    def __init__(self, in_channels, out_channels, kernel_size=3, padding=1, downsamples=0, n_fft=2048, num_res_blocks=1, upsample=True, column_kernel=False, column_stride=True):
         super(FrameDecoder, self).__init__()
 
         self.upsample = nn.Upsample(scale_factor=(2,1) if column_stride else 2, mode='bilinear', align_corners=True) if upsample else nn.Identity()
