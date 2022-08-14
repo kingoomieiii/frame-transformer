@@ -7,17 +7,17 @@ import math
 from frame_primer.rotary_embedding_torch import RotaryEmbedding
 
 class MultichannelMultiheadAttention(nn.Module):
-    def __init__(self, num_bands, bins, kernel_size=3, padding=1, bias=False):
+    def __init__(self, num_heads, bins, kernel_size=3, padding=1, bias=False):
         super().__init__()
 
-        self.num_bands = num_bands
-        self.rotary_embedding = RotaryEmbedding(dim = bins // num_bands // 2)
+        self.num_bands = num_heads
+        self.rotary_embedding = RotaryEmbedding(dim = bins // num_heads // 2)
         self.q_proj = nn.Linear(bins, bins, bias=bias)
-        self.q_conv = nn.Conv2d(bins, bins, kernel_size=(kernel_size,1), padding=(padding,0), groups=bins)
+        self.q_conv = ColumnConv(bins, bins, kernel_size=kernel_size, padding=padding, groups=bins, norm=False, activate=None)
         self.k_proj = nn.Linear(bins, bins, bias=bias)
-        self.k_conv = nn.Conv2d(bins, bins, kernel_size=(kernel_size,1), padding=(padding,0), groups=bins)
+        self.k_conv = ColumnConv(bins, bins, kernel_size=kernel_size, padding=padding, groups=bins, norm=False, activate=None)
         self.v_proj = nn.Linear(bins, bins, bias=bias)
-        self.v_conv = nn.Conv2d(bins, bins, kernel_size=(kernel_size,1), padding=(padding,0), groups=bins)
+        self.v_conv = ColumnConv(bins, bins, kernel_size=kernel_size, padding=padding, groups=bins, norm=False, activate=None)
         self.o_proj = nn.Linear(bins, bins, bias=bias)
 
     def forward(self, x, mem=None):
@@ -122,9 +122,9 @@ class FramePrimerDecoder(nn.Module):
 
         return x.transpose(2,3)
 
-class FrameConv(nn.Module):
+class ColumnConv(nn.Module):
     def __init__(self, in_channels, out_channels, kernel_size=3, stride=1, padding=1, groups=1, activate=nn.GELU, norm=True, downsamples=0, n_fft=2048, column_kernel=True, column_stride=True):
-        super(FrameConv, self).__init__()
+        super(ColumnConv, self).__init__()
 
         bins = n_fft // 2
         if downsamples > 0:
@@ -140,9 +140,9 @@ class FrameConv(nn.Module):
 
         self.conv = nn.Conv2d(
                 in_channels, out_channels,
-                kernel_size=(kernel_size, 1) if column_kernel else kernel_size,
-                padding=(padding, 0) if column_kernel else padding,
-                stride=(stride, 1) if column_stride else stride,
+                kernel_size=(kernel_size, 1),
+                padding=(padding, 0),
+                stride=(stride, 1),
                 groups=groups,
                 bias=False)
 
@@ -155,7 +155,9 @@ class FrameConv(nn.Module):
         if self.activate is not None:
             x = self.activate(x)
 
+        x = x.permute(0,3,1,2).reshape(b * w, c, h).unsqueeze(-1)
         x = self.conv(x)
+        x = x.squeeze(-1).reshape(b,w,x.shape[1],x.shape[2]).permute(0,2,3,1)
 
         return x
 
@@ -164,8 +166,8 @@ class ResBlock(nn.Module):
         super(ResBlock, self).__init__()
 
         self.identity = nn.Conv2d(in_channels, out_channels, kernel_size=1, padding=0, stride=(stride, 1) if column_stride else stride) if in_channels != out_channels or stride > 1 else nn.Identity()
-        self.conv1 = FrameConv(in_channels, out_channels, kernel_size, 1, padding, activate=activate, downsamples=downsamples, n_fft=n_fft, column_kernel=column_kernel, column_stride=column_stride)
-        self.conv2 = FrameConv(out_channels, out_channels, kernel_size, stride, padding, activate=activate, downsamples=downsamples, n_fft=n_fft, column_kernel=column_kernel, column_stride=column_stride)
+        self.conv1 = ColumnConv(in_channels, out_channels, kernel_size, 1, padding, activate=activate, downsamples=downsamples, n_fft=n_fft, column_kernel=column_kernel, column_stride=column_stride)
+        self.conv2 = ColumnConv(out_channels, out_channels, kernel_size, stride, padding, activate=activate, downsamples=downsamples, n_fft=n_fft, column_kernel=column_kernel, column_stride=column_stride)
 
     def __call__(self, x):
         h = self.conv1(x)
