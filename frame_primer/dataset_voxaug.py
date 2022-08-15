@@ -121,7 +121,14 @@ class VoxAugDataset(torch.utils.data.Dataset):
                 X = X[::-1]
                 Y = Y[::-1]
         else:
-            c = Xc
+            if len(self.vocal_list) > 0:                              
+                vpath = self.vocal_list[idx % len(self.vocal_list)]
+                vdata = np.load(str(vpath))
+                V = vdata['X']
+                X = Y + V
+                c = np.max([Xc, np.abs(X).max()])
+            else:
+                c = Xc
 
         if np.random.uniform() < self.mixup_rate and root and not self.is_validation:
             MX, MY = self.__getitem__(np.random.randint(len(self)), root=False)

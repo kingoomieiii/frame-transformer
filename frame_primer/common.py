@@ -13,11 +13,11 @@ class MultichannelMultiheadAttention(nn.Module):
         self.num_bands = num_heads
         self.rotary_embedding = RotaryEmbedding(dim = bins // num_heads // 2)
         self.q_proj = nn.Linear(bins, bins, bias=bias)
-        self.q_conv = ColumnConv(bins, bins, kernel_size=kernel_size, padding=padding, groups=bins, norm=False, activate=None)
+        self.q_conv = FrameConv(bins, bins, kernel_size=kernel_size, padding=padding, groups=bins, norm=False, activate=None)
         self.k_proj = nn.Linear(bins, bins, bias=bias)
-        self.k_conv = ColumnConv(bins, bins, kernel_size=kernel_size, padding=padding, groups=bins, norm=False, activate=None)
+        self.k_conv = FrameConv(bins, bins, kernel_size=kernel_size, padding=padding, groups=bins, norm=False, activate=None)
         self.v_proj = nn.Linear(bins, bins, bias=bias)
-        self.v_conv = ColumnConv(bins, bins, kernel_size=kernel_size, padding=padding, groups=bins, norm=False, activate=None)
+        self.v_conv = FrameConv(bins, bins, kernel_size=kernel_size, padding=padding, groups=bins, norm=False, activate=None)
         self.o_proj = nn.Linear(bins, bins, bias=bias)
 
     def forward(self, x, mem=None):
@@ -122,18 +122,14 @@ class FramePrimerDecoder(nn.Module):
 
         return x.transpose(2,3)
 
-class ColumnConv(nn.Module):
-    def __init__(self, in_channels, out_channels, kernel_size=3, stride=1, padding=1, groups=1, activate=nn.GELU, norm=True, downsamples=0, n_fft=2048, column_kernel=True, column_stride=True):
-        super(ColumnConv, self).__init__()
+class FrameConv(nn.Module):
+    def __init__(self, in_channels, out_channels, kernel_size=3, stride=1, padding=1, groups=1, activate=nn.GELU, norm=True, downsamples=0, n_fft=2048):
+        super(FrameConv, self).__init__()
 
         bins = n_fft // 2
         if downsamples > 0:
             for _ in range(downsamples):
                 bins = bins // 2
-
-        self.downsamples = downsamples
-        self.bins = bins
-        self.in_channels = in_channels
 
         self.norm = nn.LayerNorm(bins * in_channels) if norm else None
         self.activate = activate() if activate is not None else None
@@ -162,12 +158,12 @@ class ColumnConv(nn.Module):
         return x
 
 class ResBlock(nn.Module):
-    def __init__(self, in_channels, out_channels, kernel_size=3, stride=1, padding=1, activate=nn.GELU, cropsize=1024, downsamples=0, n_fft=2048, column_kernel=True, column_stride=True):
+    def __init__(self, in_channels, out_channels, kernel_size=3, stride=1, padding=1, activate=nn.GELU, downsamples=0, n_fft=2048):
         super(ResBlock, self).__init__()
 
-        self.identity = nn.Conv2d(in_channels, out_channels, kernel_size=1, padding=0, stride=(stride, 1) if column_stride else stride) if in_channels != out_channels or stride > 1 else nn.Identity()
-        self.conv1 = ColumnConv(in_channels, out_channels, kernel_size, 1, padding, activate=activate, downsamples=downsamples, n_fft=n_fft, column_kernel=column_kernel, column_stride=column_stride)
-        self.conv2 = ColumnConv(out_channels, out_channels, kernel_size, stride, padding, activate=activate, downsamples=downsamples, n_fft=n_fft, column_kernel=column_kernel, column_stride=column_stride)
+        self.identity = nn.Conv2d(in_channels, out_channels, kernel_size=1, padding=0, stride=(stride, 1)) if in_channels != out_channels or stride > 1 else nn.Identity()
+        self.conv1 = FrameConv(in_channels, out_channels, kernel_size, 1, padding, activate=activate, downsamples=downsamples, n_fft=n_fft)
+        self.conv2 = FrameConv(out_channels, out_channels, kernel_size, stride, padding, activate=activate, downsamples=downsamples, n_fft=n_fft)
 
     def __call__(self, x):
         h = self.conv1(x)
@@ -177,10 +173,10 @@ class ResBlock(nn.Module):
         return h
         
 class FrameEncoder(nn.Module):
-    def __init__(self, in_channels, out_channels, kernel_size=3, stride=1, padding=1, downsamples=0, n_fft=2048, num_res_blocks=1, column_kernel=False, column_stride=True):
+    def __init__(self, in_channels, out_channels, kernel_size=3, stride=1, padding=1, downsamples=0, n_fft=2048, num_res_blocks=1):
         super(FrameEncoder, self).__init__()
 
-        self.body = nn.Sequential(*[ResBlock(in_channels if i == 0 else out_channels, out_channels, kernel_size=kernel_size, padding=padding, stride=stride if i == num_res_blocks - 1 else 1, downsamples=downsamples, n_fft=n_fft, column_kernel=column_kernel, column_stride=column_stride) for i in range(0, num_res_blocks)])
+        self.body = nn.Sequential(*[ResBlock(in_channels if i == 0 else out_channels, out_channels, kernel_size=kernel_size, padding=padding, stride=stride if i == num_res_blocks - 1 else 1, downsamples=downsamples, n_fft=n_fft) for i in range(0, num_res_blocks)])
         
     def __call__(self, x):
         h = self.body(x)

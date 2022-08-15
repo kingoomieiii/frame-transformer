@@ -346,23 +346,38 @@ def main():
                 num_workers=args.num_workers
             )
 
+            val_dataset2 = VoxAugDataset(
+                path=[f"C://cs{cropsize}_sr44100_hl1024_nf2048_of0_VALIDATION"],
+                vocal_path=[f"J://cs{cropsize}_sr44100_hl1024_nf2048_of0_VOCALS_VALIDATION"],
+                is_validation=True,
+                force_voxaug=True
+            )
+
+            val_dataloader2 = torch.utils.data.DataLoader(
+                dataset=val_dataset2,
+                batch_size=1,
+                shuffle=False,
+                num_workers=args.num_workers
+            )
+
         print('# epoch {}'.format(epoch))
         train_loss = train_epoch(train_dataloader, model, device, optimizer, accum_steps, args.progress_bar, args.mixup_rate, args.mixup_alpha, lr_warmup=scheduler, grad_scaler=grad_scaler, use_wandb=args.wandb)
-        val_loss_mag = validate_epoch(val_dataloader, model, device)
+        val_loss_old = validate_epoch(val_dataloader, model, device)
+        val_loss_new = validate_epoch(val_dataloader2, model, device)
 
         if args.wandb:
             wandb.log({
                 'train_loss': train_loss,
-                'val_loss': val_loss_mag,
+                'val_loss': val_loss_new,
             })
 
         print(
-            '  * training loss = {:.6f}, validation loss mag = {:.6f}'
-            .format(train_loss, val_loss_mag)
+            '  * training loss = {:.6f}, validation loss old = {:.6f}, validation loss new = {:.6f}'
+            .format(train_loss, val_loss_old, val_loss_new)
         )
 
-        if (val_loss_mag) < best_loss:
-            best_loss = val_loss_mag
+        if (val_loss_new) < best_loss:
+            best_loss = val_loss_new
             print('  * best validation loss')
 
         model_path = f'{args.model_dir}models/model_iter{epoch}.remover.pth'
