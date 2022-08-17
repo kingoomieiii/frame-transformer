@@ -5,7 +5,7 @@ import math
 from frame_primer.common import FrameDecoder, FrameEncoder, FramePrimerEncoder, FramePrimerDecoder
 
 class FramePrimer2(nn.Module):
-    def __init__(self, in_channels=2, channels=2, dropout=0.1, n_fft=2048, feedforward_dim=2048, num_res_blocks=1, num_heads=[4, 4, 4, 4, 4, 4], expansion=4):
+    def __init__(self, in_channels=2, channels=2, dropout=0.1, n_fft=2048, feedforward_dim=2048, num_res_blocks=1, num_heads=[1, 1, 1, 1, 1, 1], expansion=4):
         super(FramePrimer2, self).__init__()
         
         self.max_bin = n_fft // 2
@@ -52,12 +52,11 @@ class FramePrimer2(nn.Module):
         e3 = self.enc3_primer(self.enc3(e2))
         e4 = self.enc4_primer(self.enc4(e3))
         e5 = self.enc5_primer(self.enc5(e4))
-        e6 = self.enc6_primer(self.enc6(e5))
-        
-        d5 = self.dec5_primer(self.dec5(e6, e5), skip=e5)
-        d4 = self.dec4_primer(self.dec4(d5, e4), skip=e4)
-        d3 = self.dec3_primer(self.dec3(d4, e3), skip=e3)
-        d2 = self.dec2_primer(self.dec2(d3, e2), skip=e2)
-        d1 = self.dec1_primer(self.dec1(d2, e1), skip=e1)
+        e6 = self.enc6_primer(self.enc6(e5))        
+        d5 = self.dec5_primer(self.dec5(e6, e5), e5)
+        d4 = self.dec4_primer(self.dec4(d5, e4), e4)
+        d3 = self.dec3_primer(self.dec3(d4, e3), e3)
+        d2 = self.dec2_primer(self.dec2(d3, e2), e2)
+        d1 = self.dec1_primer(self.dec1(d2, e1), e1)
 
         return self.out(d1)

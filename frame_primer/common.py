@@ -129,12 +129,12 @@ class FramePrimerEncoder(nn.Module):
 
         self.norm1 = nn.LayerNorm(bins)
         self.attn = MultichannelMultiheadAttention(num_bands, bins, kernel_size=9, padding=4)
-        self.dropout1 = nn.Dropout2d(dropout) if dropout > 0 else nn.Identity()
+        self.dropout1 = nn.Dropout(dropout) if dropout > 0 else nn.Identity()
 
-        self.norm2 = nn.LayerNorm(bins * channels)
-        self.conv1 = FrameConv(channels, channels * expansion, kernel_size=9, padding=4, downsamples=downsamples, n_fft=n_fft, norm=True, activate=None)
-        self.conv2 = FrameConv(channels * expansion, channels, kernel_size=9, padding=4, downsamples=downsamples, n_fft=n_fft, norm=False, activate=None)
-        self.dropout2 = nn.Dropout2d(dropout) if dropout > 0 else nn.Identity()
+        self.norm2 = nn.LayerNorm(bins)
+        self.linear1 = nn.Linear(bins, bins * expansion, bias=bias)
+        self.linear2 = nn.Linear(bins * expansion, bins, bias=bias)
+        self.dropout2 = nn.Dropout(dropout) if dropout > 0 else nn.Identity()
         
     def __call__(self, x):
         x = x.transpose(2,3)
@@ -143,12 +143,11 @@ class FramePrimerEncoder(nn.Module):
         z = self.attn(z)
         x = x + self.dropout1(z)
 
-        b,c,w,h = x.shape
-        z = self.norm2(x.permute(0,2,3,1).reshape(b,w,h*c)).reshape(b,w,h,c).transpose(1,3)
-        z = self.conv2(torch.square(self.relu(self.conv1(z))))
-        x = x.transpose(2,3) + self.dropout2(z)
+        z = self.norm2(x)
+        z = self.linear2(torch.square(self.relu(self.linear1(z))))
+        x = x + self.dropout2(z)
 
-        return x
+        return x.transpose(2,3)
 
 class FramePrimerDecoder(nn.Module):
     def __init__(self, channels, num_bands=4, bias=False, dropout=0.1, downsamples=0, n_fft=2048, expansion=12, feedforward=4096):
@@ -166,16 +165,16 @@ class FramePrimerDecoder(nn.Module):
 
         self.norm1 = nn.LayerNorm(bins)
         self.attn1 = MultichannelMultiheadAttention(num_bands, bins, kernel_size=9, padding=4)
-        self.dropout1 = nn.Dropout2d(dropout) if dropout > 0 else nn.Identity()
+        self.dropout1 = nn.Dropout(dropout) if dropout > 0 else nn.Identity()
 
         self.norm2 = nn.LayerNorm(bins)
         self.attn2 = MultichannelMultiheadAttention(num_bands, bins, kernel_size=9, padding=4)
-        self.dropout2 = nn.Dropout2d(dropout) if dropout > 0 else nn.Identity()
+        self.dropout2 = nn.Dropout(dropout) if dropout > 0 else nn.Identity()
 
-        self.norm3 = nn.LayerNorm(bins * channels)
-        self.conv1 = FrameConv(channels, channels * expansion, kernel_size=9, padding=4, downsamples=downsamples, n_fft=n_fft, norm=True, activate=None)
-        self.conv2 = FrameConv(channels * expansion, channels, kernel_size=9, padding=4, downsamples=downsamples, n_fft=n_fft, norm=False, activate=None)
-        self.dropout3 = nn.Dropout2d(dropout) if dropout > 0 else nn.Identity()
+        self.norm3 = nn.LayerNorm(bins) 
+        self.linear1 = nn.Linear(bins, bins * expansion, bias=bias)
+        self.linear2 = nn.Linear(bins * expansion, bins, bias=bias)
+        self.dropout3 = nn.Dropout(dropout) if dropout > 0 else nn.Identity()
 
     def __call__(self, x, skip=None):
         x = x.transpose(2,3)
@@ -189,9 +188,8 @@ class FramePrimerDecoder(nn.Module):
         z = self.attn2(z, mem=skip)
         x = x + self.dropout2(z)
 
-        b,c,w,h = x.shape
-        z = self.norm3(x.permute(0,2,3,1).reshape(b,w,h*c)).reshape(b,w,h,c).transpose(1,3)
-        z = self.conv2(torch.square(self.relu(self.conv1(z))))
-        x = x.transpose(2,3) + self.dropout3(z)
+        z = self.norm3(x)
+        z = self.linear2(torch.square(self.relu(self.linear1(z))))
+        x = x + self.dropout3(z)
 
-        return x
+        return x.transpose(2,3)
