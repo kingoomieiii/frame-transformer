@@ -85,19 +85,18 @@ class FrameDecoder(nn.Module):
         return h
 
 class MultichannelMultiheadAttention(nn.Module):
-    def __init__(self, num_heads, bins, resize_factor=1, kernel_size=3, padding=1, bias=False):
+    def __init__(self, num_heads, bins, kernel_size=3, padding=1, bias=False):
         super().__init__()
 
-        self.resize_factor = resize_factor
         self.num_heads = num_heads
-        self.rotary_embedding = RotaryEmbedding(dim = bins * resize_factor // num_heads // 2, learned_freq=True)
-        self.q_proj = nn.Linear(bins, bins * resize_factor, bias=bias)
-        self.q_conv = FrameConv(bins * resize_factor, bins * resize_factor, kernel_size=kernel_size, padding=padding, groups=bins, norm=False, activate=None)
-        self.k_proj = nn.Linear(bins, bins * resize_factor, bias=bias)
-        self.k_conv = FrameConv(bins * resize_factor, bins * resize_factor, kernel_size=kernel_size, padding=padding, groups=bins, norm=False, activate=None)
-        self.v_proj = nn.Linear(bins, bins * resize_factor, bias=bias)
-        self.v_conv = FrameConv(bins * resize_factor, bins * resize_factor, kernel_size=kernel_size, padding=padding, groups=bins, norm=False, activate=None)
-        self.out_proj = nn.Linear(bins * resize_factor, bins, bias=bias)
+        self.rotary_embedding = RotaryEmbedding(dim = bins // num_heads // 2, learned_freq=True)
+        self.q_proj = nn.Linear(bins, bins, bias=bias)
+        self.q_conv = FrameConv(bins, bins, kernel_size=kernel_size, padding=padding, groups=bins, norm=False, activate=None)
+        self.k_proj = nn.Linear(bins, bins, bias=bias)
+        self.k_conv = FrameConv(bins, bins, kernel_size=kernel_size, padding=padding, groups=bins, norm=False, activate=None)
+        self.v_proj = nn.Linear(bins, bins, bias=bias)
+        self.v_conv = FrameConv(bins, bins, kernel_size=kernel_size, padding=padding, groups=bins, norm=False, activate=None)
+        self.out_proj = nn.Linear(bins, bins, bias=bias)
 
     def forward(self, x, mem=None):
         b,c,w,h = x.shape
@@ -106,7 +105,7 @@ class MultichannelMultiheadAttention(nn.Module):
         v = self.v_conv(self.v_proj(x if mem is None else mem).transpose(1,3)).transpose(1,3).reshape(b, c, w, self.num_heads, -1).permute(0,1,3,2,4).contiguous()
 
         with torch.cuda.amp.autocast_mode.autocast(enabled=False):
-            qk = torch.matmul(q,k) / math.sqrt(h * self.resize_factor)
+            qk = torch.matmul(q,k) / math.sqrt(h)
             a = torch.matmul(F.softmax(qk, dim=-1),v).transpose(2,3).reshape(b,c,w,-1).contiguous()
                 
         x = self.out_proj(a)
