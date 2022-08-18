@@ -75,6 +75,9 @@ def train_epoch(dataloader, model, device, optimizer, accumulation_steps, progre
         batch_qloss = batch_qloss
         accum_loss = l1_loss
 
+        if torch.logical_or(accum_loss.isnan(), accum_loss.isinf()):
+            print('! non-finite or nan loss')
+
         if grad_scaler is not None:
             grad_scaler.scale(accum_loss).backward()
         else:

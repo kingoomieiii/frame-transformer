@@ -68,7 +68,7 @@ class FrameEncoder(nn.Module):
         return h
 
 class FrameDecoder(nn.Module):
-    def __init__(self, in_channels, out_channels, kernel_size=3, padding=1, downsamples=0, n_fft=2048, num_res_blocks=1, upsample=True):
+    def __init__(self, in_channels, out_channels, kernel_size=9, padding=4, downsamples=0, n_fft=2048, num_res_blocks=1, upsample=True):
         super(FrameDecoder, self).__init__()
 
         self.upsample = nn.Upsample(scale_factor=(2,1), mode='bilinear', align_corners=True) if upsample else nn.Identity()
@@ -85,7 +85,7 @@ class FrameDecoder(nn.Module):
         return h
 
 class MultichannelMultiheadAttention(nn.Module):
-    def __init__(self, num_heads, bins, kernel_size=3, padding=1, bias=False):
+    def __init__(self, num_heads, bins, kernel_size=9, padding=4, bias=False):
         super().__init__()
 
         self.num_heads = num_heads
