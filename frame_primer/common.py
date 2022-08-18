@@ -113,7 +113,7 @@ class MultichannelMultiheadAttention(nn.Module):
         return x
 
 class FramePrimerEncoder(nn.Module):
-    def __init__(self, channels, num_bands=4, bias=False, dropout=0.1, downsamples=0, n_fft=2048, expansion=4, feedforward=4096):
+    def __init__(self, num_heads=4, bias=False, dropout=0.1, downsamples=0, n_fft=2048, expansion=4):
         super(FramePrimerEncoder, self).__init__()
 
         bins = n_fft // 2
@@ -122,12 +122,12 @@ class FramePrimerEncoder(nn.Module):
                 bins = bins // 2
 
         self.bins = bins
-        self.num_bands = num_bands
+        self.num_bands = num_heads
 
         self.relu = nn.ReLU(inplace=True)
 
         self.norm1 = nn.LayerNorm(bins)
-        self.attn = MultichannelMultiheadAttention(num_bands, bins, kernel_size=9, padding=4)
+        self.attn = MultichannelMultiheadAttention(num_heads, bins, kernel_size=9, padding=4)
         self.dropout1 = nn.Dropout(dropout) if dropout > 0 else nn.Identity()
 
         self.norm2 = nn.LayerNorm(bins)
@@ -149,7 +149,7 @@ class FramePrimerEncoder(nn.Module):
         return x.transpose(2,3)
 
 class FramePrimerDecoder(nn.Module):
-    def __init__(self, channels, num_bands=4, bias=False, dropout=0.1, downsamples=0, n_fft=2048, expansion=12, feedforward=4096):
+    def __init__(self, num_heads=4, bias=False, dropout=0.1, downsamples=0, n_fft=2048, expansion=4):
         super(FramePrimerDecoder, self).__init__()
 
         bins = n_fft // 2
@@ -158,16 +158,16 @@ class FramePrimerDecoder(nn.Module):
                 bins = bins // 2
 
         self.bins = bins
-        self.num_bands = num_bands
+        self.num_bands = num_heads
 
         self.relu = nn.ReLU(inplace=True)
 
         self.norm1 = nn.LayerNorm(bins)
-        self.attn1 = MultichannelMultiheadAttention(num_bands, bins, kernel_size=9, padding=4)
+        self.attn1 = MultichannelMultiheadAttention(num_heads, bins, kernel_size=9, padding=4)
         self.dropout1 = nn.Dropout(dropout) if dropout > 0 else nn.Identity()
 
         self.norm2 = nn.LayerNorm(bins)
-        self.attn2 = MultichannelMultiheadAttention(num_bands, bins, kernel_size=9, padding=4)
+        self.attn2 = MultichannelMultiheadAttention(num_heads, bins, kernel_size=9, padding=4)
         self.dropout2 = nn.Dropout(dropout) if dropout > 0 else nn.Identity()
 
         self.norm3 = nn.LayerNorm(bins) 
