@@ -6,6 +6,48 @@ import math
 
 from frame_primer.rotary_embedding_torch import RotaryEmbedding
 
+class MultichannelLinear(nn.Module):
+    def __init__(self, channels, in_features, out_features, transpose=True):
+        super(MultichannelLinear, self).__init__()
+
+        self.transpose = transpose
+
+        self.weight = nn.Parameter(torch.empty(channels, out_features, in_features))
+        self.reset_parameters()
+
+    def reset_parameters(self):
+        nn.init.kaiming_uniform_(self.weight, a=math.sqrt(5))
+
+    def __call__(self, x):
+        if self.transpose:
+            x = x.transpose(2,3)
+
+        x = torch.matmul(x, self.weight.transpose(1,2))
+
+        if self.transpose:
+            x = x.transpose(2,3)
+
+        return x
+
+class FrameDrop(nn.Module):
+    def __init__(self, p=0.5, inplace=False):
+        super(FrameDrop, self).__init__()
+
+        self.dropout = nn.Dropout2d(p, inplace=inplace)
+
+    def __call__(self, x):
+        b,c,h,w = x.shape
+        return self.dropout(x.reshape(b,c*h,w).unsqueeze(2)).squeeze(2).reshape(b,c,h,w)
+
+class FrameNorm(nn.Module):
+    def __init__(self, bins):
+        super(FrameNorm, self).__init__()
+
+        self.norm = nn.LayerNorm(bins)
+
+    def __call__(self, x):
+        return self.norm(x.transpose(2,3)).transpose(2,3)
+
 class FrameConv(nn.Module):
     def __init__(self, in_channels, out_channels, kernel_size=3, stride=1, padding=1, groups=1, activate=nn.GELU, norm=True, downsamples=0, n_fft=2048):
         super(FrameConv, self).__init__()
@@ -68,7 +110,7 @@ class FrameEncoder(nn.Module):
         return h
 
 class FrameDecoder(nn.Module):
-    def __init__(self, in_channels, out_channels, kernel_size=9, padding=4, downsamples=0, n_fft=2048, num_res_blocks=1, upsample=True):
+    def __init__(self, in_channels, out_channels, kernel_size=3, padding=1, downsamples=0, n_fft=2048, num_res_blocks=1, upsample=True):
         super(FrameDecoder, self).__init__()
 
         self.upsample = nn.Upsample(scale_factor=(2,1), mode='bilinear', align_corners=True) if upsample else nn.Identity()
@@ -85,35 +127,43 @@ class FrameDecoder(nn.Module):
         return h
 
 class MultichannelMultiheadAttention(nn.Module):
-    def __init__(self, num_heads, bins, kernel_size=9, padding=4, bias=False):
+    def __init__(self, channels, num_heads, bins, kernel_size=3, padding=1, bias=False, skip=False):
         super().__init__()
 
         self.num_heads = num_heads
-        self.rotary_embedding = RotaryEmbedding(dim = bins // num_heads // 2, learned_freq=True)
-        self.q_proj = nn.Linear(bins, bins, bias=bias)
-        self.q_conv = FrameConv(bins, bins, kernel_size=kernel_size, padding=padding, groups=bins, norm=False, activate=None)
-        self.k_proj = nn.Linear(bins, bins, bias=bias)
-        self.k_conv = FrameConv(bins, bins, kernel_size=kernel_size, padding=padding, groups=bins, norm=False, activate=None)
-        self.v_proj = nn.Linear(bins, bins, bias=bias)
-        self.v_conv = FrameConv(bins, bins, kernel_size=kernel_size, padding=padding, groups=bins, norm=False, activate=None)
-        self.out_proj = nn.Linear(bins, bins, bias=bias)
+        self.rotary_embedding = RotaryEmbedding(dim = bins // num_heads // 2, freqs_for='lang')
+
+        self.q_proj = nn.Sequential(
+            MultichannelLinear(channels, bins, bins),
+            nn.Conv2d(channels, channels, kernel_size=(1, kernel_size), padding=(0, padding), groups=channels))
+        
+        self.k_proj = nn.Sequential(
+            MultichannelLinear(channels, bins, bins),
+            nn.Conv2d(channels, channels, kernel_size=(1, kernel_size), padding=(0, padding), groups=channels))
+
+        self.v_proj = nn.Sequential(
+            MultichannelLinear(channels, bins, bins),
+            nn.Conv2d(channels, channels, kernel_size=(1, kernel_size), padding=(0, padding), groups=channels))
+
+        self.out_proj = MultichannelLinear(channels, bins, bins)
 
     def forward(self, x, mem=None):
-        b,c,w,h = x.shape
-        q = self.rotary_embedding.rotate_queries_or_keys(self.q_conv(self.q_proj(x).transpose(1,3)).transpose(1,3).reshape(b, c, w, self.num_heads, -1).permute(0,1,3,2,4)).contiguous()
-        k = self.rotary_embedding.rotate_queries_or_keys(self.k_conv(self.k_proj(x if mem is None else mem).transpose(1,3)).transpose(1,3).reshape(b, c, w, self.num_heads, -1).permute(0,1,3,2,4)).transpose(3,4).contiguous()
-        v = self.v_conv(self.v_proj(x if mem is None else mem).transpose(1,3)).transpose(1,3).reshape(b, c, w, self.num_heads, -1).permute(0,1,3,2,4).contiguous()
+        b,c,h,w = x.shape
+
+        q = self.rotary_embedding.rotate_queries_or_keys(self.q_proj(x).transpose(2,3).reshape(b,c,w,self.num_heads,-1).permute(0,1,3,2,4)).contiguous()
+        k = self.rotary_embedding.rotate_queries_or_keys(self.q_proj(x if mem is None else mem).transpose(2,3).reshape(b,c,w,self.num_heads,-1).permute(0,1,3,2,4)).transpose(3,4).contiguous()
+        v = self.q_proj(x if mem is None else mem).transpose(2,3).reshape(b,c,w,self.num_heads,-1).permute(0,1,3,2,4).contiguous()
 
         with torch.cuda.amp.autocast_mode.autocast(enabled=False):
             qk = torch.matmul(q,k) / math.sqrt(h)
-            a = torch.matmul(F.softmax(qk, dim=-1),v).transpose(2,3).reshape(b,c,w,-1).contiguous()
+            a = torch.matmul(F.softmax(qk, dim=-1),v).transpose(2,3).reshape(b,c,w,-1).transpose(2,3).contiguous()
                 
         x = self.out_proj(a)
 
         return x
 
 class FramePrimerEncoder(nn.Module):
-    def __init__(self, num_heads=4, bias=False, dropout=0.1, downsamples=0, n_fft=2048, expansion=4):
+    def __init__(self, channels, num_heads=4, bias=False, dropout=0.1, downsamples=0, n_fft=2048, expansion=4, feedforward_dim=4096, kernel_size=3, padding=1):
         super(FramePrimerEncoder, self).__init__()
 
         bins = n_fft // 2
@@ -126,30 +176,28 @@ class FramePrimerEncoder(nn.Module):
 
         self.relu = nn.ReLU(inplace=True)
 
-        self.norm1 = nn.LayerNorm(bins)
-        self.attn = MultichannelMultiheadAttention(num_heads, bins, kernel_size=9, padding=4)
+        self.norm1 = FrameNorm(bins)
+        self.attn = MultichannelMultiheadAttention(channels, num_heads, bins, kernel_size=kernel_size, padding=padding)
         self.dropout1 = nn.Dropout(dropout) if dropout > 0 else nn.Identity()
 
-        self.norm2 = nn.LayerNorm(bins)
-        self.linear1 = nn.Linear(bins, bins * expansion, bias=bias)
-        self.linear2 = nn.Linear(bins * expansion, bins, bias=bias)
+        self.norm2 = FrameNorm(bins)
+        self.linear1 = MultichannelLinear(channels, bins, bins * expansion)
+        self.linear2 = MultichannelLinear(channels, bins * expansion, bins)
         self.dropout2 = nn.Dropout(dropout) if dropout > 0 else nn.Identity()
         
     def __call__(self, x):
-        x = x.transpose(2,3)
-
         z = self.norm1(x)
         z = self.attn(z)
-        x = x + self.dropout1(z)
+        x = x + self.dropout1(z.transpose(2,3)).transpose(2,3)
 
         z = self.norm2(x)
         z = self.linear2(torch.square(self.relu(self.linear1(z))))
-        x = x + self.dropout2(z)
+        x = x + self.dropout2(z.transpose(2,3)).transpose(2,3)
 
-        return x.transpose(2,3)
+        return x
 
 class FramePrimerDecoder(nn.Module):
-    def __init__(self, num_heads=4, bias=False, dropout=0.1, downsamples=0, n_fft=2048, expansion=4):
+    def __init__(self, channels, num_heads=4, bias=False, dropout=0.1, downsamples=0, n_fft=2048, expansion=4, feedforward_dim=4096, kernel_size=3, padding=1):
         super(FramePrimerDecoder, self).__init__()
 
         bins = n_fft // 2
@@ -162,33 +210,30 @@ class FramePrimerDecoder(nn.Module):
 
         self.relu = nn.ReLU(inplace=True)
 
-        self.norm1 = nn.LayerNorm(bins)
-        self.attn1 = MultichannelMultiheadAttention(num_heads, bins, kernel_size=9, padding=4)
+        self.norm1 = FrameNorm(bins)
+        self.attn1 = MultichannelMultiheadAttention(channels, num_heads, bins, kernel_size=kernel_size, padding=padding)
         self.dropout1 = nn.Dropout(dropout) if dropout > 0 else nn.Identity()
 
-        self.norm2 = nn.LayerNorm(bins)
-        self.attn2 = MultichannelMultiheadAttention(num_heads, bins, kernel_size=9, padding=4)
+        self.norm2 = FrameNorm(bins)
+        self.attn2 = MultichannelMultiheadAttention(channels, num_heads, bins, kernel_size=kernel_size, padding=padding)
         self.dropout2 = nn.Dropout(dropout) if dropout > 0 else nn.Identity()
 
-        self.norm3 = nn.LayerNorm(bins) 
-        self.linear1 = nn.Linear(bins, bins * expansion, bias=bias)
-        self.linear2 = nn.Linear(bins * expansion, bins, bias=bias)
+        self.norm3 = FrameNorm(bins)
+        self.linear1 = MultichannelLinear(channels, bins, bins * expansion)
+        self.linear2 = MultichannelLinear(channels, bins * expansion, bins)
         self.dropout3 = nn.Dropout(dropout) if dropout > 0 else nn.Identity()
 
     def __call__(self, x, skip=None):
-        x = x.transpose(2,3)
-        skip = skip.transpose(2,3)
-
         z = self.norm1(x)
         z = self.attn1(z)
-        x = x + self.dropout1(z)
+        x = x + self.dropout1(z.transpose(2,3)).transpose(2,3)
 
         z = self.norm2(x)
         z = self.attn2(z, mem=skip)
-        x = x + self.dropout2(z)
+        x = x + self.dropout2(z.transpose(2,3)).transpose(2,3)
 
         z = self.norm3(x)
         z = self.linear2(torch.square(self.relu(self.linear1(z))))
-        x = x + self.dropout3(z)
+        x = x + self.dropout3(z.transpose(2,3)).transpose(2,3)
 
-        return x.transpose(2,3)
+        return x
