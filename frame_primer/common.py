@@ -7,10 +7,8 @@ import math
 from frame_primer.rotary_embedding_torch import RotaryEmbedding
 
 class MultichannelLinear(nn.Module):
-    def __init__(self, channels, in_features, out_features, transpose=True):
+    def __init__(self, channels, in_features, out_features):
         super(MultichannelLinear, self).__init__()
-
-        self.transpose = transpose
 
         self.weight = nn.Parameter(torch.empty(channels, out_features, in_features))
         self.reset_parameters()
@@ -19,25 +17,7 @@ class MultichannelLinear(nn.Module):
         nn.init.kaiming_uniform_(self.weight, a=math.sqrt(5))
 
     def __call__(self, x):
-        if self.transpose:
-            x = x.transpose(2,3)
-
-        x = torch.matmul(x, self.weight.transpose(1,2))
-
-        if self.transpose:
-            x = x.transpose(2,3)
-
-        return x
-
-class FrameDrop(nn.Module):
-    def __init__(self, p=0.5, inplace=False):
-        super(FrameDrop, self).__init__()
-
-        self.dropout = nn.Dropout2d(p, inplace=inplace)
-
-    def __call__(self, x):
-        b,c,h,w = x.shape
-        return self.dropout(x.reshape(b,c*h,w).unsqueeze(2)).squeeze(2).reshape(b,c,h,w)
+        return torch.matmul(x, self.weight.transpose(1,2))
 
 class FrameNorm(nn.Module):
     def __init__(self, bins):

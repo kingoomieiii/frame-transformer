@@ -1,8 +1,7 @@
 import torch
 from torch import nn
 import torch.nn.functional as F
-import math
-from frame_primer.common import FramePrimerDecoder, FramePrimerEncoder, FrameDecoder, FrameEncoder, FramePrimerEncoder, FramePrimerDecoder
+from frame_primer.common import FramePrimerDecoder, FramePrimerEncoder, FrameDecoder, FrameEncoder
 
 class FramePrimer2(nn.Module):
     def __init__(self, in_channels=2, channels=2, dropout=0.1, n_fft=2048, feedforward_dim=2048, num_res_blocks=1, num_heads=[1, 1, 1, 1, 1, 1], expansion=2):
