@@ -7,14 +7,21 @@ import math
 from frame_primer.rotary_embedding_torch import RotaryEmbedding
 
 class MultichannelLinear(nn.Module):
-    def __init__(self, channels, in_features, out_features):
+    def __init__(self, channels, in_features, out_features, separable=True):
         super(MultichannelLinear, self).__init__()
 
-        self.weight = nn.Parameter(torch.empty(channels, out_features, in_features))
-        nn.init.uniform_(self.weight, a=-1/math.sqrt(in_features), b=1/math.sqrt(in_features))
+        self.separable = separable
+        self.out_features = out_features
+        self.weight = nn.Parameter(torch.empty(channels, out_features, in_features)) if separable else nn.Parameter(torch.empty(out_features * channels, in_features * channels))
+        nn.init.uniform_(self.weight, a=-1/math.sqrt(in_features if separable else in_features * channels), b=1/math.sqrt(in_features if separable else in_features * channels))
 
     def __call__(self, x):
-        return torch.matmul(x.transpose(2,3), self.weight.transpose(1,2)).transpose(2,3)
+        b,c,h,w = x.shape
+
+        if self.separable:
+            return torch.matmul(x.transpose(2,3), self.weight.transpose(1,2)).transpose(2,3)
+        else:
+            return torch.matmul(x.permute(0,3,2,1).reshape(b,w,h*c), self.weight.t()).reshape(b,w,self.out_features,c).permute(0,3,2,1)
 
 class FrameNorm(nn.Module):
     def __init__(self, bins):
