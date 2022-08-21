@@ -11,13 +11,10 @@ class MultichannelLinear(nn.Module):
         super(MultichannelLinear, self).__init__()
 
         self.weight = nn.Parameter(torch.empty(channels, out_features, in_features))
-        self.reset_parameters()
-
-    def reset_parameters(self):
-        nn.init.kaiming_uniform_(self.weight, a=math.sqrt(5))
+        nn.init.uniform_(self.weight, a=-1/math.sqrt(in_features), b=1/math.sqrt(in_features))
 
     def __call__(self, x):
-        return torch.matmul(x, self.weight.transpose(1,2))
+        return torch.matmul(x.transpose(2,3), self.weight.transpose(1,2)).transpose(2,3)
 
 class FrameNorm(nn.Module):
     def __init__(self, bins):
@@ -152,8 +149,6 @@ class FramePrimerEncoder(nn.Module):
                 bins = bins // 2
 
         self.bins = bins
-        self.num_bands = num_heads
-
         self.relu = nn.ReLU(inplace=True)
 
         self.norm1 = FrameNorm(bins)
@@ -186,8 +181,6 @@ class FramePrimerDecoder(nn.Module):
                 bins = bins // 2
 
         self.bins = bins
-        self.num_bands = num_heads
-
         self.relu = nn.ReLU(inplace=True)
 
         self.norm1 = FrameNorm(bins)
@@ -203,7 +196,7 @@ class FramePrimerDecoder(nn.Module):
         self.linear2 = MultichannelLinear(channels, bins * expansion, bins)
         self.dropout3 = nn.Dropout(dropout) if dropout > 0 else nn.Identity()
 
-    def __call__(self, x, skip=None):
+    def __call__(self, x, skip):
         z = self.norm1(x)
         z = self.attn1(z)
         x = x + self.dropout1(z.transpose(2,3)).transpose(2,3)
