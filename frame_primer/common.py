@@ -104,7 +104,7 @@ class FrameDecoder(nn.Module):
         return h
 
 class MultichannelMultiheadAttention(nn.Module):
-    def __init__(self, channels, num_heads, bins, kernel_size=3, padding=1, bias=False, skip=False):
+    def __init__(self, channels, num_heads, bins, kernel_size=3, padding=1, separable=True):
         super().__init__()
 
         self.num_heads = num_heads
@@ -112,15 +112,15 @@ class MultichannelMultiheadAttention(nn.Module):
 
         self.q_proj = nn.Sequential(
             MultichannelLinear(channels, bins, bins),
-            nn.Conv2d(channels, channels, kernel_size=(1, kernel_size), padding=(0, padding), groups=channels))
+            nn.Conv2d(channels, channels, kernel_size=(1, kernel_size), padding=(0, padding), groups=channels if separable else 1))
         
         self.k_proj = nn.Sequential(
             MultichannelLinear(channels, bins, bins),
-            nn.Conv2d(channels, channels, kernel_size=(1, kernel_size), padding=(0, padding), groups=channels))
+            nn.Conv2d(channels, channels, kernel_size=(1, kernel_size), padding=(0, padding), groups=channels if separable else 1))
 
         self.v_proj = nn.Sequential(
             MultichannelLinear(channels, bins, bins),
-            nn.Conv2d(channels, channels, kernel_size=(1, kernel_size), padding=(0, padding), groups=channels))
+            nn.Conv2d(channels, channels, kernel_size=(1, kernel_size), padding=(0, padding), groups=channels if separable else 1))
 
         self.out_proj = MultichannelLinear(channels, bins, bins)
 
