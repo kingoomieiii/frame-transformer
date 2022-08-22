@@ -1,9 +1,5 @@
 import argparse
-from datetime import datetime
-import json
 import logging
-import math
-import os
 import random
 
 import numpy as np
@@ -12,12 +8,12 @@ import torch.nn as nn
 import torch.utils.data
 import wandb
 
-from lib import dataset
 from tqdm import tqdm
 
 from frame_primer.dataset_voxaug import VoxAugDataset
 
 from frame_primer.frame_primer import FramePrimer2
+from frame_primer.frame_transformer import FrameTransformer
 from lib.lr_scheduler_linear_warmup import LinearWarmupScheduler
 from lib.lr_scheduler_polynomial_decay import PolynomialDecayScheduler
 
@@ -40,19 +36,6 @@ def setup_logger(name, logfile='LOGFILENAME.log', out_dir='logs'):
 
     return logger
 
-def mixup(X, Y, alpha=1):
-    indices = torch.randperm(X.size(0))
-    X2 = X[indices]
-    Y2 = Y[indices]
-    alpha = np.full((X.shape[0]), fill_value=alpha)
-    lam = torch.FloatTensor(np.random.beta(alpha, alpha))
-    inv_lam = torch.ones_like(lam) - lam
-    lam = lam.unsqueeze(1).unsqueeze(2).unsqueeze(3).to(X.device)
-    inv_lam = inv_lam.unsqueeze(1).unsqueeze(2).unsqueeze(3).to(X.device)
-    X = X * lam + X2 * inv_lam
-    Y = Y * lam + Y2 * inv_lam
-    return X, Y
-
 def train_epoch(dataloader, model, device, optimizer, accumulation_steps, progress_bar, mixup_rate, mixup_alpha, lr_warmup=None, grad_scaler=None, use_wandb=True):
     model.train()
     sum_loss = 0
@@ -60,6 +43,8 @@ def train_epoch(dataloader, model, device, optimizer, accumulation_steps, progre
     batch_loss = 0
     batch_qloss = 0
     batches = 0
+    
+    model.zero_grad()
 
     pbar = tqdm(dataloader) if progress_bar else dataloader
     for itr, (X_batch, y_batch) in enumerate(pbar):
@@ -168,7 +153,7 @@ def main():
     p.add_argument('--num_bands', type=int, default=16) # going to retitle this to heads, not really bands given the q,k,v projections
     p.add_argument('--feedforward_dim', type=int, default=12288) # probabably an absurd feedforward dim, however a large feedforward dim was talked about in the primer paper as being useful (I think it was 7x there)
     p.add_argument('--feedforward_expansion', type=int, default=12)
-    p.add_argument('--bias', type=str, default='true')
+    p.add_argument('--bias', type=str, default='false')
     p.add_argument('--dropout', type=float, default=0.1)
 
     p.add_argument('--cropsizes', type=str, default='512,1024,2048')
@@ -184,7 +169,7 @@ def main():
     p.add_argument('--epoch', '-E', type=int, default=60)
     p.add_argument('--epoch_size', type=int, default=None)
     p.add_argument('--learning_rate', '-l', type=float, default=1e-4)
-    p.add_argument('--lr_scheduler_decay_target', type=int, default=1e-10)
+    p.add_argument('--lr_scheduler_decay_target', type=int, default=1e-12)
     p.add_argument('--lr_scheduler_decay_power', type=float, default=1.0)
     p.add_argument('--progress_bar', '-pb', type=str, default='true')
     p.add_argument('--force_voxaug', type=str, default='false')
@@ -254,7 +239,7 @@ def main():
 
     device = torch.device('cpu')
     
-    model = FramePrimer2(channels=args.channels, feedforward_dim=args.feedforward_dim, n_fft=args.n_fft, dropout=args.dropout, num_res_blocks=args.num_res_blocks)
+    model = FrameTransformer(channels=args.channels, n_fft=args.n_fft, dropout=args.dropout, expansion=args.feedforward_expansion)
 
     if args.pretrained_model is not None:
         model.load_state_dict(torch.load(args.pretrained_model, map_location=device))

@@ -169,14 +169,13 @@ class FrameDecoder2(nn.Module):
             for _ in range(downsamples):
                 bins = bins // 2
 
-        self.upsample = MultichannelLinear2(in_channels, in_channels, bins, bins * 2) if upsample else nn.Identity()
+        self.upsample = MultichannelLinear2(in_channels, in_channels, bins // 2, bins) if upsample else nn.Identity()
 
         self.norm = FrameNorm(bins)
         self.gelu = nn.GELU()
         self.linear1 = MultichannelLinear2(in_channels + out_channels, out_channels, bins, bins * expansion)
         self.linear2 = MultichannelLinear2(out_channels, out_channels, bins * expansion, bins)
         self.identity = MultichannelLinear2(in_channels + out_channels, out_channels, bins, bins, skip_redundant=True)
-        self.upsample = nn.Upsample(scale_factor=(2,1), mode='bilinear', align_corners=True) if upsample else nn.Identity()
 
     def __call__(self, x, skip=None):
         x = self.upsample(x)
@@ -191,7 +190,7 @@ class FrameDecoder2(nn.Module):
             
         return h
 
-class MultichannelMultiheadAttention(nn.Module):
+class MultichannelMultiheadDconvAttention(nn.Module):
     def __init__(self, channels, num_heads, bins, kernel_size=3, padding=1, separable=True):
         super().__init__()
 
@@ -199,18 +198,44 @@ class MultichannelMultiheadAttention(nn.Module):
         self.rotary_embedding = RotaryEmbedding(dim = bins // num_heads // 2, freqs_for='lang')
 
         self.q_proj = nn.Sequential(
-            MultichannelLinear(channels, bins, bins, separable=separable),
-            nn.Conv2d(channels, channels, kernel_size=(1, kernel_size), padding=(0, padding)))
-        
+            MultichannelLinear2(channels, channels, bins, bins, separable=separable),
+            nn.Conv2d(channels, channels, kernel_size=(1, kernel_size), padding=(0, padding), bias=False))
+            
         self.k_proj = nn.Sequential(
-            MultichannelLinear(channels, bins, bins, separable=separable),
-            nn.Conv2d(channels, channels, kernel_size=(1, kernel_size), padding=(0, padding)))
+            MultichannelLinear2(channels, channels, bins, bins, separable=separable),
+            nn.Conv2d(channels, channels, kernel_size=(1, kernel_size), padding=(0, padding), bias=False))
 
         self.v_proj = nn.Sequential(
-            MultichannelLinear(channels, bins, bins, separable=separable),
-            nn.Conv2d(channels, channels, kernel_size=(1, kernel_size), padding=(0, padding)))
+            MultichannelLinear2(channels, channels, bins, bins, separable=separable),
+            nn.Conv2d(channels, channels, kernel_size=(1, kernel_size), padding=(0, padding), bias=False))
 
-        self.out_proj = MultichannelLinear(channels, bins, bins, separable=separable)
+        self.out_proj = MultichannelLinear2(channels, channels, bins, bins, separable=separable)
+
+    def forward(self, x, mem=None):
+        b,c,h,w = x.shape
+
+        q = self.rotary_embedding.rotate_queries_or_keys(self.q_proj(x).transpose(2,3).reshape(b,c,w,self.num_heads,-1).permute(0,1,3,2,4)).contiguous()
+        k = self.rotary_embedding.rotate_queries_or_keys(self.q_proj(x if mem is None else mem).transpose(2,3).reshape(b,c,w,self.num_heads,-1).permute(0,1,3,2,4)).transpose(3,4).contiguous()
+        v = self.q_proj(x if mem is None else mem).transpose(2,3).reshape(b,c,w,self.num_heads,-1).permute(0,1,3,2,4).contiguous()
+
+        with torch.cuda.amp.autocast_mode.autocast(enabled=False):
+            qk = torch.matmul(q,k) / math.sqrt(h)
+            a = torch.matmul(F.softmax(qk, dim=-1),v).transpose(2,3).reshape(b,c,w,-1).transpose(2,3).contiguous()
+                
+        x = self.out_proj(a)
+
+        return x
+
+class MultichannelMultiheadAttention(nn.Module):
+    def __init__(self, channels, num_heads, bins, kernel_size=3, padding=1, separable=True):
+        super().__init__()
+
+        self.num_heads = num_heads
+        self.rotary_embedding = RotaryEmbedding(dim = bins // num_heads // 2, freqs_for='lang')
+        self.q_proj = MultichannelLinear2(channels, channels, bins, bins, separable=separable)
+        self.k_proj = MultichannelLinear2(channels, channels, bins, bins, separable=separable)
+        self.v_proj = MultichannelLinear2(channels, channels, bins, bins, separable=separable)
+        self.out_proj = MultichannelLinear2(channels, channels, bins, bins, separable=separable)
 
     def forward(self, x, mem=None):
         b,c,h,w = x.shape
@@ -309,7 +334,7 @@ class FramePrimerEncoder2(nn.Module):
                 bins = bins // 2
 
         self.bins = bins
-        self.relu = nn.ReLU(inplace=True)
+        self.gelu = nn.GELU()
 
         self.norm1 = FrameNorm(bins)
         self.attn = MultichannelMultiheadAttention(channels, num_heads, bins, kernel_size=kernel_size, padding=padding)
@@ -326,7 +351,7 @@ class FramePrimerEncoder2(nn.Module):
         x = x + self.dropout1(z.transpose(2,3)).transpose(2,3)
 
         z = self.norm2(x)
-        z = self.linear2(torch.square(self.relu(self.linear1(z))))
+        z = self.linear2(self.gelu(self.linear1(z)))
         x = x + self.dropout2(z.transpose(2,3)).transpose(2,3)
 
         return x
@@ -341,7 +366,7 @@ class FramePrimerDecoder2(nn.Module):
                 bins = bins // 2
 
         self.bins = bins
-        self.relu = nn.ReLU(inplace=True)
+        self.gelu = nn.GELU()
 
         self.norm1 = FrameNorm(bins)
         self.attn1 = MultichannelMultiheadAttention(channels, num_heads, bins, kernel_size=kernel_size, padding=padding)
@@ -366,7 +391,7 @@ class FramePrimerDecoder2(nn.Module):
         x = x + self.dropout2(z.transpose(2,3)).transpose(2,3)
 
         z = self.norm3(x)
-        z = self.linear2(torch.square(self.relu(self.linear1(z))))
+        z = self.linear2(self.gelu(self.linear1(z)))
         x = x + self.dropout3(z.transpose(2,3)).transpose(2,3)
 
         return x
