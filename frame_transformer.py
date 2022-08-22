@@ -103,7 +103,7 @@ class FrameEncoder(nn.Module):
         self.gelu = nn.GELU()
         self.norm = FrameNorm(features)
         self.linear1 = MultichannelLinear(in_channels, out_channels, features, features * expansion)
-        self.linear2 = MultichannelLinear(out_channels, out_channels, features * expansion, features // 2 if downsample else features)
+        self.linear2 = MultichannelLinear(out_channels, out_channels, features * expansion, features // 2 if downsample else features, skip_redundant=True)
         self.identity = MultichannelLinear(in_channels, out_channels, features, features // 2 if downsample else features, skip_redundant=True)
 
     def __call__(self, x):
@@ -114,7 +114,7 @@ class FrameEncoder(nn.Module):
         return h
 
 class FrameDecoder(nn.Module):
-    def __init__(self, in_channels, out_channels, features, upsample=True, expansion=2):
+    def __init__(self, in_channels, out_channels, features, upsample=True, expansion=1):
         super(FrameDecoder, self).__init__()
 
         self.upsample = MultichannelLinear(in_channels, in_channels, features // 2, features) if upsample else nn.Identity()
@@ -122,7 +122,7 @@ class FrameDecoder(nn.Module):
         self.gelu = nn.GELU()
         self.norm = FrameNorm(features)
         self.linear1 = MultichannelLinear(in_channels + out_channels, out_channels, features, features * expansion)
-        self.linear2 = MultichannelLinear(out_channels, out_channels, features * expansion, features)
+        self.linear2 = MultichannelLinear(out_channels, out_channels, features * expansion, features, skip_redundant=True)
         self.identity = MultichannelLinear(in_channels + out_channels, out_channels, features, features, skip_redundant=True)
 
     def __call__(self, x, skip=None):
