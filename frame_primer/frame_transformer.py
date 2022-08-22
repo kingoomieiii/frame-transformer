@@ -88,23 +88,23 @@ class MultichannelLinear(nn.Module):
         return x
 
 class FrameNorm(nn.Module):
-    def __init__(self, bins):
+    def __init__(self, features):
         super(FrameNorm, self).__init__()
 
-        self.norm = nn.LayerNorm(bins)
+        self.norm = nn.LayerNorm(features)
 
     def __call__(self, x):
         return self.norm(x.transpose(2,3)).transpose(2,3)
 
 class FrameEncoder(nn.Module):
-    def __init__(self, in_channels, out_channels, bins, downsample=True, expansion=1):
+    def __init__(self, in_channels, out_channels, features, downsample=True, expansion=1):
         super(FrameEncoder, self).__init__()
 
         self.gelu = nn.GELU()
-        self.norm = FrameNorm(bins)
-        self.linear1 = MultichannelLinear(in_channels, out_channels, bins, bins * expansion)
-        self.linear2 = MultichannelLinear(out_channels, out_channels, bins * expansion, bins // 2 if downsample else bins)
-        self.identity = MultichannelLinear(in_channels, out_channels, bins, bins // 2 if downsample else bins, skip_redundant=True)
+        self.norm = FrameNorm(features)
+        self.linear1 = MultichannelLinear(in_channels, out_channels, features, features * expansion)
+        self.linear2 = MultichannelLinear(out_channels, out_channels, features * expansion, features // 2 if downsample else features)
+        self.identity = MultichannelLinear(in_channels, out_channels, features, features // 2 if downsample else features, skip_redundant=True)
 
     def __call__(self, x):
         h = self.norm(x)
@@ -114,16 +114,16 @@ class FrameEncoder(nn.Module):
         return h
 
 class FrameDecoder(nn.Module):
-    def __init__(self, in_channels, out_channels, bins, upsample=True, expansion=2):
+    def __init__(self, in_channels, out_channels, features, upsample=True, expansion=2):
         super(FrameDecoder, self).__init__()
 
-        self.upsample = MultichannelLinear(in_channels, in_channels, bins // 2, bins) if upsample else nn.Identity()
+        self.upsample = MultichannelLinear(in_channels, in_channels, features // 2, features) if upsample else nn.Identity()
 
         self.gelu = nn.GELU()
-        self.norm = FrameNorm(bins)
-        self.linear1 = MultichannelLinear(in_channels + out_channels, out_channels, bins, bins * expansion)
-        self.linear2 = MultichannelLinear(out_channels, out_channels, bins * expansion, bins)
-        self.identity = MultichannelLinear(in_channels + out_channels, out_channels, bins, bins, skip_redundant=True)
+        self.norm = FrameNorm(features)
+        self.linear1 = MultichannelLinear(in_channels + out_channels, out_channels, features, features * expansion)
+        self.linear2 = MultichannelLinear(out_channels, out_channels, features * expansion, features)
+        self.identity = MultichannelLinear(in_channels + out_channels, out_channels, features, features, skip_redundant=True)
 
     def __call__(self, x, skip=None):
         x = self.upsample(x)
@@ -138,15 +138,15 @@ class FrameDecoder(nn.Module):
         return h
 
 class MultichannelMultiheadAttention(nn.Module):
-    def __init__(self, channels, num_heads, bins):
+    def __init__(self, channels, num_heads, features):
         super().__init__()
 
         self.num_heads = num_heads
-        self.rotary_embedding = RotaryEmbedding(dim = bins // num_heads // 2, learned_freq=True, freqs_for='pixel')
-        self.q_proj = MultichannelLinear(channels, channels, bins, bins, depthwise=False)
-        self.k_proj = MultichannelLinear(channels, channels, bins, bins, depthwise=False)
-        self.v_proj = MultichannelLinear(channels, channels, bins, bins, depthwise=False)
-        self.out_proj = MultichannelLinear(channels, channels, bins, bins, depthwise=False)
+        self.rotary_embedding = RotaryEmbedding(dim = features // num_heads // 2, learned_freq=True, freqs_for='pixel')
+        self.q_proj = MultichannelLinear(channels, channels, features, features, depthwise=False)
+        self.k_proj = MultichannelLinear(channels, channels, features, features, depthwise=False)
+        self.v_proj = MultichannelLinear(channels, channels, features, features, depthwise=False)
+        self.out_proj = MultichannelLinear(channels, channels, features, features, depthwise=False)
 
     def forward(self, x, mem=None):
         b,c,h,w = x.shape
@@ -164,18 +164,18 @@ class MultichannelMultiheadAttention(nn.Module):
         return x
 
 class FrameTransformerEncoder(nn.Module):
-    def __init__(self, channels, bins, num_heads=4, dropout=0.1, expansion=4):
+    def __init__(self, channels, features, num_heads=4, dropout=0.1, expansion=4):
         super(FrameTransformerEncoder, self).__init__()
 
         self.gelu = nn.GELU()
 
-        self.norm1 = FrameNorm(bins)
-        self.attn = MultichannelMultiheadAttention(channels, num_heads, bins)
+        self.norm1 = FrameNorm(features)
+        self.attn = MultichannelMultiheadAttention(channels, num_heads, features)
         self.dropout1 = nn.Dropout(dropout) if dropout > 0 else nn.Identity()
 
-        self.norm2 = FrameNorm(bins)
-        self.linear1 = MultichannelLinear(channels, channels, bins, bins * expansion, skip_redundant=True)
-        self.linear2 = MultichannelLinear(channels, channels, bins * expansion, bins, skip_redundant=True)
+        self.norm2 = FrameNorm(features)
+        self.linear1 = MultichannelLinear(channels, channels, features, features * expansion, skip_redundant=True)
+        self.linear2 = MultichannelLinear(channels, channels, features * expansion, features, skip_redundant=True)
         self.dropout2 = nn.Dropout(dropout) if dropout > 0 else nn.Identity()
         
     def __call__(self, x):
@@ -190,22 +190,22 @@ class FrameTransformerEncoder(nn.Module):
         return x
 
 class FrameTransformerDecoder(nn.Module):
-    def __init__(self, channels, bins, num_heads=4, dropout=0.1, expansion=4):
+    def __init__(self, channels, features, num_heads=4, dropout=0.1, expansion=4):
         super(FrameTransformerDecoder, self).__init__()
 
         self.gelu = nn.GELU()
 
-        self.norm1 = FrameNorm(bins)
-        self.attn1 = MultichannelMultiheadAttention(channels, num_heads, bins)
+        self.norm1 = FrameNorm(features)
+        self.attn1 = MultichannelMultiheadAttention(channels, num_heads, features)
         self.dropout1 = nn.Dropout(dropout) if dropout > 0 else nn.Identity()
 
-        self.norm2 = FrameNorm(bins)
-        self.attn2 = MultichannelMultiheadAttention(channels, num_heads, bins)
+        self.norm2 = FrameNorm(features)
+        self.attn2 = MultichannelMultiheadAttention(channels, num_heads, features)
         self.dropout2 = nn.Dropout(dropout) if dropout > 0 else nn.Identity()
 
-        self.norm3 = FrameNorm(bins)
-        self.linear1 = MultichannelLinear(channels, channels, bins, bins * expansion, skip_redundant=True)
-        self.linear2 = MultichannelLinear(channels, channels, bins * expansion, bins, skip_redundant=True)
+        self.norm3 = FrameNorm(features)
+        self.linear1 = MultichannelLinear(channels, channels, features, features * expansion, skip_redundant=True)
+        self.linear2 = MultichannelLinear(channels, channels, features * expansion, features, skip_redundant=True)
         self.dropout3 = nn.Dropout(dropout) if dropout > 0 else nn.Identity()
 
     def __call__(self, x, skip):
