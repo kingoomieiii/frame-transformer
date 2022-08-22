@@ -78,7 +78,7 @@ class FrameNorm(nn.Module):
             return self.norm(x.transpose(1,3)).transpose(1,3)
 
 class MultichannelLinear(nn.Module):
-    def __init__(self, in_channels, out_channels, in_features, out_features, skip_redundant=False):
+    def __init__(self, in_channels, out_channels, in_features, out_features, skip_redundant=False, depthwise=True):
         super(MultichannelLinear, self).__init__()
 
         self.weight_pw = None
@@ -87,7 +87,7 @@ class MultichannelLinear(nn.Module):
             nn.init.uniform_(self.weight_pw, a=-1/math.sqrt(in_features), b=1/math.sqrt(in_features))
 
         self.weight_dw = None
-        if in_channels != out_channels or not skip_redundant:
+        if in_channels != out_channels or (depthwise and not skip_redundant):
             self.weight_dw = nn.Parameter(torch.empty(out_channels, in_channels))
             nn.init.uniform_(self.weight_dw, a=-1/math.sqrt(in_channels), b=1/math.sqrt(in_channels))
 
@@ -106,10 +106,10 @@ class MultichannelMultiheadAttention(nn.Module):
 
         self.num_heads = num_heads
         self.rotary_embedding = RotaryEmbedding(dim = bins // num_heads // 2)
-        self.q_proj = MultichannelLinear(channels, channels, bins, bins)
-        self.k_proj = MultichannelLinear(channels, channels, bins, bins)
-        self.v_proj = MultichannelLinear(channels, channels, bins, bins)
-        self.out_proj = MultichannelLinear(channels, channels, bins, bins)
+        self.q_proj = MultichannelLinear(channels, channels, bins, bins, depthwise=False)
+        self.k_proj = MultichannelLinear(channels, channels, bins, bins, depthwise=False)
+        self.v_proj = MultichannelLinear(channels, channels, bins, bins, depthwise=False)
+        self.out_proj = MultichannelLinear(channels, channels, bins, bins, depthwise=False)
 
     def forward(self, x, mem=None):
         b,c,h,w = x.shape
