@@ -54,7 +54,6 @@ class FrameTransformer(nn.Module):
         e4 = self.enc4_transformer(self.enc4(e3))
         e5 = self.enc5_transformer(self.enc5(e4))
         e6 = self.enc6_transformer(self.enc6(e5))
-
         d5 = self.dec5_transformer(self.dec5(e6, e5), e5)
         d4 = self.dec4_transformer(self.dec4(d5, e4), e4)
         d3 = self.dec3_transformer(self.dec3(d4, e3), e3)
@@ -64,18 +63,6 @@ class FrameTransformer(nn.Module):
         out = torch.matmul(d1.transpose(1,3), self.out.t()).transpose(1,3)
         
         return out
-
-class FrameNorm(nn.Module):
-    def __init__(self, bins, channels=None):
-        super(FrameNorm, self).__init__()
-
-        self.norm = nn.LayerNorm((bins, channels)) if channels is not None else nn.LayerNorm(bins)
-
-    def __call__(self, x):
-        if len(self.norm.weight.shape) == 1:
-            return self.norm(x.transpose(2,3)).transpose(2,3)
-        else:
-            return self.norm(x.transpose(1,3)).transpose(1,3)
 
 class MultichannelLinear(nn.Module):
     def __init__(self, in_channels, out_channels, in_features, out_features, skip_redundant=False, depthwise=True):
@@ -100,31 +87,17 @@ class MultichannelLinear(nn.Module):
         
         return x
 
-class MultichannelMultiheadAttention(nn.Module):
-    def __init__(self, channels, num_heads, bins):
-        super().__init__()
+class FrameNorm(nn.Module):
+    def __init__(self, bins, channels=None):
+        super(FrameNorm, self).__init__()
 
-        self.num_heads = num_heads
-        self.rotary_embedding = RotaryEmbedding(dim = bins // num_heads // 2)
-        self.q_proj = MultichannelLinear(channels, channels, bins, bins, depthwise=False)
-        self.k_proj = MultichannelLinear(channels, channels, bins, bins, depthwise=False)
-        self.v_proj = MultichannelLinear(channels, channels, bins, bins, depthwise=False)
-        self.out_proj = MultichannelLinear(channels, channels, bins, bins, depthwise=False)
+        self.norm = nn.LayerNorm((bins, channels)) if channels is not None else nn.LayerNorm(bins)
 
-    def forward(self, x, mem=None):
-        b,c,h,w = x.shape
-
-        q = self.rotary_embedding.rotate_queries_or_keys(self.q_proj(x).transpose(2,3).reshape(b,c,w,self.num_heads,-1).permute(0,1,3,2,4)).contiguous()
-        k = self.rotary_embedding.rotate_queries_or_keys(self.q_proj(x if mem is None else mem).transpose(2,3).reshape(b,c,w,self.num_heads,-1).permute(0,1,3,2,4)).transpose(3,4).contiguous()
-        v = self.q_proj(x if mem is None else mem).transpose(2,3).reshape(b,c,w,self.num_heads,-1).permute(0,1,3,2,4).contiguous()
-
-        with torch.cuda.amp.autocast_mode.autocast(enabled=False):
-            qk = torch.matmul(q,k) / math.sqrt(h)
-            a = torch.matmul(F.softmax(qk, dim=-1),v).transpose(2,3).reshape(b,c,w,-1).transpose(2,3).contiguous()
-                
-        x = self.out_proj(a)
-
-        return x
+    def __call__(self, x):
+        if len(self.norm.weight.shape) == 1:
+            return self.norm(x.transpose(2,3)).transpose(2,3)
+        else:
+            return self.norm(x.transpose(1,3)).transpose(1,3)
 
 class FrameEncoder(nn.Module):
     def __init__(self, in_channels, out_channels, downsample=True, downsamples=0, n_fft=2048, expansion=1):
@@ -135,8 +108,8 @@ class FrameEncoder(nn.Module):
             for _ in range(downsamples):
                 bins = bins // 2
 
-        self.norm = FrameNorm(bins)
         self.gelu = nn.GELU()
+        self.norm = FrameNorm(bins)
         self.linear1 = MultichannelLinear(in_channels, out_channels, bins, bins * expansion)
         self.linear2 = MultichannelLinear(out_channels, out_channels, bins * expansion, bins // 2 if downsample else bins)
         self.identity = MultichannelLinear(in_channels, out_channels, bins, bins // 2 if downsample else bins, skip_redundant=True)
@@ -176,6 +149,32 @@ class FrameDecoder(nn.Module):
         h = h + self.identity(x)
             
         return h
+
+class MultichannelMultiheadAttention(nn.Module):
+    def __init__(self, channels, num_heads, bins):
+        super().__init__()
+
+        self.num_heads = num_heads
+        self.rotary_embedding = RotaryEmbedding(dim = bins // num_heads // 2, learned_freq=True, freqs_for='pixel')
+        self.q_proj = MultichannelLinear(channels, channels, bins, bins, depthwise=False)
+        self.k_proj = MultichannelLinear(channels, channels, bins, bins, depthwise=False)
+        self.v_proj = MultichannelLinear(channels, channels, bins, bins, depthwise=False)
+        self.out_proj = MultichannelLinear(channels, channels, bins, bins, depthwise=False)
+
+    def forward(self, x, mem=None):
+        b,c,h,w = x.shape
+
+        q = self.rotary_embedding.rotate_queries_or_keys(self.q_proj(x).transpose(2,3).reshape(b,c,w,self.num_heads,-1).permute(0,1,3,2,4)).contiguous()
+        k = self.rotary_embedding.rotate_queries_or_keys(self.q_proj(x if mem is None else mem).transpose(2,3).reshape(b,c,w,self.num_heads,-1).permute(0,1,3,2,4)).transpose(3,4).contiguous()
+        v = self.q_proj(x if mem is None else mem).transpose(2,3).reshape(b,c,w,self.num_heads,-1).permute(0,1,3,2,4).contiguous()
+
+        with torch.cuda.amp.autocast_mode.autocast(enabled=False):
+            qk = torch.matmul(q,k) / math.sqrt(h)
+            a = torch.matmul(F.softmax(qk, dim=-1),v).transpose(2,3).reshape(b,c,w,-1).transpose(2,3).contiguous()
+                
+        x = self.out_proj(a)
+
+        return x
 
 class FrameTransformerEncoder(nn.Module):
     def __init__(self, channels, num_heads=4, dropout=0.1, downsamples=0, n_fft=2048, expansion=4):
