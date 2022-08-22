@@ -169,11 +169,13 @@ class FrameDecoder2(nn.Module):
             for _ in range(downsamples):
                 bins = bins // 2
 
+        self.upsample = MultichannelLinear2(in_channels, in_channels, bins, bins * 2) if upsample else nn.Identity()
+
         self.norm = FrameNorm(bins)
         self.gelu = nn.GELU()
-        self.linear1 = MultichannelLinear2(in_channels, out_channels, bins, bins * expansion)
+        self.linear1 = MultichannelLinear2(in_channels + out_channels, out_channels, bins, bins * expansion)
         self.linear2 = MultichannelLinear2(out_channels, out_channels, bins * expansion, bins)
-        self.identity = MultichannelLinear2(in_channels, out_channels, bins, bins, skip_redundant=True)
+        self.identity = MultichannelLinear2(in_channels + out_channels, out_channels, bins, bins, skip_redundant=True)
         self.upsample = nn.Upsample(scale_factor=(2,1), mode='bilinear', align_corners=True) if upsample else nn.Identity()
 
     def __call__(self, x, skip=None):
@@ -349,7 +351,7 @@ class FramePrimerDecoder2(nn.Module):
         self.attn2 = MultichannelMultiheadAttention(channels, num_heads, bins, kernel_size=kernel_size, padding=padding)
         self.dropout2 = nn.Dropout(dropout) if dropout > 0 else nn.Identity()
 
-        self.norm3 = FrameNorm(bins, channels)
+        self.norm3 = FrameNorm(bins)
         self.linear1 = MultichannelLinear2(channels, channels, bins, bins * expansion, skip_redundant=True)
         self.linear2 = MultichannelLinear2(channels, channels, bins * expansion, bins, skip_redundant=True)
         self.dropout3 = nn.Dropout(dropout) if dropout > 0 else nn.Identity()

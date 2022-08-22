@@ -87,19 +87,19 @@ class FramePrimer3(nn.Module):
         self.enc6 = FrameEncoder2(channels * 8, channels * 16, n_fft=n_fft, downsamples=4)
         self.enc6_primer = FramePrimerEncoder2(channels * 16, num_heads=num_heads[5], n_fft=n_fft, downsamples=5, dropout=dropout, expansion=expansion)
 
-        self.dec5 = FrameDecoder2(channels * (16 + 8), channels * 8, n_fft=n_fft, downsamples=4)
+        self.dec5 = FrameDecoder2(channels * 16, channels * 8, n_fft=n_fft, downsamples=4)
         self.dec5_primer = FramePrimerDecoder2(channels * 8, num_heads=num_heads[4], n_fft=n_fft, downsamples=4, dropout=dropout, expansion=expansion)
 
-        self.dec4 = FrameDecoder2(channels * (8 + 6), channels * 6, n_fft=n_fft, downsamples=3)
+        self.dec4 = FrameDecoder2(channels * 8, channels * 6, n_fft=n_fft, downsamples=3)
         self.dec4_primer = FramePrimerDecoder2(channels * 6, num_heads=num_heads[3], n_fft=n_fft, downsamples=3, dropout=dropout, expansion=expansion)
 
-        self.dec3 = FrameDecoder2(channels * (6 + 4), channels * 4, n_fft=n_fft, downsamples=2)
+        self.dec3 = FrameDecoder2(channels * 6, channels * 4, n_fft=n_fft, downsamples=2)
         self.dec3_primer = FramePrimerDecoder2(channels * 4, num_heads=num_heads[2], n_fft=n_fft, downsamples=2, dropout=dropout, expansion=expansion)
 
-        self.dec2 = FrameDecoder2(channels * (4 + 2), channels * 2, n_fft=n_fft, downsamples=1)
+        self.dec2 = FrameDecoder2(channels * 4, channels * 2, n_fft=n_fft, downsamples=1)
         self.dec2_primer = FramePrimerDecoder2(channels * 2, num_heads=num_heads[1], n_fft=n_fft, downsamples=1, dropout=dropout, expansion=expansion)
 
-        self.dec1 = FrameDecoder2(channels * (2 + 1), channels * 1, n_fft=n_fft, downsamples=0)
+        self.dec1 = FrameDecoder2(channels * 2, channels * 1, n_fft=n_fft, downsamples=0)
         self.dec1_primer = FramePrimerDecoder2(channels * 1, num_heads=num_heads[0], n_fft=n_fft, downsamples=0, dropout=dropout, expansion=expansion)
 
         self.out = nn.Parameter(torch.empty(in_channels, channels))
