@@ -143,7 +143,6 @@ class FrameEncoder(nn.Module):
 
     def __call__(self, x):
         h = self.norm(x)
-        h = self.gelu(h)
         h = self.linear2(self.gelu(self.linear1(h)))
         h = h + self.identity(x)
         
@@ -160,8 +159,8 @@ class FrameDecoder(nn.Module):
 
         self.upsample = MultichannelLinear(in_channels, in_channels, bins // 2, bins) if upsample else nn.Identity()
 
-        self.norm = FrameNorm(bins)
         self.gelu = nn.GELU()
+        self.norm = FrameNorm(bins)
         self.linear1 = MultichannelLinear(in_channels + out_channels, out_channels, bins, bins * expansion)
         self.linear2 = MultichannelLinear(out_channels, out_channels, bins * expansion, bins)
         self.identity = MultichannelLinear(in_channels + out_channels, out_channels, bins, bins, skip_redundant=True)
@@ -173,7 +172,6 @@ class FrameDecoder(nn.Module):
             x = torch.cat((x, skip), dim=1)
 
         h = self.norm(x)
-        h = self.gelu(h)
         h = self.linear2(self.gelu(self.linear1(h)))
         h = h + self.identity(x)
             
