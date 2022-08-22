@@ -81,22 +81,22 @@ class MultichannelLinear(nn.Module):
     def __init__(self, in_channels, out_channels, in_features, out_features, skip_redundant=False):
         super(MultichannelLinear, self).__init__()
 
-        self.weight_frame = None
+        self.weight_pw = None
         if in_features != out_features or not skip_redundant:
-            self.weight_frame = nn.Parameter(torch.empty(out_channels, out_features, in_features))
-            nn.init.uniform_(self.weight_frame, a=-1/math.sqrt(in_features), b=1/math.sqrt(in_features))
+            self.weight_pw = nn.Parameter(torch.empty(out_channels, out_features, in_features))
+            nn.init.uniform_(self.weight_pw, a=-1/math.sqrt(in_features), b=1/math.sqrt(in_features))
 
-        self.weight_depthwise = None
+        self.weight_dw = None
         if in_channels != out_channels or not skip_redundant:
-            self.weight_depthwise = nn.Parameter(torch.empty(out_channels, in_channels))
-            nn.init.uniform_(self.weight_depthwise, a=-1/math.sqrt(in_channels), b=1/math.sqrt(out_channels))
+            self.weight_dw = nn.Parameter(torch.empty(out_channels, in_channels))
+            nn.init.uniform_(self.weight_dw, a=-1/math.sqrt(in_channels), b=1/math.sqrt(in_channels))
 
     def __call__(self, x):
-        if self.weight_depthwise is not None:
-            x = torch.matmul(x.transpose(1,3), self.weight_depthwise.t()).transpose(1,3)
+        if self.weight_dw is not None:
+            x = torch.matmul(x.transpose(1,3), self.weight_dw.t()).transpose(1,3)
         
-        if self.weight_frame is not None:
-            x = torch.matmul(x.transpose(2,3), self.weight_frame.transpose(1,2)).transpose(2,3)
+        if self.weight_pw is not None:
+            x = torch.matmul(x.transpose(2,3), self.weight_pw.transpose(1,2)).transpose(2,3)
         
         return x
 
