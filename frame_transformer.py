@@ -5,7 +5,7 @@ import torch.nn.functional as F
 from frame_primer.rotary_embedding_torch import RotaryEmbedding
 
 class FrameTransformer(nn.Module):
-    def __init__(self, in_channels=2, channels=2, dropout=0.1, n_fft=2048, num_heads=[16, 16, 16, 16, 8, 4], expansion=16):
+    def __init__(self, in_channels=2, channels=2, dropout=0.1, n_fft=2048, num_heads=[4, 4, 4, 4, 4, 4], expansion=2):
         super(FrameTransformer, self).__init__()
         
         self.max_bin = n_fft // 2
@@ -97,24 +97,24 @@ class FrameNorm(nn.Module):
         return self.norm(x.transpose(2,3)).transpose(2,3)
 
 class FrameEncoder(nn.Module):
-    def __init__(self, in_channels, out_channels, features, downsample=True, expansion=1):
+    def __init__(self, in_channels, out_channels, features, downsample=True, expansion=2):
         super(FrameEncoder, self).__init__()
 
         self.gelu = nn.GELU()
         self.norm = FrameNorm(features)
         self.linear1 = MultichannelLinear(in_channels, out_channels, features, features * expansion)
-        self.linear2 = MultichannelLinear(out_channels, out_channels, features * expansion, features // 2 if downsample else features, skip_redundant=True)
+        self.linear2 = MultichannelLinear(out_channels, out_channels, features * expansion, features // 2 if downsample else features)
         self.identity = MultichannelLinear(in_channels, out_channels, features, features // 2 if downsample else features, skip_redundant=True)
 
     def __call__(self, x):
-        h = self.norm(x)
+        h = self.gelu(self.norm(x))
         h = self.linear2(self.gelu(self.linear1(h)))
         h = h + self.identity(x)
         
         return h
 
 class FrameDecoder(nn.Module):
-    def __init__(self, in_channels, out_channels, features, upsample=True, expansion=1):
+    def __init__(self, in_channels, out_channels, features, upsample=True, expansion=2):
         super(FrameDecoder, self).__init__()
 
         self.upsample = MultichannelLinear(in_channels, in_channels, features // 2, features) if upsample else nn.Identity()
@@ -122,7 +122,7 @@ class FrameDecoder(nn.Module):
         self.gelu = nn.GELU()
         self.norm = FrameNorm(features)
         self.linear1 = MultichannelLinear(in_channels + out_channels, out_channels, features, features * expansion)
-        self.linear2 = MultichannelLinear(out_channels, out_channels, features * expansion, features, skip_redundant=True)
+        self.linear2 = MultichannelLinear(out_channels, out_channels, features * expansion, features)
         self.identity = MultichannelLinear(in_channels + out_channels, out_channels, features, features, skip_redundant=True)
 
     def __call__(self, x, skip=None):
@@ -131,7 +131,7 @@ class FrameDecoder(nn.Module):
         if skip is not None:
             x = torch.cat((x, skip), dim=1)
 
-        h = self.norm(x)
+        h = self.gelu(self.norm(x))
         h = self.linear2(self.gelu(self.linear1(h)))
         h = h + self.identity(x)
             
@@ -142,7 +142,7 @@ class MultichannelMultiheadAttention(nn.Module):
         super().__init__()
 
         self.num_heads = num_heads
-        self.rotary_embedding = RotaryEmbedding(dim = features // num_heads // 2, learned_freq=True, freqs_for='pixel')
+        self.rotary_embedding = RotaryEmbedding(dim = features // num_heads // 2)
         self.q_proj = MultichannelLinear(channels, channels, features, features, depthwise=False)
         self.k_proj = MultichannelLinear(channels, channels, features, features, depthwise=False)
         self.v_proj = MultichannelLinear(channels, channels, features, features, depthwise=False)
