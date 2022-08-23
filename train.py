@@ -13,7 +13,7 @@ from tqdm import tqdm
 from frame_primer.dataset_voxaug import VoxAugDataset
 
 from frame_primer.frame_primer import FramePrimer2
-from frame_primer.frame_transformer import FrameTransformer
+from frame_transformer import FrameTransformer
 from lib.lr_scheduler_linear_warmup import LinearWarmupScheduler
 from lib.lr_scheduler_polynomial_decay import PolynomialDecayScheduler
 
@@ -157,7 +157,7 @@ def main():
     p.add_argument('--dropout', type=float, default=0.1)
 
     p.add_argument('--cropsizes', type=str, default='512,1024,2048')
-    p.add_argument('--epochs', type=str, default='24,50,24')
+    p.add_argument('--epochs', type=str, default='24,50,30')
     p.add_argument('--batch_sizes', type=str, default='1,2,1')
     p.add_argument('--accumulation_steps', '-A', type=str, default='8,2,4')
 
@@ -172,7 +172,7 @@ def main():
     p.add_argument('--lr_scheduler_decay_target', type=int, default=1e-12)
     p.add_argument('--lr_scheduler_decay_power', type=float, default=1.0)
     p.add_argument('--progress_bar', '-pb', type=str, default='true')
-    p.add_argument('--force_voxaug', type=str, default='false')
+    p.add_argument('--force_voxaug', type=str, default='true')
     p.add_argument('--save_all', type=str, default='true')
     p.add_argument('--model_dir', type=str, default='J://')
     p.add_argument('--llrd', type=str, default='false')
