@@ -9,7 +9,7 @@ identity_ratio = 1.0
 steps = 1
 
 class FrameTransformer(nn.Module):
-    def __init__(self, in_channels=2, channels=2, dropout=0.1, n_fft=2048, num_heads=[4, 4, 4, 4, 4, 4], expansion=2):
+    def __init__(self, in_channels=2, channels=2, dropout=0.1, n_fft=2048, num_heads=[1, 1, 1, 1, 1, 1], expansion=2):
         super(FrameTransformer, self).__init__()
         
         self.max_bin = n_fft // 2
@@ -64,9 +64,18 @@ class FrameTransformer(nn.Module):
         d2 = self.dec2_transformer(self.dec2(d3, e2), e2)
         d1 = self.dec1_transformer(self.dec1(d2, e1), e1)
 
-        out = torch.matmul(d1.transpose(1,3), self.out.t()).transpose(1,3)
-        
+        out = torch.matmul(d1.transpose(1,3), self.out.t()).transpose(1,3)    
+
         return out
+
+class FrameLinear(nn.Module):
+    def __init__(self, in_features, out_features):
+        super(FrameLinear, self).__init__()
+
+        self.linear = nn.Linear(in_features, out_features, bias=False)
+
+    def __call__(self, x):
+        return self.linear(x.transpose(2,3)).transpose(2,3)
 
 class MultichannelLinear(nn.Module):
     def __init__(self, in_channels, out_channels, in_features, out_features, skip_redundant=False, depthwise=True):
@@ -74,7 +83,7 @@ class MultichannelLinear(nn.Module):
 
         self.weight_pw = None
         if in_features != out_features or not skip_redundant:
-            self.weight_pw = nn.Parameter(torch.empty(out_channels, out_features, in_features))
+            self.weight_pw = nn.Parameter(torch.empty(in_channels, out_features, in_features))
             nn.init.uniform_(self.weight_pw, a=-1/math.sqrt(in_features), b=1/math.sqrt(in_features))
 
         self.weight_dw = None
@@ -83,38 +92,29 @@ class MultichannelLinear(nn.Module):
             nn.init.uniform_(self.weight_dw, a=-1/math.sqrt(in_channels), b=1/math.sqrt(in_channels))
 
     def __call__(self, x):
-        if self.weight_dw is not None:
-            x = torch.matmul(x.transpose(1,3), self.weight_dw.t()).transpose(1,3)
-        
         if self.weight_pw is not None:
             x = torch.matmul(x.transpose(2,3), self.weight_pw.transpose(1,2)).transpose(2,3)
+
+        if self.weight_dw is not None:
+            x = torch.matmul(x.transpose(1,3), self.weight_dw.t()).transpose(1,3)        
         
         return x
-
-class FrameNorm(nn.Module):
-    def __init__(self, features):
-        super(FrameNorm, self).__init__()
-
-        self.norm = nn.LayerNorm(features)
-
-    def __call__(self, x):
-        return self.norm(x.transpose(2,3)).transpose(2,3)
-
 
 class FrameEncoder(nn.Module):
     def __init__(self, in_channels, out_channels, features, downsample=True, expansion=2, dropout=0.1):
         super(FrameEncoder, self).__init__()
 
         self.gelu = nn.GELU()
-        self.norm = nn.LayerNorm(features)
-        self.linear1 = MultichannelLinear(in_channels, out_channels, features, features * expansion)
-        self.linear2 = MultichannelLinear(out_channels, out_channels, features * expansion, features // 2 if downsample else features)
+        self.norm1 = nn.LayerNorm(features)
+        self.linear1 = MultichannelLinear(in_channels, out_channels, features, features * 2)
+        self.norm2 = nn.LayerNorm(features * 2)
+        self.linear2 = MultichannelLinear(out_channels, out_channels, features * 2, features // 2 if downsample else features)
         self.identity = MultichannelLinear(in_channels, out_channels, features, features // 2 if downsample else features, skip_redundant=True)
         self.dropout = nn.Dropout(dropout)
 
     def __call__(self, x):
-        h = self.norm(x.transpose(2,3)).transpose(2,3)
-        h = self.linear2(self.gelu(self.linear1(h)))
+        h = self.norm1(x.transpose(2,3)).transpose(2,3)
+        h = self.linear2(self.gelu(self.norm2(self.linear1(h).transpose(2,3)).transpose(2,3)))
         x = self.identity(x) + self.dropout(h.transpose(2,3)).transpose(2,3)
         
         return x
@@ -126,31 +126,35 @@ class FrameDecoder(nn.Module):
         self.gelu = nn.GELU()
         self.norm = nn.LayerNorm(features // 2)
         self.linear1 = MultichannelLinear(in_channels, out_channels, features // 2, features * 2)
+        self.norm2 = nn.LayerNorm(features * 2)
         self.linear2 = MultichannelLinear(out_channels, out_channels, features * 2, features)
         self.identity = MultichannelLinear(in_channels, out_channels, features // 2, features, skip_redundant=True)
         self.dropout = nn.Dropout(dropout)
 
     def __call__(self, x, skip=None):
         h = self.norm(x.transpose(2,3)).transpose(2,3)
-        h = self.linear2(self.gelu(self.linear1(h)))
+        h = self.linear2(self.gelu(self.norm2(self.linear1(h).transpose(2,3)).transpose(2,3)))
         x = self.identity(x) + self.dropout(h.transpose(2,3)).transpose(2,3) + skip
 
         return x
 
 class MultichannelMultiheadAttention(nn.Module):
-    def __init__(self, channels, num_heads, features):
+    def __init__(self, channels, num_heads, features, mixed_precision=False):
         super().__init__()
 
+        self.mixed_precision = mixed_precision
         self.num_heads = num_heads
         self.rotary_embedding = RotaryEmbedding(dim = features // num_heads // 2)
 
         self.q_proj = nn.Sequential(
             MultichannelLinear(channels, channels, features, features, depthwise=False),
             nn.Conv2d(channels, channels, kernel_size=(1,3), padding=(0,1), bias=False))
+        self.q_norm = nn.LayerNorm(features // num_heads)
 
         self.k_proj = nn.Sequential(
             MultichannelLinear(channels, channels, features, features, depthwise=False),
             nn.Conv2d(channels, channels, kernel_size=(1,3), padding=(0,1), bias=False))
+        self.k_norm = nn.LayerNorm(features // num_heads)
 
         self.v_proj = nn.Sequential(
             MultichannelLinear(channels, channels, features, features, depthwise=False),
@@ -161,14 +165,14 @@ class MultichannelMultiheadAttention(nn.Module):
     def forward(self, x, mem=None):
         b,c,h,w = x.shape
 
-        q = self.rotary_embedding.rotate_queries_or_keys(self.q_proj(x).transpose(2,3).reshape(b,c,w,self.num_heads,-1).permute(0,1,3,2,4)).contiguous()
-        k = self.rotary_embedding.rotate_queries_or_keys(self.k_proj(x if mem is None else mem).transpose(2,3).reshape(b,c,w,self.num_heads,-1).permute(0,1,3,2,4)).transpose(3,4).contiguous()
-        v = self.v_proj(x if mem is None else mem).transpose(2,3).reshape(b,c,w,self.num_heads,-1).permute(0,1,3,2,4).contiguous()
+        q = self.q_norm(self.rotary_embedding.rotate_queries_or_keys(self.q_proj(x).transpose(2,3).reshape(b,c,w,self.num_heads,-1).permute(0,1,3,2,4)))
+        k = self.k_norm(self.rotary_embedding.rotate_queries_or_keys(self.k_proj(x if mem is None else mem).transpose(2,3).reshape(b,c,w,self.num_heads,-1).permute(0,1,3,2,4))).transpose(3,4)
+        v = self.v_proj(x if mem is None else mem).transpose(2,3).reshape(b,c,w,self.num_heads,-1).permute(0,1,3,2,4)
 
         with torch.cuda.amp.autocast_mode.autocast(enabled=False):
-            qk = torch.matmul(q,k) / math.sqrt(h)
-            a = torch.matmul(F.softmax(qk, dim=-1),v).transpose(2,3).reshape(b,c,w,-1).transpose(2,3).contiguous()
-                
+            qk = torch.matmul(q.float(), k.float()) / math.sqrt(h)        
+            a = torch.matmul(F.softmax(qk, dim=-1),v.float()).transpose(2,3).reshape(b,c,w,-1).transpose(2,3)
+
         x = self.out_proj(a)
 
         return x
@@ -184,8 +188,9 @@ class FrameTransformerEncoder(nn.Module):
         self.dropout1 = nn.Dropout(dropout) if dropout > 0 else nn.Identity()
 
         self.norm2 = nn.LayerNorm(features)
-        self.linear1 = MultichannelLinear(channels, channels, features, features * expansion)
-        self.linear2 = MultichannelLinear(channels, channels, features * expansion, features)
+        self.linear1 = MultichannelLinear(channels, channels, features, features * expansion, depthwise=False)
+        self.norm3 = nn.LayerNorm(features * expansion)
+        self.linear2 = MultichannelLinear(channels, channels, features * expansion, features, depthwise=False)
         self.dropout2 = nn.Dropout(dropout) if dropout > 0 else nn.Identity()
         
     def __call__(self, x):
@@ -195,7 +200,7 @@ class FrameTransformerEncoder(nn.Module):
         x = x + z
 
         z = self.norm2(x.transpose(2,3)).transpose(2,3)
-        z = self.linear2(self.gelu(self.linear1(x)))
+        z = self.linear2(self.gelu(self.norm3(self.linear1(x).transpose(2,3)).transpose(2,3)))
         z = self.dropout2(z.transpose(2,3)).transpose(2,3)
         x = x + z
 
@@ -216,8 +221,9 @@ class FrameTransformerDecoder(nn.Module):
         self.dropout2 = nn.Dropout(dropout) if dropout > 0 else nn.Identity()
 
         self.norm3 = nn.LayerNorm(features)
-        self.linear1 = MultichannelLinear(channels, channels, features, features * expansion)
-        self.linear2 = MultichannelLinear(channels, channels, features * expansion, features)
+        self.linear1 = MultichannelLinear(channels, channels, features, features * expansion, depthwise=False)
+        self.norm4 = nn.LayerNorm(features * expansion)
+        self.linear2 = MultichannelLinear(channels, channels, features * expansion, features, depthwise=False)
         self.dropout3 = nn.Dropout(dropout) if dropout > 0 else nn.Identity()
 
     def __call__(self, x, skip):
@@ -232,7 +238,7 @@ class FrameTransformerDecoder(nn.Module):
         x = x + z
 
         z = self.norm3(x.transpose(2,3)).transpose(2,3)
-        z = self.linear2(self.gelu(self.linear1(x)))
+        z = self.linear2(self.gelu(self.norm4(self.linear1(x).transpose(2,3)).transpose(2,3)))
         z = self.dropout3(z.transpose(2,3)).transpose(2,3)
         x = x + z
 
