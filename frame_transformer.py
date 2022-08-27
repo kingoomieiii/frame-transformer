@@ -68,15 +68,6 @@ class FrameTransformer(nn.Module):
 
         return out
 
-class FrameLinear(nn.Module):
-    def __init__(self, in_features, out_features):
-        super(FrameLinear, self).__init__()
-
-        self.linear = nn.Linear(in_features, out_features, bias=False)
-
-    def __call__(self, x):
-        return self.linear(x.transpose(2,3)).transpose(2,3)
-
 class MultichannelLinear(nn.Module):
     def __init__(self, in_channels, out_channels, in_features, out_features, skip_redundant=False, depthwise=True):
         super(MultichannelLinear, self).__init__()
