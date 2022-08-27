@@ -9,7 +9,7 @@ identity_ratio = 1.0
 steps = 1
 
 class FrameTransformer(nn.Module):
-    def __init__(self, in_channels=2, channels=2, dropout=0.1, n_fft=2048, num_heads=[1, 1, 1, 1, 1, 1], expansion=2):
+    def __init__(self, in_channels=2, channels=2, dropout=0.1, n_fft=2048, num_heads=[4, 4, 4, 4, 4, 4], expansion=2):
         super(FrameTransformer, self).__init__()
         
         self.max_bin = n_fft // 2
@@ -69,16 +69,16 @@ class FrameTransformer(nn.Module):
         return out
 
 class MultichannelLinear(nn.Module):
-    def __init__(self, in_channels, out_channels, in_features, out_features, skip_redundant=False, depthwise=True):
+    def __init__(self, in_channels, out_channels, in_features, out_features, positionwise=True, depthwise=True):
         super(MultichannelLinear, self).__init__()
 
         self.weight_pw = None
-        if in_features != out_features or not skip_redundant:
+        if in_features != out_features or positionwise:
             self.weight_pw = nn.Parameter(torch.empty(in_channels, out_features, in_features))
             nn.init.uniform_(self.weight_pw, a=-1/math.sqrt(in_features), b=1/math.sqrt(in_features))
 
         self.weight_dw = None
-        if in_channels != out_channels or (depthwise and not skip_redundant):
+        if in_channels != out_channels or depthwise:
             self.weight_dw = nn.Parameter(torch.empty(out_channels, in_channels))
             nn.init.uniform_(self.weight_dw, a=-1/math.sqrt(in_channels), b=1/math.sqrt(in_channels))
 
@@ -87,26 +87,44 @@ class MultichannelLinear(nn.Module):
             x = torch.matmul(x.transpose(2,3), self.weight_pw.transpose(1,2)).transpose(2,3)
 
         if self.weight_dw is not None:
-            x = torch.matmul(x.transpose(1,3), self.weight_dw.t()).transpose(1,3)        
+            x = torch.matmul(x.transpose(1,3), self.weight_dw.t()).transpose(1,3) 
         
         return x
+
+class FrameNorm(nn.Module):
+    def __init__(self, features):
+        super(FrameNorm, self).__init__()
+
+        self.norm = nn.LayerNorm(features)
+
+    def __call__(self, x):
+        return self.norm(x.transpose(2,3)).transpose(2,3)
+
+class FrameDrop(nn.Module):
+    def __init__(self, dropout, inplace=False):
+        super(FrameDrop, self).__init__()
+
+        self.dropout = nn.Dropout(dropout, inplace=inplace)
+
+    def __call__(self, x):
+        return self.dropout(x.transpose(2,3)).transpose(2,3)
 
 class FrameEncoder(nn.Module):
     def __init__(self, in_channels, out_channels, features, downsample=True, expansion=2, dropout=0.1):
         super(FrameEncoder, self).__init__()
 
         self.gelu = nn.GELU()
-        self.norm1 = nn.LayerNorm(features)
-        self.linear1 = MultichannelLinear(in_channels, out_channels, features, features * 2)
-        self.norm2 = nn.LayerNorm(features * 2)
-        self.linear2 = MultichannelLinear(out_channels, out_channels, features * 2, features // 2 if downsample else features)
-        self.identity = MultichannelLinear(in_channels, out_channels, features, features // 2 if downsample else features, skip_redundant=True)
-        self.dropout = nn.Dropout(dropout)
+        self.norm1 = FrameNorm(features)
+        self.linear1 = MultichannelLinear(in_channels, out_channels, features, features)
+        self.norm2 = FrameNorm(features)
+        self.linear2 = MultichannelLinear(out_channels, out_channels, features, features // 2 if downsample else features)
+        self.identity = MultichannelLinear(in_channels, out_channels, features, features // 2 if downsample else features, positionwise=False)
+        self.dropout = FrameDrop(dropout)
 
     def __call__(self, x):
-        h = self.norm1(x.transpose(2,3)).transpose(2,3)
-        h = self.linear2(self.gelu(self.norm2(self.linear1(h).transpose(2,3)).transpose(2,3)))
-        x = self.identity(x) + self.dropout(h.transpose(2,3)).transpose(2,3)
+        h = self.norm1(x)
+        h = self.linear2(self.gelu(self.norm2(self.linear1(h))))
+        x = self.identity(x) + self.dropout(h)
         
         return x
 
@@ -115,17 +133,26 @@ class FrameDecoder(nn.Module):
         super(FrameDecoder, self).__init__()
         
         self.gelu = nn.GELU()
-        self.norm = nn.LayerNorm(features // 2)
-        self.linear1 = MultichannelLinear(in_channels, out_channels, features // 2, features * 2)
-        self.norm2 = nn.LayerNorm(features * 2)
-        self.linear2 = MultichannelLinear(out_channels, out_channels, features * 2, features)
-        self.identity = MultichannelLinear(in_channels, out_channels, features // 2, features, skip_redundant=True)
-        self.dropout = nn.Dropout(dropout)
+        self.norm = FrameNorm(features // 2)
+        self.linear1 = MultichannelLinear(in_channels, out_channels, features // 2, features)
+        self.norm2 = FrameNorm(features)
+        self.linear2 = MultichannelLinear(out_channels, out_channels, features, features)
+        self.identity = MultichannelLinear(in_channels, out_channels, features // 2, features)
+        self.dropout = FrameDrop(dropout)
+
+        self.norm3 = FrameNorm(features)
+        self.linear3 = MultichannelLinear(out_channels * 2, out_channels, features, features)
+        self.norm4 = FrameNorm(features)
+        self.linear4 = MultichannelLinear(out_channels, out_channels, features, features)
 
     def __call__(self, x, skip=None):
-        h = self.norm(x.transpose(2,3)).transpose(2,3)
-        h = self.linear2(self.gelu(self.norm2(self.linear1(h).transpose(2,3)).transpose(2,3)))
-        x = self.identity(x) + self.dropout(h.transpose(2,3)).transpose(2,3) + skip
+        h = self.norm(x)
+        h = self.linear2(self.gelu(self.norm2(self.linear1(h))))
+        x = self.identity(x) + self.dropout(h)
+
+        h = self.norm3(torch.cat((x, skip), dim=1))
+        h = self.linear4(self.gelu(self.norm4(self.linear3(h))))
+        x = x + h
 
         return x
 
@@ -140,12 +167,12 @@ class MultichannelMultiheadAttention(nn.Module):
         self.q_proj = nn.Sequential(
             MultichannelLinear(channels, channels, features, features, depthwise=False),
             nn.Conv2d(channels, channels, kernel_size=(1,3), padding=(0,1), bias=False))
-        self.q_norm = nn.LayerNorm(features // num_heads)
+        self.q_norm = FrameNorm(features // num_heads)
 
         self.k_proj = nn.Sequential(
             MultichannelLinear(channels, channels, features, features, depthwise=False),
             nn.Conv2d(channels, channels, kernel_size=(1,3), padding=(0,1), bias=False))
-        self.k_norm = nn.LayerNorm(features // num_heads)
+        self.k_norm = FrameNorm(features // num_heads)
 
         self.v_proj = nn.Sequential(
             MultichannelLinear(channels, channels, features, features, depthwise=False),
@@ -174,25 +201,25 @@ class FrameTransformerEncoder(nn.Module):
 
         self.gelu = nn.GELU()
 
-        self.norm1 = nn.LayerNorm(features)
+        self.norm1 = FrameNorm(features)
         self.attn = MultichannelMultiheadAttention(channels, num_heads, features)
         self.dropout1 = nn.Dropout(dropout) if dropout > 0 else nn.Identity()
 
-        self.norm2 = nn.LayerNorm(features)
+        self.norm2 = FrameNorm(features)
         self.linear1 = MultichannelLinear(channels, channels, features, features * expansion, depthwise=False)
-        self.norm3 = nn.LayerNorm(features * expansion)
+        self.norm3 = FrameNorm(features * expansion)
         self.linear2 = MultichannelLinear(channels, channels, features * expansion, features, depthwise=False)
         self.dropout2 = nn.Dropout(dropout) if dropout > 0 else nn.Identity()
         
     def __call__(self, x):
-        z = self.norm1(x.transpose(2,3)).transpose(2,3)
+        z = self.norm1(x)
         z = self.attn(x)
-        z = self.dropout1(z.transpose(2,3)).transpose(2,3)
+        z = self.dropout1(z)
         x = x + z
 
-        z = self.norm2(x.transpose(2,3)).transpose(2,3)
-        z = self.linear2(self.gelu(self.norm3(self.linear1(x).transpose(2,3)).transpose(2,3)))
-        z = self.dropout2(z.transpose(2,3)).transpose(2,3)
+        z = self.norm2(x)
+        z = self.linear2(self.gelu(self.norm3(self.linear1(x))))
+        z = self.dropout2(z)
         x = x + z
 
         return x
@@ -203,34 +230,34 @@ class FrameTransformerDecoder(nn.Module):
         
         self.gelu = nn.GELU()
 
-        self.norm1 = nn.LayerNorm(features)
+        self.norm1 = FrameNorm(features)
         self.attn1 = MultichannelMultiheadAttention(channels, num_heads, features)
         self.dropout1 = nn.Dropout(dropout) if dropout > 0 else nn.Identity()
 
-        self.norm2 = nn.LayerNorm(features)
+        self.norm2 = FrameNorm(features)
         self.attn2 = MultichannelMultiheadAttention(channels, num_heads, features)
         self.dropout2 = nn.Dropout(dropout) if dropout > 0 else nn.Identity()
 
-        self.norm3 = nn.LayerNorm(features)
+        self.norm3 = FrameNorm(features)
         self.linear1 = MultichannelLinear(channels, channels, features, features * expansion, depthwise=False)
-        self.norm4 = nn.LayerNorm(features * expansion)
+        self.norm4 = FrameNorm(features * expansion)
         self.linear2 = MultichannelLinear(channels, channels, features * expansion, features, depthwise=False)
         self.dropout3 = nn.Dropout(dropout) if dropout > 0 else nn.Identity()
 
     def __call__(self, x, skip):
-        z = self.norm1(x.transpose(2,3)).transpose(2,3)
+        z = self.norm1(x)
         z = self.attn1(x)
-        z = self.dropout1(z.transpose(2,3)).transpose(2,3)
+        z = self.dropout1(z)
         x = x + z
 
-        z = self.norm2(x.transpose(2,3)).transpose(2,3)
+        z = self.norm2(x)
         z = self.attn2(x, mem=skip)
-        z = self.dropout2(z.transpose(2,3)).transpose(2,3)
+        z = self.dropout2(z)
         x = x + z
 
-        z = self.norm3(x.transpose(2,3)).transpose(2,3)
-        z = self.linear2(self.gelu(self.norm4(self.linear1(x).transpose(2,3)).transpose(2,3)))
-        z = self.dropout3(z.transpose(2,3)).transpose(2,3)
+        z = self.norm3(x)
+        z = self.linear2(self.gelu(self.norm4(self.linear1(x))))
+        z = self.dropout3(z)
         x = x + z
 
         return x
