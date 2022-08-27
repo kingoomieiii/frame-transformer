@@ -115,15 +115,14 @@ class FrameEncoder(nn.Module):
 
         self.gelu = nn.GELU()
         self.norm1 = FrameNorm(features)
-        self.linear1 = MultichannelLinear(in_channels, out_channels, features, features)
-        self.norm2 = FrameNorm(features)
-        self.linear2 = MultichannelLinear(out_channels, out_channels, features, features // 2 if downsample else features)
+        self.linear1 = MultichannelLinear(in_channels, out_channels, features, features * 2)
+        self.linear2 = MultichannelLinear(out_channels, out_channels, features * 2, features // 2 if downsample else features)
         self.identity = MultichannelLinear(in_channels, out_channels, features, features // 2 if downsample else features, positionwise=False)
         self.dropout = FrameDrop(dropout)
 
     def __call__(self, x):
         h = self.norm1(x)
-        h = self.linear2(self.gelu(self.norm2(self.linear1(h))))
+        h = self.linear2(self.gelu(self.linear1(h)))
         x = self.identity(x) + self.dropout(h)
         
         return x
@@ -134,24 +133,23 @@ class FrameDecoder(nn.Module):
         
         self.gelu = nn.GELU()
         self.norm = FrameNorm(features // 2)
-        self.linear1 = MultichannelLinear(in_channels, out_channels, features // 2, features)
-        self.norm2 = FrameNorm(features)
-        self.linear2 = MultichannelLinear(out_channels, out_channels, features, features)
+        self.linear1 = MultichannelLinear(in_channels, out_channels, features // 2, features * 2)
+        self.linear2 = MultichannelLinear(out_channels, out_channels, features * 2, features)
         self.identity = MultichannelLinear(in_channels, out_channels, features // 2, features)
         self.dropout = FrameDrop(dropout)
 
-        self.norm3 = FrameNorm(features)
+        self.norm2 = FrameNorm(features)
         self.linear3 = MultichannelLinear(out_channels * 2, out_channels, features, features)
-        self.norm4 = FrameNorm(features)
         self.linear4 = MultichannelLinear(out_channels, out_channels, features, features)
+        self.dropout2 = FrameDrop(dropout)
 
     def __call__(self, x, skip=None):
         h = self.norm(x)
-        h = self.linear2(self.gelu(self.norm2(self.linear1(h))))
+        h = self.linear2(self.gelu(self.linear1(h)))
         x = self.identity(x) + self.dropout(h)
 
-        h = self.norm3(torch.cat((x, skip), dim=1))
-        h = self.linear4(self.gelu(self.norm4(self.linear3(h))))
+        h = self.norm2(torch.cat((x, skip), dim=1))
+        h = self.linear4(self.gelu(self.linear3(h)))
         x = x + h
 
         return x
@@ -199,26 +197,26 @@ class FrameTransformerEncoder(nn.Module):
     def __init__(self, channels, features, num_heads=4, dropout=0.1, expansion=4):
         super(FrameTransformerEncoder, self).__init__()
 
-        self.gelu = nn.GELU()
+        self.relu = nn.ReLU()
 
         self.norm1 = FrameNorm(features)
         self.attn = MultichannelMultiheadAttention(channels, num_heads, features)
         self.dropout1 = nn.Dropout(dropout) if dropout > 0 else nn.Identity()
 
         self.norm2 = FrameNorm(features)
-        self.linear1 = MultichannelLinear(channels, channels, features, features * expansion, depthwise=False)
+        self.linear1 = MultichannelLinear(channels, channels, features, features * expansion)
         self.norm3 = FrameNorm(features * expansion)
-        self.linear2 = MultichannelLinear(channels, channels, features * expansion, features, depthwise=False)
+        self.linear2 = MultichannelLinear(channels, channels, features * expansion, features)
         self.dropout2 = nn.Dropout(dropout) if dropout > 0 else nn.Identity()
         
     def __call__(self, x):
         z = self.norm1(x)
-        z = self.attn(x)
+        z = self.attn(z)
         z = self.dropout1(z)
         x = x + z
 
         z = self.norm2(x)
-        z = self.linear2(self.gelu(self.norm3(self.linear1(x))))
+        z = self.linear2(torch.square(self.relu(self.linear1(z))))
         z = self.dropout2(z)
         x = x + z
 
@@ -228,7 +226,7 @@ class FrameTransformerDecoder(nn.Module):
     def __init__(self, channels, features, num_heads=4, dropout=0.1, expansion=4):
         super(FrameTransformerDecoder, self).__init__()
         
-        self.gelu = nn.GELU()
+        self.relu = nn.ReLU()
 
         self.norm1 = FrameNorm(features)
         self.attn1 = MultichannelMultiheadAttention(channels, num_heads, features)
@@ -239,24 +237,23 @@ class FrameTransformerDecoder(nn.Module):
         self.dropout2 = nn.Dropout(dropout) if dropout > 0 else nn.Identity()
 
         self.norm3 = FrameNorm(features)
-        self.linear1 = MultichannelLinear(channels, channels, features, features * expansion, depthwise=False)
-        self.norm4 = FrameNorm(features * expansion)
-        self.linear2 = MultichannelLinear(channels, channels, features * expansion, features, depthwise=False)
+        self.linear1 = MultichannelLinear(channels, channels, features, features * expansion)
+        self.linear2 = MultichannelLinear(channels, channels, features * expansion, features)
         self.dropout3 = nn.Dropout(dropout) if dropout > 0 else nn.Identity()
 
     def __call__(self, x, skip):
         z = self.norm1(x)
-        z = self.attn1(x)
+        z = self.attn1(z)
         z = self.dropout1(z)
         x = x + z
 
         z = self.norm2(x)
-        z = self.attn2(x, mem=skip)
+        z = self.attn2(z, mem=skip)
         z = self.dropout2(z)
         x = x + z
 
         z = self.norm3(x)
-        z = self.linear2(self.gelu(self.norm4(self.linear1(x))))
+        z = self.linear2(torch.square(self.relu(self.linear1(z))))
         z = self.dropout3(z)
         x = x + z
 
