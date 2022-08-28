@@ -178,8 +178,8 @@ class MultichannelMultiheadAttention(nn.Module):
     def forward(self, x, mem=None):
         b,c,h,w = x.shape
 
-        q = self.q_norm(self.rotary_embedding.rotate_queries_or_keys(self.q_proj(x).transpose(2,3).reshape(b,c,w,self.num_heads,-1).permute(0,1,3,2,4)))
-        k = self.k_norm(self.rotary_embedding.rotate_queries_or_keys(self.k_proj(x if mem is None else mem).transpose(2,3).reshape(b,c,w,self.num_heads,-1).permute(0,1,3,2,4))).transpose(3,4)
+        q = self.rotary_embedding.rotate_queries_or_keys(self.q_norm(self.q_proj(x).transpose(2,3).reshape(b,c,w,self.num_heads,-1).permute(0,1,3,2,4)))
+        k = self.rotary_embedding.rotate_queries_or_keys(self.k_norm(self.k_proj(x if mem is None else mem).transpose(2,3).reshape(b,c,w,self.num_heads,-1).permute(0,1,3,2,4))).transpose(3,4)
         v = self.v_proj(x if mem is None else mem).transpose(2,3).reshape(b,c,w,self.num_heads,-1).permute(0,1,3,2,4)
 
         with torch.cuda.amp.autocast_mode.autocast(enabled=False):
@@ -194,7 +194,7 @@ class FrameTransformerEncoder(nn.Module):
     def __init__(self, channels, features, num_heads=4, dropout=0.1, expansion=4):
         super(FrameTransformerEncoder, self).__init__()
 
-        self.relu = nn.GELU()
+        self.relu = nn.ReLU(inplace=True)
 
         self.norm1 = FrameNorm(features)
         self.attn = MultichannelMultiheadAttention(channels, num_heads, features)
@@ -212,7 +212,7 @@ class FrameTransformerEncoder(nn.Module):
         x = x + z
 
         z = self.norm2(x)
-        z = self.linear2(self.relu(self.linear1(z)))
+        z = self.linear2(torch.square(self.relu(self.linear1(z))))
         z = self.dropout2(z)
         x = x + z
 
@@ -222,7 +222,7 @@ class FrameTransformerDecoder(nn.Module):
     def __init__(self, channels, features, num_heads=4, dropout=0.1, expansion=4):
         super(FrameTransformerDecoder, self).__init__()
         
-        self.relu = nn.GELU()
+        self.relu = nn.ReLU()
 
         self.norm1 = FrameNorm(features)
         self.attn1 = MultichannelMultiheadAttention(channels, num_heads, features)
@@ -249,7 +249,7 @@ class FrameTransformerDecoder(nn.Module):
         x = x + z
 
         z = self.norm3(x)
-        z = self.linear2(self.relu(self.linear1(z)))
+        z = self.linear2(torch.square(self.relu(self.linear1(z))))
         z = self.dropout3(z)
         x = x + z
 
