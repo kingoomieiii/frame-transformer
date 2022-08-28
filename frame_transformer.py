@@ -104,7 +104,7 @@ class FrameDrop(nn.Module):
     def __init__(self, dropout, inplace=False):
         super(FrameDrop, self).__init__()
 
-        self.dropout = nn.Dropout(dropout, inplace=inplace)
+        self.dropout = nn.Dropout(dropout, inplace=inplace) if dropout > 0 else nn.Identity()
 
     def __call__(self, x):
         return self.dropout(x.transpose(2,3)).transpose(2,3)
@@ -164,17 +164,17 @@ class MultichannelMultiheadAttention(nn.Module):
 
         self.q_proj = nn.Sequential(
             MultichannelLinear(channels, channels, features, features, depthwise=False),
-            nn.Conv2d(channels, channels, kernel_size=(1,3), padding=(0,1), bias=False))
+            nn.Conv2d(channels, channels, kernel_size=(1,9), padding=(0,4), bias=False))
         self.q_norm = FrameNorm(features // num_heads)
 
         self.k_proj = nn.Sequential(
             MultichannelLinear(channels, channels, features, features, depthwise=False),
-            nn.Conv2d(channels, channels, kernel_size=(1,3), padding=(0,1), bias=False))
+            nn.Conv2d(channels, channels, kernel_size=(1,9), padding=(0,4), bias=False))
         self.k_norm = FrameNorm(features // num_heads)
 
         self.v_proj = nn.Sequential(
             MultichannelLinear(channels, channels, features, features, depthwise=False),
-            nn.Conv2d(channels, channels, kernel_size=(1,3), padding=(0,1), bias=False))
+            nn.Conv2d(channels, channels, kernel_size=(1,9), padding=(0,4), bias=False))
 
         self.out_proj = MultichannelLinear(channels, channels, features, features, depthwise=False)
 
