@@ -10,8 +10,6 @@ This repo has gone through so many changes, doubt anyone is reading any of this 
 
 * FrameNorm - Just a helper module; applies layer norm to each frame of each channel with shared affine transform.
 
-* FrameDrop - Same as above, just 1d dropout applied to each frame
-
 * FrameEncoder - position-wise encoder for each frame responsible for downsampling and expansion of channels. This consists of a residual block made from multichannel linear layers to allow for each channel to learn its own position-wise linear layer. It takes inspiration from the transformer architecture and uses residual blocks in that style - linear2(activation(linear1(norm(x)))).
 
 * FrameDecoder - position-wise decoder for each frame responsible for upsampling and reduction of channels. This consists of two residual blocks; the first allows each channel to learn its own position-wise residual block, and the second residual block integrates the skip connection by concatenating it with the output of the first block and reducing it back to out_channels.
