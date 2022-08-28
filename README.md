@@ -2,7 +2,7 @@
 
 This is a deep-learning-based tool to extract instrumental track from your songs.
 
-This repo has gone through so many changes, doubt anyone is reading any of this but on the off chance anyone does lol... I'm calling this architecture a frame transformer. It consists of a position-wise residual u-net with a multichannel transformer. Currently training a version of this out, it is learning way faster than I would have thought so I'm pretty excited. It is able to keep up with the convolutional variant with half the context and struggles less with stuff like fretless bass.Below are module descriptions used in this neural network starting at the topmost level.
+This repo has gone through so many changes, doubt anyone is reading any of this but on the off chance anyone does lol... I'm calling this architecture a frame transformer. It consists of a position-wise linear residual u-net with a multichannel transformer. Currently training a version of this out, it is learning way faster than I would have thought so I'm pretty excited. It is able to keep up with the convolutional variant with half the context and struggles less with stuff like fretless bass.Below are module descriptions used in this neural network starting at the topmost level.
 
 * FrameTransformer - The core of the neural network. This consists of a series of encoders and decoders, with encoders defined as frame_transformer_encoder(frame_encoder(x)) and decoders defined as frame_transformer_decoder(frame_decoder(x, skip)). It also includes an output depthwise linear layer in the form of a weight matrix.
 
