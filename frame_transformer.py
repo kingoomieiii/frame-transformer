@@ -204,9 +204,8 @@ class FrameTransformerEncoder(nn.Module):
         self.dropout1 = nn.Dropout(dropout) if dropout > 0 else nn.Identity()
 
         self.norm2 = FrameNorm(features)
-        self.linear1 = MultichannelLinear(channels, channels, features, features * expansion)
-        self.norm3 = FrameNorm(features * expansion)
-        self.linear2 = MultichannelLinear(channels, channels, features * expansion, features)
+        self.linear1 = MultichannelLinear(channels, channels, features, features * expansion, depthwise=False)
+        self.linear2 = MultichannelLinear(channels, channels, features * expansion, features, depthwise=False)
         self.dropout2 = nn.Dropout(dropout) if dropout > 0 else nn.Identity()
         
     def __call__(self, x):
@@ -237,8 +236,8 @@ class FrameTransformerDecoder(nn.Module):
         self.dropout2 = nn.Dropout(dropout) if dropout > 0 else nn.Identity()
 
         self.norm3 = FrameNorm(features)
-        self.linear1 = MultichannelLinear(channels, channels, features, features * expansion)
-        self.linear2 = MultichannelLinear(channels, channels, features * expansion, features)
+        self.linear1 = MultichannelLinear(channels, channels, features, features * expansion, depthwise=False)
+        self.linear2 = MultichannelLinear(channels, channels, features * expansion, features, depthwise=False)
         self.dropout3 = nn.Dropout(dropout) if dropout > 0 else nn.Identity()
 
     def __call__(self, x, skip):
