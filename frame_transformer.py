@@ -24,16 +24,16 @@ class FrameTransformer(nn.Module):
         self.enc4 = FrameEncoder(channels * 4, channels * 6, self.max_bin // 4, expansion=expansion)
         self.enc4_transformer = FrameTransformerEncoder(channels * 6, self.max_bin // 8, num_heads=num_heads[3], dropout=dropout, expansion=expansion)
 
-        self.enc5 = FrameEncoder(channels * 6, channels * 12, self.max_bin // 8, expansion=expansion)
-        self.enc5_transformer = FrameTransformerEncoder(channels * 12, self.max_bin // 16, num_heads=num_heads[4], dropout=dropout, expansion=expansion)
+        self.enc5 = FrameEncoder(channels * 6, channels * 8, self.max_bin // 8, expansion=expansion)
+        self.enc5_transformer = FrameTransformerEncoder(channels * 8, self.max_bin // 16, num_heads=num_heads[4], dropout=dropout, expansion=expansion)
 
-        self.enc6 = FrameEncoder(channels * 12, channels * 24, self.max_bin // 16, expansion=expansion)
-        self.enc6_transformer = FrameTransformerEncoder(channels * 24, self.max_bin // 32, num_heads=num_heads[5], dropout=dropout, expansion=expansion)
+        self.enc6 = FrameEncoder(channels * 8, channels * 10, self.max_bin // 16, expansion=expansion)
+        self.enc6_transformer = FrameTransformerEncoder(channels * 10, self.max_bin // 32, num_heads=num_heads[5], dropout=dropout, expansion=expansion)
 
-        self.dec5 = FrameDecoder(channels * 24, channels * 12, self.max_bin // 16, expansion=expansion)
-        self.dec5_transformer = FrameTransformerDecoder(channels * 12, self.max_bin // 16, num_heads=num_heads[4], dropout=dropout, expansion=expansion)
+        self.dec5 = FrameDecoder(channels * 10, channels * 8, self.max_bin // 16, expansion=expansion)
+        self.dec5_transformer = FrameTransformerDecoder(channels * 8, self.max_bin // 16, num_heads=num_heads[4], dropout=dropout, expansion=expansion)
 
-        self.dec4 = FrameDecoder(channels * 12, channels * 6, self.max_bin // 8, expansion=expansion)
+        self.dec4 = FrameDecoder(channels * 8, channels * 6, self.max_bin // 8, expansion=expansion)
         self.dec4_transformer = FrameTransformerDecoder(channels * 6, self.max_bin // 8, num_heads=num_heads[3], dropout=dropout, expansion=expansion)
 
         self.dec3 = FrameDecoder(channels * 6, channels * 4, self.max_bin // 4, expansion=expansion)
@@ -159,15 +159,15 @@ class MultichannelMultiheadAttention(nn.Module):
         self.num_heads = num_heads
         self.rotary_embedding = RotaryEmbedding(dim = features // num_heads // 2, learned_freq=True)
 
+        self.q_norm = FrameNorm(features // num_heads)
         self.q_proj = nn.Sequential(
             MultichannelLinear(channels, channels, features, features, depthwise=False),
             nn.Conv2d(channels, channels, kernel_size=(1,9), padding=(0,4), bias=False, groups=channels))
-        self.q_norm = FrameNorm(features // num_heads)
 
+        self.k_norm = FrameNorm(features // num_heads)
         self.k_proj = nn.Sequential(
             MultichannelLinear(channels, channels, features, features, depthwise=False),
             nn.Conv2d(channels, channels, kernel_size=(1,9), padding=(0,4), bias=False, groups=channels))
-        self.k_norm = FrameNorm(features // num_heads)
 
         self.v_proj = nn.Sequential(
             MultichannelLinear(channels, channels, features, features, depthwise=False),
