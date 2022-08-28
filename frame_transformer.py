@@ -6,7 +6,7 @@ from frame_primer.rotary_embedding_torch import RotaryEmbedding
 from frame_primer.common import FrameConv, ResBlock
 
 class FrameTransformer(nn.Module):
-    def __init__(self, in_channels=2, channels=2, dropout=0.1, n_fft=2048, num_heads=[16, 8, 4, 4, 4, 4], expansion=2):
+    def __init__(self, in_channels=2, channels=2, dropout=0.1, n_fft=2048, num_heads=[4, 4, 4, 4, 4, 4], expansion=2):
         super(FrameTransformer, self).__init__()
         
         self.max_bin = n_fft // 2
