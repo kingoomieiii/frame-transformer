@@ -64,13 +64,14 @@ def train_epoch(dataloader, model, device, optimizer, accumulation_steps, progre
         X_batch = X_batch.to(device)[:, :, :model.max_bin]
 
         with torch.cuda.amp.autocast_mode.autocast(enabled=grad_scaler is not None):
-            pred = torch.sigmoid(model(X_batch))
+            pred, ql = model(X_batch)
 
-        l1_loss = crit((pred + 1) * 0.5, X_batch) / accumulation_steps
+        l1_loss = crit(pred, (X_batch + 1) * 0.5) / accumulation_steps
+        ql = ql / accumulation_steps
 
         batch_loss = batch_loss + l1_loss
-        batch_qloss = batch_qloss
-        accum_loss = l1_loss
+        batch_qloss = batch_qloss + ql
+        accum_loss = l1_loss + ql
 
         if torch.logical_or(accum_loss.isnan(), accum_loss.isinf()):
             print('nan training loss; aborting')
@@ -83,7 +84,7 @@ def train_epoch(dataloader, model, device, optimizer, accumulation_steps, progre
 
         if (itr + 1) % accumulation_steps == 0:
             if progress_bar:
-                pbar.set_description(f'{str(batch_loss.item())}')
+                pbar.set_description(f'{str(batch_loss.item())}|{batch_qloss.item()}')
 
             if use_wandb:
                 wandb.log({
@@ -107,15 +108,6 @@ def train_epoch(dataloader, model, device, optimizer, accumulation_steps, progre
             batch_loss = 0
             batch_qloss = 0
 
-        #sum_loss += accum_loss.item() * len(X_batch) * accumulation_steps
-
-    # # the rest batch
-    # if (itr + 1) % accumulation_steps != 0:
-    #     # grad_scaler.unscale_(optimizer)
-    #     # clip_grad_norm_(model.parameters(), 0.5)
-    #     optimizer.step()
-    #     model.zero_grad()
-
     return sum_loss / batches
 
 def validate_epoch(dataloader, model, device):
@@ -127,8 +119,8 @@ def validate_epoch(dataloader, model, device):
         for X_batch, _ in dataloader:
             X_batch = X_batch.to(device)[:, :, :model.max_bin]
 
-            pred = torch.sigmoid(model(X_batch))
-            mag_loss = crit((pred + 1) * 0.5, X_batch)
+            pred, ql = model(X_batch)
+            mag_loss = crit(pred * 2 - 1, X_batch)
 
             if torch.logical_or(mag_loss.isnan(), mag_loss.isinf()):
                 print('nan validation loss; aborting')
@@ -155,6 +147,7 @@ def main():
     p.add_argument('--curr_warmup_step', type=int, default=0)
     p.add_argument('--lr_verbosity', type=int, default=1000)
 
+    p.add_argument('--num_embeddings', type=int, default=2048)
     p.add_argument('--channels', type=int, default=4)
     p.add_argument('--num_heads', type=int, default=4)
     p.add_argument('--feedforward_expansion', type=int, default=4)
@@ -237,7 +230,7 @@ def main():
     torch.manual_seed(args.seed)
 
     device = torch.device('cpu')
-    model = FrameTransformer(channels=args.channels, n_fft=args.n_fft, dropout=args.dropout, expansion=args.feedforward_expansion, num_heads=args.num_heads)
+    model = VQFrameTransformer(channels=args.channels, n_fft=args.n_fft, dropout=args.dropout, expansion=args.feedforward_expansion, num_heads=args.num_heads, num_embeddings=args.num_embeddings)
 
     if args.pretrained_model is not None:
         model.load_state_dict(torch.load(args.pretrained_model, map_location=device))

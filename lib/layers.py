@@ -7,9 +7,11 @@ from lib import spec_utils
 
 class Conv2DBNActiv(nn.Module):
 
-    def __init__(self, nin, nout, ksize=3, stride=1, pad=1, dilation=1, activ=nn.ReLU):
+    def __init__(self, nin, nout, ksize=3, stride=1, pad=1, dilation=1, activ=nn.ReLU, norm=True):
         super(Conv2DBNActiv, self).__init__()
         self.conv = nn.Sequential(
+            nn.BatchNorm2d(nin) if norm else nn.Identity(),
+            activ() if activ is not None else nn.Identity(),
             nn.Conv2d(
                 nin, nout,
                 kernel_size=ksize,
@@ -17,9 +19,7 @@ class Conv2DBNActiv(nn.Module):
                 padding=pad,
                 dilation=dilation,
                 bias=False
-            ),
-            nn.BatchNorm2d(nout),
-            activ()
+            )
         )
 
     def __call__(self, x):

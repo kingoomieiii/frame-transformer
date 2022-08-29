@@ -95,8 +95,17 @@ class VoxAugDataset(torch.utils.data.Dataset):
         path = self.curr_list[idx % len(self.curr_list)]
         data = np.load(str(path))
         aug = 'Y' not in data.files
-        X, Xc = data['X'], data['c']
-        Y = X if aug else data['Y']
+
+        try:
+            X, Xc = data['X'], data['c']
+            Y = X if aug else data['Y']
+        except:
+            print(f'error loading {path}, substituting with random sample')
+            path = self.curr_list[np.random.randint(len(self.curr_list))]
+            data = np.load(str(path))
+            aug = 'Y' not in data.files
+            X, Xc = data['X'], data['c']
+            Y = X if aug else data['Y']
 
         if X.shape[2] > self.cropsize:
             start = np.random.randint(0, X.shape[2] - self.cropsize + 1)

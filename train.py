@@ -169,7 +169,7 @@ def main():
     p.add_argument('--cropsizes', type=str, default='256,512')
     p.add_argument('--epochs', type=str, default='10,25')
     p.add_argument('--batch_sizes', type=str, default='2,1')
-    p.add_argument('--accumulation_steps', '-A', type=str, default='24,48')
+    p.add_argument('--accumulation_steps', '-A', type=str, default='48,96')
 
     p.add_argument('--gpu', '-g', type=int, default=-1)
     p.add_argument('--optimizer', type=str.lower, choices=['adam', 'adamw', 'sgd', 'radam', 'rmsprop'], default='adamw')
