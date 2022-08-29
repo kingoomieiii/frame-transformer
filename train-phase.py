@@ -154,11 +154,12 @@ def main():
     p.add_argument('--mixup_alpha', '-a', type=float, default=0.4)
     p.add_argument('--mixed_precision', type=str, default='false')
 
+    p.add_argument('--curr_epoch', type=int, default=0)
     p.add_argument('--warmup_steps', type=int, default=16000)
     p.add_argument('--curr_warmup_step', type=int, default=0)
     p.add_argument('--lr_verbosity', type=int, default=1000)
 
-    p.add_argument('--channels', type=int, default=16)
+    p.add_argument('--channels', type=int, default=4)
     p.add_argument('--num_heads', type=int, default=4)
     p.add_argument('--feedforward_expansion', type=int, default=4)
     p.add_argument('--dropout', type=float, default=0.1)
@@ -186,17 +187,15 @@ def main():
     p.add_argument('--lock', type=str, default='false')
     p.add_argument('--debug', action='store_true')
     p.add_argument('--wandb', type=str, default='true')
-    p.add_argument('--wandb_project', type=str, default='VOCAL-REMOVER')
+    p.add_argument('--wandb_project', type=str, default='phase-prediction')
     p.add_argument('--wandb_entity', type=str, default='carperbr')
     p.add_argument('--wandb_run_id', type=str, default=None)
     p.add_argument('--prefetch_factor', type=int, default=2)
     p.add_argument('--cropsize', type=int, default=0)
     args = p.parse_args()
 
-    args.column_kernel = str.lower(args.column_kernel) == 'true'
     args.amsgrad = str.lower(args.amsgrad) == 'true'
     args.progress_bar = str.lower(args.progress_bar) == 'true'
-    args.bias = str.lower(args.bias) == 'true'
     args.mixed_precision = str.lower(args.mixed_precision) == 'true'
     args.save_all = str.lower(args.save_all) == 'true'
     args.force_voxaug = str.lower(args.force_voxaug) == 'true'
@@ -234,10 +233,7 @@ def main():
             "K://cs2048_sr44100_hl1024_nf2048_of0_MIXES",
         ],
         is_validation=False,
-        epoch_size=args.epoch_size,
-        mixup_rate=args.mixup_rate,
-        mixup_alpha=args.mixup_alpha,
-        force_voxaug=args.force_voxaug
+        epoch_size=args.epoch_size
     )
     
     random.seed(args.seed)
@@ -310,14 +306,14 @@ def main():
     print(f'{args.epochs[-1]} epochs')
 
     best_loss = np.inf
-    for epoch in range(args.curr_warmup_epoch, args.epochs[-1]+args.epoch):
+    for epoch in range(args.curr_epoch, args.epochs[-1]+args.epoch):
         train_dataset.rebuild()
 
         if epoch > args.epochs[curr_idx] or val_dataset is None:
             for i,e in enumerate(args.epochs):
                 if epoch > e:
                     print(curr_idx)
-                    print(args.curr_warmup_epoch)
+                    print(args.curr_epoch)
                     print(e)
                     curr_idx = i + 1
             
@@ -338,7 +334,6 @@ def main():
 
             val_dataset = PhasePredictionDataset(
                 path=[f"C://cs{cropsize}_sr44100_hl1024_nf2048_of0_VALIDATION"],
-                vocal_path=None,
                 is_validation=True
             )
 

@@ -156,6 +156,7 @@ def main():
     p.add_argument('--mixup_alpha', '-a', type=float, default=0.4)
     p.add_argument('--mixed_precision', type=str, default='false')
 
+    p.add_argument('--curr_epoch', type=int, default=0)
     p.add_argument('--warmup_steps', type=int, default=16000)
     p.add_argument('--curr_warmup_step', type=int, default=0)
     p.add_argument('--lr_verbosity', type=int, default=1000)
@@ -195,10 +196,8 @@ def main():
     p.add_argument('--cropsize', type=int, default=0)
     args = p.parse_args()
 
-    args.column_kernel = str.lower(args.column_kernel) == 'true'
     args.amsgrad = str.lower(args.amsgrad) == 'true'
     args.progress_bar = str.lower(args.progress_bar) == 'true'
-    args.bias = str.lower(args.bias) == 'true'
     args.mixed_precision = str.lower(args.mixed_precision) == 'true'
     args.save_all = str.lower(args.save_all) == 'true'
     args.force_voxaug = str.lower(args.force_voxaug) == 'true'
@@ -312,14 +311,14 @@ def main():
     print(f'{args.epochs[-1]} epochs')
 
     best_loss = np.inf
-    for epoch in range(args.curr_warmup_epoch, args.epochs[-1]+args.epoch):
+    for epoch in range(args.curr_epoch, args.epochs[-1]+args.epoch):
         train_dataset.rebuild()
 
         if epoch > args.epochs[curr_idx] or val_dataset is None:
             for i,e in enumerate(args.epochs):
                 if epoch > e:
                     print(curr_idx)
-                    print(args.curr_warmup_epoch)
+                    print(args.curr_epoch)
                     print(e)
                     curr_idx = i + 1
             

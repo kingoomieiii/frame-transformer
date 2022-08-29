@@ -15,13 +15,10 @@ from torch.nn.utils import clip_grad_norm_
 from lib import dataset
 from lib import spec_utils
 from tqdm import tqdm
-from lib.frame_primer import FramePrimer, FramePrimerDiscriminator
 
-from lib.frame_transformer import FrameTransformer, FrameTransformerDiscriminator
+from dataset_voxaug import VoxAugDataset
+from frame_transformer import FrameTransformer, FrameTransformerDiscriminator
 
-from lib.frame_transformer_unet import FrameTransformerUnet
-from lib.conv_discriminator import ConvDiscriminator
-from lib.frame_transformer_discriminator import FrameTransformerDiscriminator as FrameTransformerUnetDiscriminator
 from lib.lr_scheduler_linear_warmup import LinearWarmupScheduler
 from lib.lr_scheduler_polynomial_decay import PolynomialDecayScheduler
 
@@ -46,7 +43,7 @@ def setup_logger(name, logfile='LOGFILENAME.log', out_dir='logs'):
 
     return logger
 
-def train_epoch(dataloader, generator, discriminator, device, generator_optimizer, discriminator_optimizer, generator_scaler, disc_scaler, progress_bar, generator_warmup=None, discriminator_warmup=None, lambda_l1=100, lambda_gen=2.0, lambda_critic=4.0, modeler_adversarial_start=1024, accum_steps=1, mixed_precision=True, token_size=16):
+def train_epoch(dataloader, generator, discriminator, device, generator_optimizer, discriminator_optimizer, generator_scaler, disc_scaler, progress_bar, generator_warmup=None, discriminator_warmup=None, lambda_l1=100, mixed_precision=True):
     generator.train()
 
     sum_mask_loss = 0
@@ -59,7 +56,7 @@ def train_epoch(dataloader, generator, discriminator, device, generator_optimize
     disc_loss = 0
 
     pbar = tqdm(dataloader) if progress_bar else dataloader
-    for src, tgt, num_indices, indices in pbar:
+    for src, tgt, indices in pbar:
         src = src.to(device)
         tgt = tgt.to(device)
         num_indices = num_indices.to(device)
@@ -68,21 +65,8 @@ def train_epoch(dataloader, generator, discriminator, device, generator_optimize
         with torch.cuda.amp.autocast_mode.autocast(enabled=mixed_precision):
             mask = generator(src)
             pred = src * mask.detach()
-            real_batch = None
-            fake_batch = None
-
-            for n in range(src.shape[0]):
-                idx_count_itm = num_indices[n]
-                start_idx = indices[n]
-
-                for idx in range(idx_count_itm):
-                    real_token = tgt[None, n, :, :, start_idx[idx]:start_idx[idx]+dataloader.dataset.token_size]
-                    fake_token = pred[None, n, :, :, start_idx[idx]:start_idx[idx]+dataloader.dataset.token_size]
-                    real_batch = torch.cat((real_batch, real_token), dim=0) if real_batch is not None else real_token
-                    fake_batch = torch.cat((fake_batch, fake_token), dim=0) if fake_batch is not None else fake_token
-
-            real = discriminator(real_batch)
-            fake = discriminator(fake_batch)
+            real = discriminator(tgt)
+            fake = discriminator(pred)
             real_loss = bce_crit(real, torch.ones_like(real))
             fake_loss = bce_crit(fake, torch.zeros_like(fake))
             disc_loss = (fake_loss + real_loss) / 2
@@ -99,22 +83,9 @@ def train_epoch(dataloader, generator, discriminator, device, generator_optimize
 
         with torch.cuda.amp.autocast_mode.autocast(enabled=mixed_precision):
             pred = src * mask
-            fake_batch = None
-            real_batch = None
-
-            for n in range(src.shape[0]):
-                idx_count_itm = num_indices[n]
-                start_idx = indices[n]
-                
-                for idx in range(num_indices[n]):
-                    fake_token = pred[None, n, :, :, start_idx[idx]:start_idx[idx]+dataloader.dataset.token_size]
-                    real_token = tgt[None, n, :, :, start_idx[idx]:start_idx[idx]+dataloader.dataset.token_size]
-                    fake_batch = torch.cat((fake_batch, fake_token), dim=0) if fake_batch is not None else fake_token
-                    real_batch = torch.cat((real_batch, real_token), dim=0) if real_batch is not None else real_token
-                    
-            fake = discriminator(fake_batch)
+            fake = discriminator(pred)
             fake_loss = bce_crit(fake, torch.ones_like(fake))
-            unmask_loss = l1_crit(fake_batch, real_batch)
+            unmask_loss = l1_crit(pred, tgt)
             generator_loss = lambda_l1 * unmask_loss + fake_loss
 
         generator_scaler.scale(generator_loss).backward()
@@ -163,6 +134,22 @@ def validate_epoch(dataloader, generator, device, grad_scaler):
 
 def main():
     p = argparse.ArgumentParser()
+
+    p.add_argument('--curr_epoch', type=int, default=0)
+    p.add_argument('--warmup_steps', type=int, default=16000)
+    p.add_argument('--curr_warmup_step', type=int, default=0)
+    p.add_argument('--lr_verbosity', type=int, default=1000)
+
+    p.add_argument('--channels', type=int, default=2)
+    p.add_argument('--num_heads', type=int, default=4)
+    p.add_argument('--expansion', type=int, default=2)
+    p.add_argument('--dropout', type=float, default=0.1)
+
+    p.add_argument('--cropsizes', type=str, default='256,512')
+    p.add_argument('--epochs', type=str, default='10,25')
+    p.add_argument('--batch_sizes', type=str, default='2,1')
+    p.add_argument('--accumulation_steps', '-A', type=str, default='24,48')
+
     p.add_argument('--id', type=str, default='')
     p.add_argument('--generator_type', type=str.lower, choices=['primer', 'unet', 'vanilla'], default='primer')
     p.add_argument('--discriminator_type', type=str.lower, choices=['primer', 'conv'], default='conv')
@@ -173,7 +160,6 @@ def main():
     p.add_argument('--lambda_gen', type=float, default=1.0)
     p.add_argument('--lambda_critic', type=float, default=1.0)
     p.add_argument('--epoch_size', type=int, default=None)
-    p.add_argument('--channels', type=int, default=2)
     p.add_argument('--depth', type=int, default=7)
     p.add_argument('--num_transformer_blocks', type=int, default=2)
     p.add_argument('--num_bands', type=int, default=8)
@@ -181,7 +167,6 @@ def main():
     p.add_argument('--bias', type=str, default='true')
     p.add_argument('--amsgrad', type=str, default='false')
     p.add_argument('--batchsize', '-B', type=int, default=1)
-    p.add_argument('--accumulation_steps', '-A', type=int, default=4)
     p.add_argument('--gpu', '-g', type=int, default=-1)
     p.add_argument('--seed', '-s', type=int, default=51)
     p.add_argument('--sr', '-r', type=int, default=44100)
@@ -216,7 +201,6 @@ def main():
     p.add_argument('--save_all', type=str, default='true')
     p.add_argument('--model_dir', type=str, default='G://')
     p.add_argument('--debug', action='store_true')
-    p.add_argument('--dropout', type=float, default=0.25)
     p.add_argument('--token_size', type=int, default=16)
     p.add_argument('--mask_rate', type=float, default=0.2)
     p.add_argument('--next_frame_chunk_size', type=int, default=512)
@@ -238,24 +222,27 @@ def main():
     np.random.seed(args.seed + 1)
     torch.manual_seed(args.seed + 1)
 
-    train_dataset = dataset.MaskedPretrainingDataset(
-        path="C://cs2048_sr44100_hl1024_nf2048_of0",
-        extra_path="D://cs2048_sr44100_hl1024_nf2048_of0",
-        mix_path=[
-            "D://cs2048_sr44100_hl1024_nf2048_of0_MIXES",
-            "C://cs2048_sr44100_hl1024_nf2048_of0_MIXES",
-            "F://cs2048_sr44100_hl1024_nf2048_of0_MIXES",
-            "H://cs2048_sr44100_hl1024_nf2048_of0_MIXES"],
+    train_dataset = VoxAugDataset(
+        path=[
+            "C://cs2048_sr44100_hl1024_nf2048_of0",
+            "D://cs2048_sr44100_hl1024_nf2048_of0",
+            "F://cs2048_sr44100_hl1024_nf2048_of0",
+            "H://cs2048_sr44100_hl1024_nf2048_of0",
+            "J://cs2048_sr44100_hl1024_nf2048_of0",
+            "K://cs2048_sr44100_hl1024_nf2048_of0_PAIRS",
+            "J://cs2048_sr44100_hl1024_nf2048_of0_PAIRS",
+            "K://cs2048_sr44100_hl1024_nf2048_of0",
+        ],
+        vocal_path=[
+            "D://cs2048_sr44100_hl1024_nf2048_of0_VOCALS",
+            "J://cs2048_sr44100_hl1024_nf2048_of0_VOCALS",
+            "K://cs2048_sr44100_hl1024_nf2048_of0_VOCALS",
+        ],
         is_validation=False,
         epoch_size=args.epoch_size,
-        cropsize=args.cropsize,
         mixup_rate=args.mixup_rate,
         mixup_alpha=args.mixup_alpha,
-        pair_mul=1,
-        mask_rate=args.mask_rate,
-        next_frame_chunk_size=args.next_frame_chunk_size,
-        token_size=args.token_size,
-        num_steps=0
+        force_voxaug=args.force_voxaug
     )
 
     train_dataloader = torch.utils.data.DataLoader(
@@ -303,12 +290,9 @@ def main():
         logger.info('{} {} {}'.format(i + 1, os.path.basename(X_fname), os.path.basename(y_fname)))
 
     device = torch.device('cpu')
-    generator = FramePrimer(channels=args.channels, n_fft=args.n_fft, num_transformer_blocks=args.num_transformer_blocks, num_bands=args.num_bands, feedforward_dim=args.feedforward_dim, bias=args.bias, cropsize=args.cropsize + args.next_frame_chunk_size, dropout=args.dropout)
-    
-    if args.discriminator_type == 'primer':
-        discriminator = FramePrimerDiscriminator(channels=args.channels, n_fft=args.n_fft, num_transformer_blocks=args.num_transformer_blocks, num_bands=args.num_bands, feedforward_dim=args.feedforward_dim, bias=args.bias, cropsize=args.token_size, dropout=args.dropout)
-    else:
-        discriminator = ConvDiscriminator(in_channels=args.channels, channels=8)
+
+    generator = FrameTransformer(channels=args.channels, n_fft=args.n_fft, dropout=args.dropout, num_heads=args.num_heads, expansion=args.expansion)
+    discriminator = FrameTransformerDiscriminator(channels=args.channels, n_fft=args.n_fft, dropout=args.dropout, num_heads=args.num_heads, expansion=args.expansion)
 
     if args.pretrained_model is not None:
         generator.load_state_dict(torch.load(args.pretrained_model, map_location=device))
@@ -362,22 +346,24 @@ def main():
             betas=(0.5, 0.999)
         )
 
-    steps = len(train_dataset) // (args.batchsize)
-    warmup_steps = steps * args.warmup_epoch
-    decay_steps = steps * args.epoch + warmup_steps
-    token_steps = steps * args.token_warmup_epoch
+    steps = len(train_dataset) // (args.batch_sizes[0] * args.accumulation_steps[0])
+    warmup_steps = args.warmup_steps
+    decay_steps = steps * args.epochs[-1] + warmup_steps
+
+    scheduler = torch.optim.lr_scheduler.ChainedScheduler([
+            LinearWarmupScheduler(optimizer, target_lr=args.learning_rate, num_steps=warmup_steps, current_step=args.curr_warmup_step, verbose_skip_steps=args.lr_verbosity),
+            PolynomialDecayScheduler(optimizer, target=args.lr_scheduler_decay_target, power=args.lr_scheduler_decay_power, num_decay_steps=decay_steps, start_step=warmup_steps, current_step=args.curr_warmup_step, verbose_skip_steps=args.lr_verbosity)
+    ])
 
     modeler_scheduler = torch.optim.lr_scheduler.ChainedScheduler([
-        LinearWarmupScheduler(optimizer, target_lr=args.learning_rate, num_steps=warmup_steps, current_step=(steps * args.curr_warmup_epoch)),
-        PolynomialDecayScheduler(optimizer, target=args.lr_scheduler_decay_target, power=args.lr_scheduler_decay_power, num_decay_steps=decay_steps, start_step=warmup_steps, current_step=(steps * args.curr_warmup_epoch))
+        LinearWarmupScheduler(optimizer, target_lr=args.learning_rate, num_steps=warmup_steps, current_step=args.curr_warmup_step, verbose_skip_steps=args.lr_verbosity),
+        PolynomialDecayScheduler(optimizer, target=args.lr_scheduler_decay_target, power=args.lr_scheduler_decay_power, num_decay_steps=decay_steps, start_step=warmup_steps, current_step=args.curr_warmup_step, verbose_skip_steps=args.lr_verbosity)
     ])
 
     critic_scheduler = torch.optim.lr_scheduler.ChainedScheduler([
-        LinearWarmupScheduler(critic_optimizer, target_lr=args.learning_rate, num_steps=warmup_steps, current_step=(steps * args.curr_warmup_epoch)),
-        PolynomialDecayScheduler(critic_optimizer, target=args.lr_scheduler_decay_target, power=args.lr_scheduler_decay_power, num_decay_steps=decay_steps, start_step=warmup_steps, current_step=(steps * args.curr_warmup_epoch))
+        LinearWarmupScheduler(critic_optimizer, target_lr=args.learning_rate, num_steps=warmup_steps, current_step=args.curr_warmup_step, verbose_skip_steps=args.lr_verbosity),
+        PolynomialDecayScheduler(critic_optimizer, target=args.lr_scheduler_decay_target, power=args.lr_scheduler_decay_power, num_decay_steps=decay_steps, start_step=warmup_steps, current_step=args.curr_warmup_step, verbose_skip_steps=args.lr_verbosity)
     ])
-
-    train_dataset.warmup_steps = token_steps
 
     log = []
     best_loss = np.inf
@@ -385,7 +371,7 @@ def main():
         train_dataset.rebuild()
 
         logger.info('# epoch {}'.format(epoch))
-        train_loss_mask, modeler_loss, critic_loss = train_epoch(train_dataloader, generator, discriminator, device, optimizer, critic_optimizer, grad_scaler, critic_scaler, args.progress_bar, generator_warmup=modeler_scheduler, discriminator_warmup=critic_scheduler, lambda_l1=args.lambda_l1, lambda_gen=args.lambda_gen, lambda_critic=args.lambda_critic, token_size=args.token_size)
+        train_loss_mask, modeler_loss, critic_loss = train_epoch(train_dataloader, generator, discriminator, device, optimizer, critic_optimizer, grad_scaler, critic_scaler, args.progress_bar, generator_warmup=modeler_scheduler, discriminator_warmup=critic_scheduler, lambda_l1=args.lambda_l1, lambda_gen=args.lambda_gen, lambda_critic=args.lambda_critic)
 
         val_loss_mask1 = validate_epoch(val_dataloader, generator, device, grad_scaler)
         val_loss_mask2 = validate_epoch(val_dataloader, generator, device, grad_scaler)
