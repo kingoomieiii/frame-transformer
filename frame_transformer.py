@@ -340,16 +340,16 @@ class VQFrameTransformer(nn.Module):
         self.fq = FrameQuantizer(channels * 8, self.max_bin // 16, num_embeddings)
 
         self.dec4 = FrameDecoder(channels * 8, channels * 6, self.max_bin // 8, expansion=expansion, has_skip=False)
-        self.dec4_transformer = FrameTransformerDecoder(channels * 6, self.max_bin // 8, num_heads=num_heads, dropout=dropout, expansion=expansion)
+        self.dec4_transformer = FrameTransformerEncoder(channels * 6, self.max_bin // 8, num_heads=num_heads, dropout=dropout, expansion=expansion)
 
         self.dec3 = FrameDecoder(channels * 6, channels * 4, self.max_bin // 4, expansion=expansion, has_skip=False)
-        self.dec3_transformer = FrameTransformerDecoder(channels * 4, self.max_bin // 4, num_heads=num_heads, dropout=dropout, expansion=expansion)
+        self.dec3_transformer = FrameTransformerEncoder(channels * 4, self.max_bin // 4, num_heads=num_heads, dropout=dropout, expansion=expansion)
 
         self.dec2 = FrameDecoder(channels * 4, channels * 2, self.max_bin // 2, expansion=expansion, has_skip=False)
-        self.dec2_transformer = FrameTransformerDecoder(channels * 2, self.max_bin // 2, num_heads=num_heads, dropout=dropout, expansion=expansion)
+        self.dec2_transformer = FrameTransformerEncoder(channels * 2, self.max_bin // 2, num_heads=num_heads, dropout=dropout, expansion=expansion)
 
         self.dec1 = FrameDecoder(channels * 2, channels * 1, self.max_bin, expansion=expansion, has_skip=False)
-        self.dec1_transformer = FrameTransformerDecoder(channels * 1, self.max_bin, num_heads=num_heads, dropout=dropout, expansion=expansion)
+        self.dec1_transformer = FrameTransformerEncoder(channels * 1, self.max_bin, num_heads=num_heads, dropout=dropout, expansion=expansion)
 
         self.out = nn.Parameter(torch.empty(in_channels, channels)) if in_channels != channels else None
         nn.init.uniform_(self.out, a=-1/math.sqrt(in_channels), b=1/math.sqrt(in_channels))
