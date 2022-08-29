@@ -149,30 +149,18 @@ def main():
     p.add_argument('--sr', '-r', type=int, default=44100)
     p.add_argument('--hop_length', '-H', type=int, default=1024)
     p.add_argument('--n_fft', '-f', type=int, default=2048)
-    p.add_argument('--max_cropsize', type=int, default=2048)
     p.add_argument('--pretrained_model', '-P', type=str, default=None)
     p.add_argument('--mixup_rate', '-M', type=float, default=0)
     p.add_argument('--mixup_alpha', '-a', type=float, default=0.4)
     p.add_argument('--mixed_precision', type=str, default='false')
-    p.add_argument('--column_kernel', type=str, default='true')
 
     p.add_argument('--warmup_steps', type=int, default=16000)
     p.add_argument('--curr_warmup_step', type=int, default=0)
-    
-    p.add_argument('--warmup_epoch', type=int, default=1)
-    p.add_argument('--curr_warmup_epoch', type=int, default=0)
     p.add_argument('--lr_verbosity', type=int, default=1000)
 
     p.add_argument('--channels', type=int, default=16)
-    p.add_argument('--channel_scale', type=int, default=1)
-    p.add_argument('--depth', type=int, default=6)
-    p.add_argument('--num_res_blocks', type=int, default=1) # per encoder/decoder
-    p.add_argument('--num_transformer_encoders', type=int, default=1) # per layer of u-net
-    p.add_argument('--num_transformer_decoders', type=int, default=1) # per layer of u-net
-    p.add_argument('--num_bands', type=int, default=16) # going to retitle this to heads, not really bands given the q,k,v projections
-    p.add_argument('--feedforward_dim', type=int, default=12288) # probabably an absurd feedforward dim, however a large feedforward dim was talked about in the primer paper as being useful (I think it was 7x there)
-    p.add_argument('--feedforward_expansion', type=int, default=12)
-    p.add_argument('--bias', type=str, default='false')
+    p.add_argument('--num_heads', type=int, default=4)
+    p.add_argument('--feedforward_expansion', type=int, default=4)
     p.add_argument('--dropout', type=float, default=0.1)
 
     p.add_argument('--cropsizes', type=str, default='256,512')
@@ -257,9 +245,7 @@ def main():
     torch.manual_seed(args.seed)
 
     device = torch.device('cpu')
-    
-    model = FrameTransformer(channels=args.channels, n_fft=args.n_fft, dropout=args.dropout, expansion=args.feedforward_expansion)
-    #model = FramePrimer2(channels=args.channels, dropout=args.dropout, n_fft=args.n_fft, expansion=args.feedforward_expansion)
+    model = FrameTransformer(channels=args.channels, n_fft=args.n_fft, dropout=args.dropout, expansion=args.feedforward_expansion, num_heads=args.num_heads)
 
     if args.pretrained_model is not None:
         model.load_state_dict(torch.load(args.pretrained_model, map_location=device))
@@ -304,7 +290,7 @@ def main():
         
 
     steps = len(train_dataset) // (args.batch_sizes[0] * args.accumulation_steps[0])
-    warmup_steps = args.warmup_steps  # steps * args.warmup_epoch
+    warmup_steps = args.warmup_steps
     decay_steps = steps * args.epochs[-1] + warmup_steps
 
     scheduler = torch.optim.lr_scheduler.ChainedScheduler([
