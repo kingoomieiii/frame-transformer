@@ -6,7 +6,7 @@ I'm calling this architecture a frame transformer. It consists of a position-wis
 
 This fork also makes use of a dataset I refer to as voxaug in order to satisfy the transformers need for large amounts of data. This dataset randomly selects from a library of instrumental music and a library of vocal tracks and mixes them together for the neural network to train on. This has the benefit of inflating data exponentially as well as ensuring data is perfect for the removal process. To an extent you could view this as self-supervised learning in that its learning to remove a mask of vocals. My instrumental dataset consists of 30.88 days worth of music while my vocal stem library consists of 1416 full song vocal tracks. I will be uploading checkpoints for a 357,493,618 parameter model after it trains for a few days.
 
-The gan script is not currently ready, nor is the vector quantized frame transformer just yet. I will be working on those shortly.
+The gan script is not currently ready, nor is the vector quantized frame transformer just yet. I will be working on those shortly. Also want to look into a diffusion training script soon.
 
 ## Module Descriptions ##
 
