@@ -10,7 +10,7 @@ import wandb
 
 from tqdm import tqdm
 
-from dataset_voxaug import VoxAugDataset
+from dataset_predphase import PhasePredictionDataset
 from frame_transformer import FrameTransformer
 
 from lib.lr_scheduler_linear_warmup import LinearWarmupScheduler
@@ -69,7 +69,7 @@ def train_epoch(dataloader, model, device, optimizer, accumulation_steps, progre
         with torch.cuda.amp.autocast_mode.autocast(enabled=grad_scaler is not None):
             pred = torch.sigmoid(model(X_batch))
 
-        l1_loss = crit((X_batch + 1) * 0.5 * pred, y_batch) / accumulation_steps
+        l1_loss = crit((pred + 1) * 0.5, y_batch) / accumulation_steps
 
         batch_loss = batch_loss + l1_loss
         batch_qloss = batch_qloss
@@ -78,7 +78,6 @@ def train_epoch(dataloader, model, device, optimizer, accumulation_steps, progre
         if torch.logical_or(accum_loss.isnan(), accum_loss.isinf()):
             print('nan training loss; aborting')
             quit()
-
 
         if grad_scaler is not None:
             grad_scaler.scale(accum_loss).backward()
@@ -133,8 +132,7 @@ def validate_epoch(dataloader, model, device):
             y_batch = y_batch.to(device)[:, :, :model.max_bin]
 
             pred = torch.sigmoid(model(X_batch))
-
-            mag_loss = crit((X_batch + 1) * 0.5 * pred, y_batch)
+            mag_loss = crit((pred + 1) * 0.5, y_batch)
 
             if torch.logical_or(mag_loss.isnan(), mag_loss.isinf()):
                 print('nan validation loss; aborting')
@@ -231,21 +229,21 @@ def main():
     np.random.seed(args.seed + 1)
     torch.manual_seed(args.seed + 1)
 
-    train_dataset = VoxAugDataset(
+    train_dataset = PhasePredictionDataset(
         path=[
             "C://cs2048_sr44100_hl1024_nf2048_of0",
             "D://cs2048_sr44100_hl1024_nf2048_of0",
+            "D://cs2048_sr44100_hl1024_nf2048_of0_MIXES",
             "F://cs2048_sr44100_hl1024_nf2048_of0",
+            "F://cs2048_sr44100_hl1024_nf2048_of0_MIXES",
             "H://cs2048_sr44100_hl1024_nf2048_of0",
+            "H://cs2048_sr44100_hl1024_nf2048_of0_MIXES",
             "J://cs2048_sr44100_hl1024_nf2048_of0",
-            "K://cs2048_sr44100_hl1024_nf2048_of0_PAIRS",
             "J://cs2048_sr44100_hl1024_nf2048_of0_PAIRS",
+            "J://cs2048_sr44100_hl1024_nf2048_of0_MIXES",
             "K://cs2048_sr44100_hl1024_nf2048_of0",
-        ],
-        vocal_path=[
-            "D://cs2048_sr44100_hl1024_nf2048_of0_VOCALS",
-            "J://cs2048_sr44100_hl1024_nf2048_of0_VOCALS",
-            "K://cs2048_sr44100_hl1024_nf2048_of0_VOCALS",
+            "K://cs2048_sr44100_hl1024_nf2048_of0_PAIRS",
+            "K://cs2048_sr44100_hl1024_nf2048_of0_MIXES",
         ],
         is_validation=False,
         epoch_size=args.epoch_size,

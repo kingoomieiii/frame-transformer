@@ -2,8 +2,7 @@ import math
 import torch
 from torch import nn
 import torch.nn.functional as F
-from frame_primer.rotary_embedding_torch import RotaryEmbedding
-from frame_primer.common import FrameConv, ResBlock
+from rotary_embedding_torch import RotaryEmbedding
 
 class FrameTransformer(nn.Module):
     def __init__(self, in_channels=2, channels=2, dropout=0.1, n_fft=2048, num_heads=[4, 4, 4, 4, 4, 4], expansion=2):
@@ -194,7 +193,7 @@ class FrameTransformerEncoder(nn.Module):
     def __init__(self, channels, features, num_heads=4, dropout=0.1, expansion=4):
         super(FrameTransformerEncoder, self).__init__()
 
-        self.relu = nn.ReLU(inplace=True)
+        self.relu = nn.ReLU()
 
         self.norm1 = FrameNorm(features)
         self.attn = MultichannelMultiheadAttention(channels, num_heads, features)
@@ -212,7 +211,7 @@ class FrameTransformerEncoder(nn.Module):
         x = x + z
 
         z = self.norm2(x)
-        z = self.linear2(torch.square(self.relu(self.linear1(z))))
+        z = self.linear2(self.relu(self.linear1(z)) ** 2)
         z = self.dropout2(z)
         x = x + z
 
@@ -249,7 +248,7 @@ class FrameTransformerDecoder(nn.Module):
         x = x + z
 
         z = self.norm3(x)
-        z = self.linear2(torch.square(self.relu(self.linear1(z))))
+        z = self.linear2(self.relu(self.linear1(z)) ** 2)
         z = self.dropout3(z)
         x = x + z
 

@@ -11,11 +11,11 @@ import torch
 import torch.nn as nn
 import torch.utils.data
 from frame_primer.dataset_denoising import DenoisingDataset
+from frame_transformer import FrameTransformer
 
 from lib import dataset
 from tqdm import tqdm
 
-from frame_primer.frame_primer import FramePrimer, FramePrimer2
 from lib.lr_scheduler_linear_warmup import LinearWarmupScheduler
 from lib.lr_scheduler_polynomial_decay import PolynomialDecayScheduler
 
@@ -68,14 +68,14 @@ def train_epoch(dataloader, model, device, optimizer, accumulation_steps, grad_s
     model.zero_grad()
 
     pbar = tqdm(dataloader) if progress_bar else dataloader
-    for X, E in pbar:
+    for i, (X, eps) in enumerate(pbar):
         X = X.to(device)[:, :, :model.max_bin]
-        E = E.to(device)[:, :, :model.max_bin]
+        eps = eps.to(device)[:, :, :model.max_bin]
 
         with torch.cuda.amp.autocast_mode.autocast(enabled=grad_scaler is not None):
-            e = model(X)
+            pred = model(X)
 
-        loss = mask_crit(e, E) / accumulation_steps
+        loss = mask_crit(pred, eps) / accumulation_steps
 
         if torch.logical_or(loss.isnan(), loss.isinf()):
             print('non-finite loss')
@@ -86,7 +86,7 @@ def train_epoch(dataloader, model, device, optimizer, accumulation_steps, grad_s
             grad_scaler.scale(loss).backward()
         else:
             loss.backward()
-
+            
         if (i + 1) % accumulation_steps == 0:
             if progress_bar:
                 pbar.set_description(f'{str(batch_loss.item())}')
@@ -120,14 +120,14 @@ def validate_epoch(dataloader, model, device, grad_scaler, reconstruction_loss_t
     mask_crit = nn.L1Loss()
 
     with torch.no_grad():
-        for X, E in tqdm(dataloader):
+        for X, eps in tqdm(dataloader):
             X = X.to(device)[:, :, :model.max_bin]
-            E = E.to(device)[:, :, :model.max_bin]
+            eps = eps.to(device)[:, :, :model.max_bin]
 
             with torch.cuda.amp.autocast_mode.autocast(enabled=grad_scaler is not None):
-                e = model(X)
+                pred = model(X)
 
-            noise_loss = mask_crit((e + 1) * 0.5, (E + 1) * 0.5)
+            noise_loss = mask_crit((pred + 1) * 0.5, (eps + 1) * 0.5)
     
             if torch.logical_or(noise_loss.isnan(), noise_loss.isinf()):
                 print('non-finite or nan validation loss') 
@@ -162,10 +162,11 @@ def main():
     p.add_argument('--bias', type=str, default='true')
     p.add_argument('--dropout', type=float, default=0.1)
 
-    p.add_argument('--cropsizes', type=str, default='512,1024,2048')
-    p.add_argument('--epochs', type=str, default='30,50,60')
-    p.add_argument('--batch_sizes', type=str, default='5,2,1')
-    p.add_argument('--accumulation_steps', '-A', type=str, default='1,2,4')
+    p.add_argument('--cropsizes', type=str, default='256,512')
+    p.add_argument('--epochs', type=str, default='30,50')
+    p.add_argument('--epoch_sizes', type=str, default='None,None')
+    p.add_argument('--batch_sizes', type=str, default='2,1')
+    p.add_argument('--accumulation_steps', '-A', type=str, default='4,2')
 
     p.add_argument('--amsgrad', type=str, default='false')
     p.add_argument('--gpu', '-g', type=int, default=-1)
@@ -202,7 +203,7 @@ def main():
     p.add_argument('--wandb_run_id', type=str, default=None)
     p.add_argument('--wandb', type=str, default='true')
     p.add_argument('--gamma', type=float, default=0.95)
-    p.add_argument('--sigma', type=float, default=0.4)
+    p.add_argument('--sigma', type=float, default=0.5)
     args = p.parse_args()
 
     args.amsgrad = str.lower(args.amsgrad) == 'true'
@@ -236,7 +237,10 @@ def main():
             "H://cs2048_sr44100_hl1024_nf2048_of0",
             "H://cs2048_sr44100_hl1024_nf2048_of0_MIXES",
             "J://cs2048_sr44100_hl1024_nf2048_of0",
+            "J://cs2048_sr44100_hl1024_nf2048_of0_PAIRS",
             "J://cs2048_sr44100_hl1024_nf2048_of0_MIXES",
+            "K://cs2048_sr44100_hl1024_nf2048_of0",
+            "K://cs2048_sr44100_hl1024_nf2048_of0_PAIRS",
             "K://cs2048_sr44100_hl1024_nf2048_of0_MIXES",
         ],
         epoch_size=args.epoch_size,
@@ -250,8 +254,11 @@ def main():
     device = torch.device('cpu')
 
     #model = FramePrimer(channels=args.channels, depth=args.depth, num_transformer_encoders=args.num_transformer_encoders, num_transformer_decoders=args.num_transformer_decoders, n_fft=args.n_fft, cropsize=args.cropsize, num_bands=args.num_bands, feedforward_dim=args.feedforward_dim, bias=args.bias)
-    model = FramePrimer2(channels=args.channels, scale_factor=args.channel_scale, feedforward_expansion=args.feedforward_expansion, depth=args.depth, num_transformer_blocks=args.num_transformer_encoders, n_fft=args.n_fft, cropsize=args.max_cropsize, num_bands=args.num_bands, bias=args.bias, dropout=args.dropout, num_res_blocks=args.num_res_blocks)
+    #model = FramePrimer(channels=args.channels, scale_factor=args.channel_scale, feedforward_dim=args.feedforward_dim, depth=args.depth, num_transformer_encoders=args.num_transformer_encoders, num_transformer_decoders=args.num_transformer_decoders, n_fft=args.n_fft, cropsize=args.max_cropsize, num_bands=args.num_bands, bias=args.bias, dropout=args.dropout, num_res_blocks=args.num_res_blocks)
+    #model = FramePrimer2(channels=args.channels, scale_factor=args.channel_scale, feedforward_expansion=args.feedforward_expansion, depth=args.depth, num_transformer_blocks=args.num_transformer_encoders, n_fft=args.n_fft, cropsize=args.max_cropsize, num_bands=args.num_bands, bias=args.bias, dropout=args.dropout, num_res_blocks=args.num_res_blocks)
    
+    model = FrameTransformer(channels=args.channels, n_fft=args.n_fft, dropout=args.dropout, expansion=args.feedforward_expansion)
+
     if args.pretrained_model is not None:
         model.load_state_dict(torch.load(args.pretrained_model, map_location=device))
     if torch.cuda.is_available() and args.gpu >= 0:
