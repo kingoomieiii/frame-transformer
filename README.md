@@ -1,6 +1,6 @@
-# vocal-remover
+# frame-transformer
 
-This is a deep-learning-based tool to extract instrumental track from your songs.
+This is a collection of tools for working with spectrograms using transformers. It includes a vocal remover that has evolved from tsurumeso's vocal remover, a phase predictor, pretraining, and a vector quantizer for frames. Right now I am working on training the vocal remover, however I will be moving onto these others after that is complete.
 
 This repo has gone through so many changes, doubt anyone is reading any of this but on the off chance anyone does lol... I'm calling this architecture a frame transformer. It consists of a position-wise linear residual u-net with a multichannel transformer. Currently training a version of this out, it is learning way faster than I would have thought so I'm pretty excited. It is able to keep up with the convolutional variant with half the context and struggles less with stuff like fretless bass. 
 
