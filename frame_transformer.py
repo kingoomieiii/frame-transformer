@@ -168,7 +168,7 @@ class MultichannelMultiheadAttention(nn.Module):
 
         self.out_proj = MultichannelLinear(channels, channels, features, features)
 
-    def forward(self, x, mem=None):
+    def __call__(self, x, mem=None):
         b,c,h,w = x.shape
 
         q = self.rotary_embedding.rotate_queries_or_keys(self.q_norm(self.q_proj(x).transpose(2,3).reshape(b,c,w,self.num_heads,-1).permute(0,1,3,2,4)))
