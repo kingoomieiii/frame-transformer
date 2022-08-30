@@ -66,13 +66,16 @@ class FrameTransformer(nn.Module):
         return out
 
 class MultichannelLinear(nn.Module):
-    def __init__(self, in_channels, out_channels, in_features, out_features, positionwise=True, depthwise=True):
+    def __init__(self, in_channels, out_channels, in_features, out_features, positionwise=True, depthwise=True, bias=False):
         super(MultichannelLinear, self).__init__()
 
         self.weight_pw = None
+        self.bias_pw = None
         if in_features != out_features or positionwise:
             self.weight_pw = nn.Parameter(torch.empty(in_channels, out_features, in_features))
             nn.init.uniform_(self.weight_pw, a=-1/math.sqrt(in_features), b=1/math.sqrt(in_features))
+
+            self.bias_pw = nn.Parameter(torch.empty(in_channels, out_features))
 
         self.weight_dw = None
         if in_channels != out_channels or depthwise:
@@ -88,6 +91,16 @@ class MultichannelLinear(nn.Module):
         
         return x
 
+class FrameGLU(nn.Module):
+    def __init__(self, channels, features):
+        super(FrameGLU, self).__init__()
+
+        self.W = MultichannelLinear(channels, channels, features, features, bias=True, depthwise=False)
+        self.V = MultichannelLinear(channels, channels, features, features, bias=True, depthwise=False)
+
+    def __call__(self, x):
+        return torch.relu_(self.W(x)) * self.V(x)
+
 class FrameNorm(nn.Module):
     def __init__(self, features):
         super(FrameNorm, self).__init__()
@@ -101,7 +114,7 @@ class FrameEncoder(nn.Module):
     def __init__(self, in_channels, out_channels, features, downsample=True, expansion=2, dropout=0.1):
         super(FrameEncoder, self).__init__()
 
-        self.relu = nn.ReLU()
+        self.relu = FrameGLU(1, features * 2)
         self.norm1 = FrameNorm(features)
         self.linear1 = MultichannelLinear(in_channels, out_channels, features, features * 2)
         self.linear2 = MultichannelLinear(out_channels, out_channels, features * 2, features // 2 if downsample else features)
@@ -110,7 +123,7 @@ class FrameEncoder(nn.Module):
 
     def __call__(self, x):
         h = self.norm1(x)
-        h = self.linear2(torch.square(self.relu(self.linear1(h))))
+        h = self.linear2(self.relu(self.linear1(h)))
         x = self.identity(x) + self.dropout(h)
         
         return x
@@ -119,7 +132,7 @@ class FrameDecoder(nn.Module):
     def __init__(self, in_channels, out_channels, features, upsample=True, expansion=2, dropout=0.1, has_skip=True):
         super(FrameDecoder, self).__init__()
         
-        self.relu = nn.ReLU()
+        self.glu1 = FrameGLU(1, features * 2)
         self.norm = FrameNorm(features // 2)
         self.linear1 = MultichannelLinear(in_channels, out_channels, features // 2, features * 2)
         self.linear2 = MultichannelLinear(out_channels, out_channels, features * 2, features)
@@ -127,6 +140,7 @@ class FrameDecoder(nn.Module):
         self.dropout = nn.Dropout(dropout) if dropout > 0 else nn.Identity()
 
         if has_skip:
+            self.glu2 = FrameGLU(out_channels, features * 2)
             self.norm2 = FrameNorm(features)
             self.linear3 = MultichannelLinear(out_channels * 2, out_channels, features, features * 2)
             self.linear4 = MultichannelLinear(out_channels, out_channels, features * 2, features, depthwise=False)
@@ -134,12 +148,12 @@ class FrameDecoder(nn.Module):
 
     def __call__(self, x, skip=None):
         h = self.norm(x)
-        h = self.linear2(torch.square(self.relu(self.linear1(h))))
+        h = self.linear2(self.glu1(self.linear1(h)))
         x = self.identity(x) + self.dropout(h)
 
         if skip is not None:
             h = self.norm2(torch.cat((x, skip), dim=1))
-            h = self.linear4(torch.square(self.relu(self.linear3(h))))
+            h = self.linear4(self.glu1(self.linear3(h)))
             x = x + h
 
         return x
@@ -150,7 +164,7 @@ class MultichannelMultiheadAttention(nn.Module):
 
         self.mixed_precision = mixed_precision
         self.num_heads = num_heads
-        self.rotary_embedding = RotaryEmbedding(dim = features // num_heads // 2)
+        self.rotary_embedding = RotaryEmbedding(dim = features // num_heads, learned_freq=True)
 
         self.q_norm = FrameNorm(features // num_heads)
         self.q_proj = nn.Sequential(
@@ -187,7 +201,7 @@ class FrameTransformerEncoder(nn.Module):
     def __init__(self, channels, features, num_heads=4, dropout=0.1, expansion=4):
         super(FrameTransformerEncoder, self).__init__()
 
-        self.relu = nn.ReLU()
+        self.relu = FrameGLU(1, features * expansion)
 
         self.norm1 = FrameNorm(features)
         self.attn = MultichannelMultiheadAttention(channels, num_heads, features)
@@ -205,7 +219,7 @@ class FrameTransformerEncoder(nn.Module):
         x = x + z
 
         z = self.norm2(x)
-        z = self.linear2(torch.square(self.relu(self.linear1(z))))
+        z = self.linear2(self.relu(self.linear1(z)))
         z = self.dropout2(z)
         x = x + z
 
@@ -215,7 +229,7 @@ class FrameTransformerDecoder(nn.Module):
     def __init__(self, channels, features, num_heads=4, dropout=0.1, expansion=4):
         super(FrameTransformerDecoder, self).__init__()
         
-        self.relu = nn.ReLU()
+        self.relu = FrameGLU(1, features * expansion)
 
         self.norm1 = FrameNorm(features)
         self.attn1 = MultichannelMultiheadAttention(channels, num_heads, features)
@@ -242,7 +256,7 @@ class FrameTransformerDecoder(nn.Module):
         x = x + z
 
         z = self.norm3(x)
-        z = self.linear2(torch.square(self.relu(self.linear1(z))))
+        z = self.linear2(self.relu(self.linear1(z)))
         z = self.dropout3(z)
         x = x + z
 
