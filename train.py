@@ -49,7 +49,7 @@ def init_epoch(dataloader, model, device):
 
         break
 
-def train_epoch(dataloader, model, device, optimizer, accumulation_steps, progress_bar, mixup_rate, mixup_alpha, lr_warmup=None, grad_scaler=None, use_wandb=True):
+def train_epoch(dataloader, model, device, optimizer, accumulation_steps, progress_bar, mixup_rate, mixup_alpha, lr_warmup=None, grad_scaler=None, use_wandb=True, step=0):
     model.train()
     sum_loss = 0
     crit = nn.L1Loss()
@@ -87,7 +87,7 @@ def train_epoch(dataloader, model, device, optimizer, accumulation_steps, progre
 
         if (itr + 1) % accumulation_steps == 0:
             if progress_bar:
-                pbar.set_description(f'{str(batch_loss.item())}')
+                pbar.set_description(f'{step}: {str(batch_loss.item())}')
 
             if use_wandb:
                 wandb.log({
@@ -101,6 +101,8 @@ def train_epoch(dataloader, model, device, optimizer, accumulation_steps, progre
                 grad_scaler.update()
             else:
                 optimizer.step()
+
+            step = step + 1
 
             if lr_warmup is not None:
                 lr_warmup.step()
@@ -120,7 +122,7 @@ def train_epoch(dataloader, model, device, optimizer, accumulation_steps, progre
     #     optimizer.step()
     #     model.zero_grad()
 
-    return sum_loss / batches
+    return sum_loss / batches, step
 
 def validate_epoch(dataloader, model, device):
     model.eval()
@@ -168,8 +170,8 @@ def main():
 
     p.add_argument('--cropsizes', type=str, default='256,512')
     p.add_argument('--epochs', type=str, default='10,25')
-    p.add_argument('--batch_sizes', type=str, default='2,1')
-    p.add_argument('--accumulation_steps', '-A', type=str, default='48,96')
+    p.add_argument('--batch_sizes', type=str, default='3,1')
+    p.add_argument('--accumulation_steps', '-A', type=str, default='16,16')
 
     p.add_argument('--gpu', '-g', type=int, default=-1)
     p.add_argument('--optimizer', type=str.lower, choices=['adam', 'adamw', 'sgd', 'radam', 'rmsprop'], default='adamw')
@@ -289,14 +291,15 @@ def main():
     elif args.optimizer == 'rmsprop':
         optimizer = torch.optim.RMSprop(groups, lr=args.learning_rate)
         
+    step = args.curr_warmup_step
 
     steps = len(train_dataset) // (args.batch_sizes[0] * args.accumulation_steps[0])
     warmup_steps = args.warmup_steps
     decay_steps = steps * args.epochs[-1] + warmup_steps
 
     scheduler = torch.optim.lr_scheduler.ChainedScheduler([
-            LinearWarmupScheduler(optimizer, target_lr=args.learning_rate, num_steps=warmup_steps, current_step=args.curr_warmup_step, verbose_skip_steps=args.lr_verbosity),
-            PolynomialDecayScheduler(optimizer, target=args.lr_scheduler_decay_target, power=args.lr_scheduler_decay_power, num_decay_steps=decay_steps, start_step=warmup_steps, current_step=args.curr_warmup_step, verbose_skip_steps=args.lr_verbosity)
+        LinearWarmupScheduler(optimizer, target_lr=args.learning_rate, num_steps=warmup_steps, current_step=args.curr_warmup_step, verbose_skip_steps=args.lr_verbosity),
+        PolynomialDecayScheduler(optimizer, target=args.lr_scheduler_decay_target, power=args.lr_scheduler_decay_power, num_decay_steps=decay_steps, start_step=warmup_steps, current_step=args.curr_warmup_step, verbose_skip_steps=args.lr_verbosity)
     ])
 
     grad_scaler = torch.cuda.amp.grad_scaler.GradScaler() if args.mixed_precision else None
@@ -366,7 +369,7 @@ def main():
 
         print('# epoch {}'.format(epoch))
 
-        train_loss = train_epoch(train_dataloader, model, device, optimizer, accum_steps, args.progress_bar, args.mixup_rate, args.mixup_alpha, lr_warmup=scheduler, grad_scaler=grad_scaler, use_wandb=args.wandb)        
+        train_loss, step = train_epoch(train_dataloader, model, device, optimizer, accum_steps, args.progress_bar, args.mixup_rate, args.mixup_alpha, lr_warmup=scheduler, grad_scaler=grad_scaler, use_wandb=args.wandb, step=step)
         val_loss_old = validate_epoch(val_dataloader, model, device)
         val_loss_new = validate_epoch(val_dataloader2, model, device)
 
