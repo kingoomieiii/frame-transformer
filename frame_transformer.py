@@ -101,7 +101,7 @@ class FrameEncoder(nn.Module):
     def __init__(self, in_channels, out_channels, features, downsample=True, expansion=2, dropout=0.1):
         super(FrameEncoder, self).__init__()
 
-        self.gelu = nn.GELU()
+        self.relu = nn.ReLU()
         self.norm1 = FrameNorm(features)
         self.linear1 = MultichannelLinear(in_channels, out_channels, features, features * 2)
         self.linear2 = MultichannelLinear(out_channels, out_channels, features * 2, features // 2 if downsample else features)
@@ -110,7 +110,7 @@ class FrameEncoder(nn.Module):
 
     def __call__(self, x):
         h = self.norm1(x)
-        h = self.linear2(self.gelu(self.linear1(h)))
+        h = self.linear2(torch.square(self.relu(self.linear1(h))))
         x = self.identity(x) + self.dropout(h)
         
         return x
@@ -119,7 +119,7 @@ class FrameDecoder(nn.Module):
     def __init__(self, in_channels, out_channels, features, upsample=True, expansion=2, dropout=0.1, has_skip=True):
         super(FrameDecoder, self).__init__()
         
-        self.gelu = nn.GELU()
+        self.relu = nn.ReLU()
         self.norm = FrameNorm(features // 2)
         self.linear1 = MultichannelLinear(in_channels, out_channels, features // 2, features * 2)
         self.linear2 = MultichannelLinear(out_channels, out_channels, features * 2, features)
@@ -134,12 +134,12 @@ class FrameDecoder(nn.Module):
 
     def __call__(self, x, skip=None):
         h = self.norm(x)
-        h = self.linear2(self.gelu(self.linear1(h)))
+        h = self.linear2(torch.square(self.relu(self.linear1(h))))
         x = self.identity(x) + self.dropout(h)
 
         if skip is not None:
             h = self.norm2(torch.cat((x, skip), dim=1))
-            h = self.linear4(self.gelu(self.linear3(h)))
+            h = self.linear4(torch.square(self.relu(self.linear3(h))))
             x = x + h
 
         return x
@@ -205,7 +205,7 @@ class FrameTransformerEncoder(nn.Module):
         x = x + z
 
         z = self.norm2(x)
-        z = self.linear2(self.relu(self.linear1(z)) ** 2)
+        z = self.linear2(torch.square(self.relu(self.linear1(z))))
         z = self.dropout2(z)
         x = x + z
 
@@ -242,7 +242,7 @@ class FrameTransformerDecoder(nn.Module):
         x = x + z
 
         z = self.norm3(x)
-        z = self.linear2(self.relu(self.linear1(z)) ** 2)
+        z = self.linear2(torch.square(self.relu(self.linear1(z))))
         z = self.dropout3(z)
         x = x + z
 

@@ -99,8 +99,8 @@ class VoxAugDataset(torch.utils.data.Dataset):
         try:
             X, Xc = data['X'], data['c']
             Y = X if aug else data['Y']
-        except:
-            print(f'error loading {path}, substituting with random sample')
+        except Exception as err:
+            print(f'error loading {path}, substituting with random sample - {err}')
             path = self.curr_list[np.random.randint(len(self.curr_list))]
             data = np.load(str(path))
             aug = 'Y' not in data.files
