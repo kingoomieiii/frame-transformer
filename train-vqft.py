@@ -11,7 +11,7 @@ import wandb
 from tqdm import tqdm
 
 from dataset_predphase import PhasePredictionDataset
-from frame_transformer import VQFrameTransformer
+from frame_quantizer import VQFrameTransformer
 
 from lib.lr_scheduler_linear_warmup import LinearWarmupScheduler
 from lib.lr_scheduler_polynomial_decay import PolynomialDecayScheduler

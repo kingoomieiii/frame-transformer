@@ -17,7 +17,8 @@ from lib import spec_utils
 from tqdm import tqdm
 
 from dataset_voxaug import VoxAugDataset
-from frame_transformer import FrameTransformer, FrameTransformerDiscriminator
+from frame_transformer import FrameTransformer
+from frame_transformer_discriminator import FrameTransformerDiscriminator
 
 from lib.lr_scheduler_linear_warmup import LinearWarmupScheduler
 from lib.lr_scheduler_polynomial_decay import PolynomialDecayScheduler

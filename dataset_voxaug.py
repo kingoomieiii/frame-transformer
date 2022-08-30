@@ -148,7 +148,7 @@ class VoxAugDataset(torch.utils.data.Dataset):
             Y = Y * a + (1 - a) * MY
             
         if root:
-            X = (np.clip(np.abs(X) / c, 0, 1) * 2) - 1
+            X = np.clip(np.abs(X) / c, 0, 1)
             Y = np.clip(np.abs(Y) / c, 0, 1)
 
         return X, Y

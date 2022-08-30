@@ -69,7 +69,7 @@ def train_epoch(dataloader, model, device, optimizer, accumulation_steps, progre
         with torch.cuda.amp.autocast_mode.autocast(enabled=grad_scaler is not None):
             pred = torch.sigmoid(model(X_batch))
 
-        l1_loss = crit((X_batch + 1) * 0.5 * pred, y_batch) / accumulation_steps
+        l1_loss = crit(X_batch * pred, y_batch) / accumulation_steps
 
         batch_loss = batch_loss + l1_loss
         batch_qloss = batch_qloss
@@ -136,7 +136,7 @@ def validate_epoch(dataloader, model, device):
 
             pred = torch.sigmoid(model(X_batch))
 
-            mag_loss = crit((X_batch + 1) * 0.5 * pred, y_batch)
+            mag_loss = crit(X_batch * pred, y_batch)
 
             if torch.logical_or(mag_loss.isnan(), mag_loss.isinf()):
                 print('nan validation loss; aborting')
@@ -169,9 +169,10 @@ def main():
     p.add_argument('--dropout', type=float, default=0.1)
 
     p.add_argument('--cropsizes', type=str, default='256,512')
+    p.add_argument('--steps', type=str, default='100000,100000')
     p.add_argument('--epochs', type=str, default='10,25')
-    p.add_argument('--batch_sizes', type=str, default='3,1')
-    p.add_argument('--accumulation_steps', '-A', type=str, default='16,24')
+    p.add_argument('--batch_sizes', type=str, default='2,1')
+    p.add_argument('--accumulation_steps', '-A', type=str, default='24,24')
 
     p.add_argument('--gpu', '-g', type=int, default=-1)
     p.add_argument('--optimizer', type=str.lower, choices=['adam', 'adamw', 'sgd', 'radam', 'rmsprop'], default='adamw')
@@ -206,6 +207,8 @@ def main():
     args.llrd = str.lower(args.llrd) == 'true'
     args.lock = str.lower(args.lock) == 'true'
     args.wandb = str.lower(args.wandb) == 'true'
+    args.steps = [int(s) for i, s in enumerate(args.steps.split(','))]
+    total_steps = sum(args.steps)
     args.epochs = [int(epoch) for i, epoch in enumerate(args.epochs.split(','))]
     args.cropsizes = [int(cropsize) for cropsize in args.cropsizes.split(',')]
     args.batch_sizes = [int(batch_size) for batch_size in args.batch_sizes.split(',')]
@@ -293,9 +296,8 @@ def main():
         
     step = args.curr_warmup_step
 
-    steps = len(train_dataset) // (args.batch_sizes[0] * args.accumulation_steps[0])
     warmup_steps = args.warmup_steps
-    decay_steps = steps * args.epochs[-1] + warmup_steps
+    decay_steps = total_steps
 
     scheduler = torch.optim.lr_scheduler.ChainedScheduler([
         LinearWarmupScheduler(optimizer, target_lr=args.learning_rate, num_steps=warmup_steps, current_step=args.curr_warmup_step, verbose_skip_steps=args.lr_verbosity),
