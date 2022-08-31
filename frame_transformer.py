@@ -194,7 +194,7 @@ class MultichannelMultiheadAttention(nn.Module):
             torch.var(f, dim=3, keepdim=True), 
             torch.min(f, dim=3, keepdim=True).values, 
             torch.max(f, dim=3, keepdim=True).values,
-            torch.sqrt(torch.sum(f, dim=3, keepdim=True))), dim=3)
+            torch.sqrt(torch.abs(torch.sum(f, dim=3, keepdim=True)))), dim=3)
         f = self.f_proj2(f.reshape(b,c*self.num_heads,1,6).transpose(2,3)).transpose(2,3).reshape(b,c,self.num_heads,1).unsqueeze(-1)
 
         with torch.cuda.amp.autocast_mode.autocast(enabled=False):
