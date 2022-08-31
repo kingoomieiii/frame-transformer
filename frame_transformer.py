@@ -159,8 +159,7 @@ class MultichannelMultiheadAttention(nn.Module):
         self.num_heads = num_heads
         self.rotary_embedding = RotaryEmbedding(dim = features // num_heads, learned_freq=True)
 
-        self.f_proj1 = MultichannelLinear(channels, channels, features, num_heads, depthwise=False)
-        
+        self.f_proj1 = MultichannelLinear(channels, channels, features, num_heads, depthwise=False)        
         self.f_proj2 = nn.Sequential(
             MultichannelLinear(channels * num_heads, channels * num_heads, 6, focus_expansion, depthwise=False),
             SquaredReLU(),
@@ -195,7 +194,7 @@ class MultichannelMultiheadAttention(nn.Module):
             torch.min(f, dim=3, keepdim=True).values, 
             torch.max(f, dim=3, keepdim=True).values,
             torch.sqrt(torch.abs(torch.sum(f, dim=3, keepdim=True)))), dim=3)
-        f = self.f_proj2(f.reshape(b,c*self.num_heads,1,6).transpose(2,3)).transpose(2,3).reshape(b,c,self.num_heads,1).unsqueeze(-1)
+        f = torch.sigmoid(self.f_proj2(f.reshape(b,c*self.num_heads,1,6).transpose(2,3)).transpose(2,3).reshape(b,c,self.num_heads,1).unsqueeze(-1))
 
         with torch.cuda.amp.autocast_mode.autocast(enabled=False):
             qk = torch.matmul(q.float(), k.float()) / math.sqrt(h)
