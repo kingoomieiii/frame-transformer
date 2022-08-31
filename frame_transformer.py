@@ -165,15 +165,15 @@ class FrameDecoder(nn.Module):
         return x
 
 class MultichannelMultiheadAttention(nn.Module):
-    def __init__(self, channels, num_heads, features, mixed_precision=False):
+    def __init__(self, channels, num_heads, features, mixed_precision=False, max_sequence_length=2048):
         super().__init__()
 
         self.mixed_precision = mixed_precision
         self.num_heads = num_heads
         self.rotary_embedding = RotaryEmbedding(dim = features // num_heads)
 
-        self.g = nn.Parameter(torch.empty(1))
-        nn.init.constant_(self.g, math.log2(256 ** 2 - 256))
+        self.g = nn.Parameter(torch.empty(channels, num_heads, 1, 1))
+        nn.init.constant_(self.g, math.log2(max_sequence_length ** 2 - max_sequence_length))
 
         self.q_proj = nn.Sequential(
             MultichannelLinear(channels, channels, features, features, depthwise=False),
