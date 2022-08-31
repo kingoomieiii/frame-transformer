@@ -2,7 +2,6 @@ import math
 import torch
 from torch import nn
 import torch.nn.functional as F
-from frame_quantizer import FrameQuantizer
 from rotary_embedding_torch import RotaryEmbedding
 
 class FrameTransformer(nn.Module):
@@ -106,27 +105,37 @@ class FrameGLU(nn.Module):
         return torch.relu_(self.W(x)) * self.V(x)
 
 class FrameNorm(nn.Module):
-    def __init__(self, features):
+    def __init__(self, channels, features, eps=0.00001, qk=False):
         super(FrameNorm, self).__init__()
+        
+        self.eps = eps
 
-        self.norm = nn.LayerNorm(features)
+        if not qk:
+            self.weight = nn.Parameter(torch.empty(channels, 1, features))
+            self.bias = nn.Parameter(torch.empty(channels, 1, features))
+        else:
+            self.weight = nn.Parameter(torch.empty(channels, 1, 1, features))
+            self.bias = nn.Parameter(torch.empty(channels, 1, 1, features))
+
+        nn.init.ones_(self.weight)
+        nn.init.zeros_(self.bias)
 
     def __call__(self, x):
-        return self.norm(x.transpose(2,3)).transpose(2,3)
+        return torch.layer_norm(x, (self.weight.shape[-1],), eps=self.eps) * self.weight + self.bias
 
 class FrameEncoder(nn.Module):
     def __init__(self, in_channels, out_channels, features, downsample=True, expansion=2, dropout=0.1):
         super(FrameEncoder, self).__init__()
 
         self.relu = SquaredReLU()
-        self.norm1 = FrameNorm(features)
+        self.norm1 = FrameNorm(in_channels, features)
         self.linear1 = MultichannelLinear(in_channels, out_channels, features, features * 2)
         self.linear2 = MultichannelLinear(out_channels, out_channels, features * 2, features // 2 if downsample else features)
         self.identity = MultichannelLinear(in_channels, out_channels, features, features // 2 if downsample else features, positionwise=False)
         self.dropout = nn.Dropout(dropout) if dropout > 0 else nn.Identity()
 
     def __call__(self, x):
-        h = self.norm1(x)
+        h = self.norm1(x.transpose(2,3)).transpose(2,3)
         h = self.linear2(self.relu(self.linear1(h)))
         x = self.identity(x) + self.dropout(h)
         
@@ -137,25 +146,25 @@ class FrameDecoder(nn.Module):
         super(FrameDecoder, self).__init__()
         
         self.activate = SquaredReLU()
-        self.norm = FrameNorm(features // 2)
+        self.norm = FrameNorm(in_channels, features // 2)
         self.linear1 = MultichannelLinear(in_channels, out_channels, features // 2, features * 2)
         self.linear2 = MultichannelLinear(out_channels, out_channels, features * 2, features)
         self.identity = MultichannelLinear(in_channels, out_channels, features // 2, features)
         self.dropout = nn.Dropout(dropout) if dropout > 0 else nn.Identity()
 
         if has_skip:
-            self.norm2 = FrameNorm(features)
+            self.norm2 = FrameNorm(out_channels * 2, features)
             self.linear3 = MultichannelLinear(out_channels * 2, out_channels, features, features * 2)
             self.linear4 = MultichannelLinear(out_channels, out_channels, features * 2, features, depthwise=False)
             self.dropout2 = nn.Dropout(dropout) if dropout > 0 else nn.Identity()
 
     def __call__(self, x, skip=None):
-        h = self.norm(x)
+        h = self.norm(x.transpose(2,3)).transpose(2,3)
         h = self.linear2(self.activate(self.linear1(h)))
         x = self.identity(x) + self.dropout(h)
 
         if skip is not None:
-            h = self.norm2(torch.cat((x, skip), dim=1))
+            h = self.norm2(torch.cat((x, skip), dim=1).transpose(2,3)).transpose(2,3)
             h = self.linear4(self.activate(self.linear3(h)))
             x = x + h
 
@@ -169,12 +178,13 @@ class MultichannelMultiheadAttention(nn.Module):
         self.num_heads = num_heads
         self.rotary_embedding = RotaryEmbedding(dim = features // num_heads)
 
-        self.q_norm = FrameNorm(features // num_heads)
+        self.g = nn.Parameter(torch.empty(1))
+        nn.init.constant_(self.g, math.log2(256 ** 2 - 256))
+
         self.q_proj = nn.Sequential(
             MultichannelLinear(channels, channels, features, features, depthwise=False),
             nn.Conv2d(channels, channels, kernel_size=(1,9), padding=(0,4), bias=False, groups=channels))
 
-        self.k_norm = FrameNorm(features // num_heads)
         self.k_proj = nn.Sequential(
             MultichannelLinear(channels, channels, features, features, depthwise=False),
             nn.Conv2d(channels, channels, kernel_size=(1,9), padding=(0,4), bias=False, groups=channels))
@@ -188,12 +198,12 @@ class MultichannelMultiheadAttention(nn.Module):
     def __call__(self, x, mem=None):
         b,c,h,w = x.shape
 
-        q = self.rotary_embedding.rotate_queries_or_keys(self.q_norm(self.q_proj(x).transpose(2,3).reshape(b,c,w,self.num_heads,-1).permute(0,1,3,2,4)))
-        k = self.rotary_embedding.rotate_queries_or_keys(self.k_norm(self.k_proj(x if mem is None else mem).transpose(2,3).reshape(b,c,w,self.num_heads,-1).permute(0,1,3,2,4))).transpose(3,4)
+        q = self.rotary_embedding.rotate_queries_or_keys(self.q_proj(x).transpose(2,3).reshape(b,c,w,self.num_heads,-1).permute(0,1,3,2,4))
+        k = self.rotary_embedding.rotate_queries_or_keys(self.k_proj(x if mem is None else mem).transpose(2,3).reshape(b,c,w,self.num_heads,-1).permute(0,1,3,2,4)).transpose(3,4)
         v = self.v_proj(x if mem is None else mem).transpose(2,3).reshape(b,c,w,self.num_heads,-1).permute(0,1,3,2,4)
 
         with torch.cuda.amp.autocast_mode.autocast(enabled=False):
-            qk = torch.matmul(q.float(), k.float()) / math.sqrt(h)        
+            qk = torch.matmul(q.float(), k.float()) * self.g    
             a = torch.matmul(F.softmax(qk, dim=-1),v.float()).transpose(2,3).reshape(b,c,w,-1).transpose(2,3)
 
         x = self.out_proj(a)
@@ -206,22 +216,22 @@ class FrameTransformerEncoder(nn.Module):
 
         self.activate = SquaredReLU()
 
-        self.norm1 = FrameNorm(features)
+        self.norm1 = FrameNorm(channels, features)
         self.attn = MultichannelMultiheadAttention(channels, num_heads, features)
         self.dropout1 = nn.Dropout(dropout) if dropout > 0 else nn.Identity()
 
-        self.norm2 = FrameNorm(features)
+        self.norm2 = FrameNorm(channels, features)
         self.linear1 = MultichannelLinear(channels, channels, features, features * expansion, depthwise=False)
         self.linear2 = MultichannelLinear(channels, channels, features * expansion, features, depthwise=False)
         self.dropout2 = nn.Dropout(dropout) if dropout > 0 else nn.Identity()
         
     def __call__(self, x):
-        z = self.norm1(x)
+        z = self.norm1(x.transpose(2,3)).transpose(2,3)
         z = self.attn(z)
         z = self.dropout1(z)
         x = x + z
 
-        z = self.norm2(x)
+        z = self.norm2(x.transpose(2,3)).transpose(2,3)
         z = self.linear2(self.activate(self.linear1(z)))
         z = self.dropout2(z)
         x = x + z
@@ -234,31 +244,31 @@ class FrameTransformerDecoder(nn.Module):
         
         self.activate = SquaredReLU()
 
-        self.norm1 = FrameNorm(features)
+        self.norm1 = FrameNorm(channels, features)
         self.attn1 = MultichannelMultiheadAttention(channels, num_heads, features)
         self.dropout1 = nn.Dropout(dropout) if dropout > 0 else nn.Identity()
 
-        self.norm2 = FrameNorm(features)
+        self.norm2 = FrameNorm(channels, features)
         self.attn2 = MultichannelMultiheadAttention(channels, num_heads, features)
         self.dropout2 = nn.Dropout(dropout) if dropout > 0 else nn.Identity()
 
-        self.norm3 = FrameNorm(features)
+        self.norm3 = FrameNorm(channels, features)
         self.linear1 = MultichannelLinear(channels, channels, features, features * expansion, depthwise=False)
         self.linear2 = MultichannelLinear(channels, channels, features * expansion, features, depthwise=False)
         self.dropout3 = nn.Dropout(dropout) if dropout > 0 else nn.Identity()
 
     def __call__(self, x, skip):
-        z = self.norm1(x)
+        z = self.norm1(x.transpose(2,3)).transpose(2,3)
         z = self.attn1(z)
         z = self.dropout1(z)
         x = x + z
 
-        z = self.norm2(x)
+        z = self.norm2(x.transpose(2,3)).transpose(2,3)
         z = self.attn2(z, mem=skip)
         z = self.dropout2(z)
         x = x + z
 
-        z = self.norm3(x)
+        z = self.norm3(x.transpose(2,3)).transpose(2,3)
         z = self.linear2(self.activate(self.linear1(z)))
         z = self.dropout3(z)
         x = x + z
