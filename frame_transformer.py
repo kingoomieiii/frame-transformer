@@ -162,7 +162,7 @@ class MultichannelMultiheadAttention(nn.Module):
         self.f_proj1 = MultichannelLinear(channels, channels, features, num_heads, depthwise=False)
         
         self.f_proj2 = nn.Sequential(
-            MultichannelLinear(channels * num_heads, channels * num_heads, 6, focus_expansion, depthwise=False),
+            MultichannelLinear(channels * num_heads, channels * num_heads, 5, focus_expansion, depthwise=False),
             SquaredReLU(),
             MultichannelLinear(channels * num_heads, channels * num_heads, focus_expansion, 1, depthwise=False))
         
@@ -193,9 +193,8 @@ class MultichannelMultiheadAttention(nn.Module):
             torch.mean(f, dim=3, keepdim=True), 
             torch.var(f, dim=3, keepdim=True), 
             torch.min(f, dim=3, keepdim=True).values, 
-            torch.max(f, dim=3, keepdim=True).values,
-            torch.sqrt(torch.abs(torch.sum(f, dim=3, keepdim=True)))), dim=3)
-        f = self.f_proj2(f.reshape(b,c*self.num_heads,1,6).transpose(2,3)).transpose(2,3).reshape(b,c,self.num_heads,1).unsqueeze(-1)
+            torch.max(f, dim=3, keepdim=True).values), dim=3)
+        f = self.f_proj2(f.reshape(b,c*self.num_heads,1,5).transpose(2,3)).transpose(2,3).reshape(b,c,self.num_heads,1).unsqueeze(-1)
 
         with torch.cuda.amp.autocast_mode.autocast(enabled=False):
             qk = torch.matmul(q.float(), k.float()) / math.sqrt(h)
