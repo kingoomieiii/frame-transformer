@@ -157,14 +157,10 @@ class MultichannelMultiheadAttention(nn.Module):
 
         self.mixed_precision = mixed_precision
         self.num_heads = num_heads
-        self.rotary_embedding = RotaryEmbedding(dim = features // num_heads, learned_freq=True)
-
-        self.f_proj1 = MultichannelLinear(channels, channels, features, num_heads, depthwise=False)        
-        self.f_proj2 = nn.Sequential(
-            MultichannelLinear(channels * num_heads, channels * num_heads, 6, focus_expansion, depthwise=False),
-            SquaredReLU(),
-            MultichannelLinear(channels * num_heads, channels * num_heads, focus_expansion, 1, depthwise=False))
+        self.rotary_embedding = RotaryEmbedding(dim = features // num_heads // 2)
         
+        self.g = nn.Parameter(torch.ones(channels, num_heads, 1, 1))
+
         self.q_proj = nn.Sequential(
             MultichannelLinear(channels, channels, features, features, depthwise=False),
             nn.Conv2d(channels, channels, kernel_size=(1,9), padding=(0,4), bias=False, groups=channels))
@@ -186,19 +182,9 @@ class MultichannelMultiheadAttention(nn.Module):
         k = self.rotary_embedding.rotate_queries_or_keys(self.k_proj(x if mem is None else mem).transpose(2,3).reshape(b,c,w,self.num_heads,-1).permute(0,1,3,2,4)).transpose(3,4)
         v = self.v_proj(x if mem is None else mem).transpose(2,3).reshape(b,c,w,self.num_heads,-1).permute(0,1,3,2,4)
 
-        f = self.f_proj1(x if mem is None else mem)        
-        f = torch.cat((
-            torch.median(f, dim=3, keepdim=True).values,
-            torch.mean(f, dim=3, keepdim=True), 
-            torch.var(f, dim=3, keepdim=True), 
-            torch.min(f, dim=3, keepdim=True).values, 
-            torch.max(f, dim=3, keepdim=True).values,
-            torch.sqrt(torch.abs(torch.sum(f, dim=3, keepdim=True)))), dim=3)
-        f = torch.sigmoid(self.f_proj2(f.reshape(b,c*self.num_heads,1,6).transpose(2,3)).transpose(2,3).reshape(b,c,self.num_heads,1).unsqueeze(-1))
-
         with torch.cuda.amp.autocast_mode.autocast(enabled=False):
             qk = torch.matmul(q.float(), k.float()) / math.sqrt(h)
-            a = torch.matmul(F.softmax(f.float() * qk, dim=-1),v.float()).transpose(2,3).reshape(b,c,w,-1).transpose(2,3)
+            a = torch.matmul(F.softmax(self.g * qk, dim=-1),v.float()).transpose(2,3).reshape(b,c,w,-1).transpose(2,3)
 
         x = self.out_proj(a)
 
