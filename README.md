@@ -14,7 +14,7 @@ The gan script is not currently ready, nor is the vector quantized frame transfo
 
 * **MultichannelLinear** - This was my solution to having parallel linear layers. Instead of having individual linear layers, I compressed them into a single weight matrix with a channel dimension and make use of batched matrix multiplication. It also includes a depth-wise linear layer for increasing channel count (compression of frequency axis and expansion of channels is still necessary for this to learn well, although it seems to have less of a reliance on channels than a convolutional neural network).
 
-* **FrameNorm** - This applies layer norm to each frame; each channel has its own elementwise affine parameters.
+* **FrameNorm** - This applies layer norm to each frame; each channel has its own element-wise affine parameters.
 
 * **FrameEncoder** - position-wise encoder for each frame responsible for downsampling and expansion of channels. This consists of a residual block made from multichannel linear layers to allow for each channel to learn its own position-wise linear layer. It takes inspiration from the transformer architecture and uses residual blocks in that style - linear2(activation(linear1(norm(x)))). For activation this uses squared ReLU as in the primer paper.
 
