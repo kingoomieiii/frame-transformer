@@ -105,18 +105,12 @@ class FrameGLU(nn.Module):
         return torch.relu_(self.W(x)) * self.V(x)
 
 class FrameNorm(nn.Module):
-    def __init__(self, channels, features, eps=0.00001, qk=False):
+    def __init__(self, channels, features, eps=0.00001):
         super(FrameNorm, self).__init__()
         
         self.eps = eps
-
-        if not qk:
-            self.weight = nn.Parameter(torch.empty(channels, 1, features))
-            self.bias = nn.Parameter(torch.empty(channels, 1, features))
-        else:
-            self.weight = nn.Parameter(torch.empty(channels, 1, 1, features))
-            self.bias = nn.Parameter(torch.empty(channels, 1, 1, features))
-
+        self.weight = nn.Parameter(torch.empty(channels, 1, features))
+        self.bias = nn.Parameter(torch.empty(channels, 1, features))
         nn.init.ones_(self.weight)
         nn.init.zeros_(self.bias)
 
