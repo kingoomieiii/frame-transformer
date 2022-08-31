@@ -159,8 +159,8 @@ class MultichannelMultiheadAttention(nn.Module):
         self.num_heads = num_heads
         self.rotary_embedding = RotaryEmbedding(dim = features // num_heads)
 
-        self.g_proj_a = MultichannelLinear(channels, channels, features, 1, depthwise=False)
-        self.g_proj_b = MultichannelLinear(channels, channels, 2, 1, depthwise=False)
+        self.ga_proj = MultichannelLinear(channels, channels, features, num_heads, depthwise=False)
+        self.g_proj = MultichannelLinear(channels, channels, 2, 1, depthwise=False)
         
         self.q_proj = nn.Sequential(
             MultichannelLinear(channels, channels, features, features, depthwise=False),
@@ -179,15 +179,14 @@ class MultichannelMultiheadAttention(nn.Module):
     def __call__(self, x, mem=None):
         b,c,h,w = x.shape
 
-        g = self.g_proj_a(x).squeeze(2)
-        g = self.g_proj_b(
+        g_a = self.ga_proj(x)
+        g = self.g_proj(
             torch.cat((
-                torch.mean(g, dim=2, keepdim=True),
-                torch.var(g, dim=2, keepdim=True)), dim=2
-            ).unsqueeze(-1)
-        ).unsqueeze(-1)
+                torch.mean(g_a, dim=3, keepdim=True),
+                torch.var(g_a, dim=3, keepdim=True)), dim=3
+            ).transpose(2,3)
+        ).transpose(2,3).unsqueeze(-1)
 
-        g = torch.mean(self.g_proj_a(x).squeeze(2), dim=2).unsqueeze(-1).unsqueeze(-1).unsqueeze(-1)
         q = self.rotary_embedding.rotate_queries_or_keys(self.q_proj(x).transpose(2,3).reshape(b,c,w,self.num_heads,-1).permute(0,1,3,2,4))
         k = self.rotary_embedding.rotate_queries_or_keys(self.k_proj(x if mem is None else mem).transpose(2,3).reshape(b,c,w,self.num_heads,-1).permute(0,1,3,2,4)).transpose(3,4)
         v = self.v_proj(x if mem is None else mem).transpose(2,3).reshape(b,c,w,self.num_heads,-1).permute(0,1,3,2,4)
