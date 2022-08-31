@@ -65,16 +65,13 @@ class FrameTransformer(nn.Module):
         return out
 
 class MultichannelLinear(nn.Module):
-    def __init__(self, in_channels, out_channels, in_features, out_features, positionwise=True, depthwise=True, bias=False):
+    def __init__(self, in_channels, out_channels, in_features, out_features, positionwise=True, depthwise=True):
         super(MultichannelLinear, self).__init__()
 
         self.weight_pw = None
-        self.bias_pw = None
         if in_features != out_features or positionwise:
             self.weight_pw = nn.Parameter(torch.empty(in_channels, out_features, in_features))
             nn.init.uniform_(self.weight_pw, a=-1/math.sqrt(in_features), b=1/math.sqrt(in_features))
-
-            self.bias_pw = nn.Parameter(torch.empty(in_channels, out_features))
 
         self.weight_dw = None
         if in_channels != out_channels or depthwise:
@@ -93,16 +90,6 @@ class MultichannelLinear(nn.Module):
 class SquaredReLU(nn.Module):
     def __call__(self, x):
         return torch.relu(x) ** 2
-
-class FrameGLU(nn.Module):
-    def __init__(self, channels, features):
-        super(FrameGLU, self).__init__()
-
-        self.W = MultichannelLinear(channels, channels, features, features, bias=True, depthwise=False)
-        self.V = MultichannelLinear(channels, channels, features, features, bias=True, depthwise=False)
-
-    def __call__(self, x):
-        return torch.relu_(self.W(x)) * self.V(x)
 
 class FrameNorm(nn.Module):
     def __init__(self, channels, features, eps=0.00001):
