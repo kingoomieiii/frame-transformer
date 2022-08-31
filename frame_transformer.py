@@ -152,7 +152,7 @@ class FrameDecoder(nn.Module):
         return x
 
 class MultichannelMultiheadAttention(nn.Module):
-    def __init__(self, channels, num_heads, features, mixed_precision=False):
+    def __init__(self, channels, num_heads, features, mixed_precision=False, focus_expansion=64):
         super().__init__()
 
         self.mixed_precision = mixed_precision
@@ -162,21 +162,21 @@ class MultichannelMultiheadAttention(nn.Module):
         self.ga_proj = MultichannelLinear(channels, channels, features, num_heads, depthwise=False)
         
         self.g_proj = nn.Sequential(
-            MultichannelLinear(channels * num_heads, channels * num_heads, 2, 128, depthwise=False),
+            MultichannelLinear(channels * num_heads, channels * num_heads, 6, focus_expansion, depthwise=False),
             SquaredReLU(),
-            MultichannelLinear(channels * num_heads, channels * num_heads, 128, 1, depthwise=False))
+            MultichannelLinear(channels * num_heads, channels * num_heads, focus_expansion, 1, depthwise=False))
         
         self.q_proj = nn.Sequential(
             MultichannelLinear(channels, channels, features, features, depthwise=False),
-            nn.Conv2d(channels, channels, kernel_size=(1,9), padding=(0,4), bias=False, groups=channels))
+            nn.Conv2d(channels, channels, kernel_size=(1,3), padding=(0,1), bias=False, groups=channels))
 
         self.k_proj = nn.Sequential(
             MultichannelLinear(channels, channels, features, features, depthwise=False),
-            nn.Conv2d(channels, channels, kernel_size=(1,9), padding=(0,4), bias=False, groups=channels))
+            nn.Conv2d(channels, channels, kernel_size=(1,3), padding=(0,1), bias=False, groups=channels))
 
         self.v_proj = nn.Sequential(
             MultichannelLinear(channels, channels, features, features, depthwise=False),
-            nn.Conv2d(channels, channels, kernel_size=(1,9), padding=(0,4), bias=False, groups=channels))
+            nn.Conv2d(channels, channels, kernel_size=(1,3), padding=(0,1), bias=False, groups=channels))
 
         self.out_proj = MultichannelLinear(channels, channels, features, features, depthwise=False)
 
@@ -184,8 +184,16 @@ class MultichannelMultiheadAttention(nn.Module):
         b,c,h,w = x.shape
 
         g_a = self.ga_proj(x)
-        gc = torch.cat((torch.mean(g_a, dim=3, keepdim=True), torch.var(g_a, dim=3, keepdim=True)), dim=3)
-        g = self.g_proj(gc.reshape(b,c*self.num_heads,1,2).transpose(2,3)).transpose(2,3).reshape(b,c,self.num_heads,1).unsqueeze(-1)
+        gc = torch.cat((
+            torch.median(g_a, dim=3, keepdim=True).values,
+            torch.mean(g_a, dim=3, keepdim=True), 
+            torch.var(g_a, dim=3, keepdim=True), 
+            torch.min(g_a, dim=3, keepdim=True).values, 
+            torch.max(g_a, dim=3, keepdim=True).values,
+            torch.linalg.norm(g_a, dim=3, keepdim=True),
+        ), dim=3)
+        
+        g = self.g_proj(gc.reshape(b,c*self.num_heads,1,6).transpose(2,3)).transpose(2,3).reshape(b,c,self.num_heads,1).unsqueeze(-1)
         q = self.rotary_embedding.rotate_queries_or_keys(self.q_proj(x).transpose(2,3).reshape(b,c,w,self.num_heads,-1).permute(0,1,3,2,4))
         k = self.rotary_embedding.rotate_queries_or_keys(self.k_proj(x if mem is None else mem).transpose(2,3).reshape(b,c,w,self.num_heads,-1).permute(0,1,3,2,4)).transpose(3,4)
         v = self.v_proj(x if mem is None else mem).transpose(2,3).reshape(b,c,w,self.num_heads,-1).permute(0,1,3,2,4)
