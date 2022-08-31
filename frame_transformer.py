@@ -165,7 +165,7 @@ class FrameDecoder(nn.Module):
         return x
 
 class MultichannelMultiheadAttention(nn.Module):
-    def __init__(self, channels, num_heads, features, mixed_precision=False, max_sequence_length=2048):
+    def __init__(self, channels, num_heads, features, mixed_precision=False, min_sequence_length=256, max_sequence_length=2048):
         super().__init__()
 
         self.mixed_precision = mixed_precision
@@ -173,8 +173,8 @@ class MultichannelMultiheadAttention(nn.Module):
         self.rotary_embedding = RotaryEmbedding(dim = features // num_heads)
 
         self.g = nn.Parameter(torch.empty(channels, num_heads, 1, 1))
-        nn.init.constant_(self.g, math.log2(max_sequence_length ** 2 - max_sequence_length))
-
+        nn.init.ones_(self.g)
+        
         self.q_proj = nn.Sequential(
             MultichannelLinear(channels, channels, features, features, depthwise=False),
             nn.Conv2d(channels, channels, kernel_size=(1,9), padding=(0,4), bias=False, groups=channels))
@@ -197,8 +197,8 @@ class MultichannelMultiheadAttention(nn.Module):
         v = self.v_proj(x if mem is None else mem).transpose(2,3).reshape(b,c,w,self.num_heads,-1).permute(0,1,3,2,4)
 
         with torch.cuda.amp.autocast_mode.autocast(enabled=False):
-            qk = torch.matmul(q.float(), k.float()) * self.g    
-            a = torch.matmul(F.softmax(qk, dim=-1),v.float()).transpose(2,3).reshape(b,c,w,-1).transpose(2,3)
+            qk = torch.matmul(q.float(), k.float()) / math.sqrt(h)
+            a = torch.matmul(F.softmax(self.g * qk, dim=-1),v.float()).transpose(2,3).reshape(b,c,w,-1).transpose(2,3)
 
         x = self.out_proj(a)
 
