@@ -20,22 +20,22 @@ class FrameTransformer(nn.Module):
         self.enc3 = FrameEncoder(channels * 2, channels * 4, self.max_bin // 2, expansion=expansion)
         self.enc3_transformer = FrameTransformerEncoder(channels * 4, self.max_bin // 4, num_heads=num_heads, dropout=dropout, expansion=expansion)
 
-        self.enc4 = FrameEncoder(channels * 4, channels * 6, self.max_bin // 4, expansion=expansion)
-        self.enc4_transformer = FrameTransformerEncoder(channels * 6, self.max_bin // 8, num_heads=num_heads, dropout=dropout, expansion=expansion)
+        self.enc4 = FrameEncoder(channels * 4, channels * 8, self.max_bin // 4, expansion=expansion)
+        self.enc4_transformer = FrameTransformerEncoder(channels * 8, self.max_bin // 8, num_heads=num_heads, dropout=dropout, expansion=expansion)
 
-        self.enc5 = FrameEncoder(channels * 6, channels * 8, self.max_bin // 8, expansion=expansion)
-        self.enc5_transformer = FrameTransformerEncoder(channels * 8, self.max_bin // 16, num_heads=num_heads, dropout=dropout, expansion=expansion)
+        self.enc5 = FrameEncoder(channels * 8, channels * 16, self.max_bin // 8, expansion=expansion)
+        self.enc5_transformer = FrameTransformerEncoder(channels * 16, self.max_bin // 16, num_heads=num_heads, dropout=dropout, expansion=expansion)
 
-        self.enc6 = FrameEncoder(channels * 8, channels * 10, self.max_bin // 16, expansion=expansion)
-        self.enc6_transformer = FrameTransformerEncoder(channels * 10, self.max_bin // 32, num_heads=num_heads, dropout=dropout, expansion=expansion)
+        self.enc6 = FrameEncoder(channels * 16, channels * 32, self.max_bin // 16, expansion=expansion)
+        self.enc6_transformer = FrameTransformerEncoder(channels * 32, self.max_bin // 32, num_heads=num_heads, dropout=dropout, expansion=expansion)
 
-        self.dec5 = FrameDecoder(channels * 10, channels * 8, self.max_bin // 16, expansion=expansion)
-        self.dec5_transformer = FrameTransformerDecoder(channels * 8, self.max_bin // 16, num_heads=num_heads, dropout=dropout, expansion=expansion)
+        self.dec5 = FrameDecoder(channels * 32, channels * 16, self.max_bin // 16, expansion=expansion)
+        self.dec5_transformer = FrameTransformerDecoder(channels * 16, self.max_bin // 16, num_heads=num_heads, dropout=dropout, expansion=expansion)
 
-        self.dec4 = FrameDecoder(channels * 8, channels * 6, self.max_bin // 8, expansion=expansion)
-        self.dec4_transformer = FrameTransformerDecoder(channels * 6, self.max_bin // 8, num_heads=num_heads, dropout=dropout, expansion=expansion)
+        self.dec4 = FrameDecoder(channels * 16, channels * 8, self.max_bin // 8, expansion=expansion)
+        self.dec4_transformer = FrameTransformerDecoder(channels * 8, self.max_bin // 8, num_heads=num_heads, dropout=dropout, expansion=expansion)
 
-        self.dec3 = FrameDecoder(channels * 6, channels * 4, self.max_bin // 4, expansion=expansion)
+        self.dec3 = FrameDecoder(channels * 8, channels * 4, self.max_bin // 4, expansion=expansion)
         self.dec3_transformer = FrameTransformerDecoder(channels * 4, self.max_bin // 4, num_heads=num_heads, dropout=dropout, expansion=expansion)
 
         self.dec2 = FrameDecoder(channels * 4, channels * 2, self.max_bin // 2, expansion=expansion)
