@@ -55,7 +55,6 @@ class VoxAugDataset(torch.utils.data.Dataset):
 
     def rebuild(self):
         self.vidx = 0
-        print('shuffle')
         random.shuffle(self.vocal_list)
 
         if self.epoch_size is not None:
@@ -65,9 +64,8 @@ class VoxAugDataset(torch.utils.data.Dataset):
     def __len__(self):
         return len(self.curr_list) * self.mul
 
-    def _get_vocals(self, root=True):
-        vidx = np.random.randint(len(self.vocal_list))                
-        vpath = self.vocal_list[vidx]
+    def _get_vocals(self, idx, root=True):          
+        vpath = self.vocal_list[idx % len(self.vocal_list)]
         vdata = np.load(str(vpath))
         V = vdata['X']
 
@@ -118,7 +116,7 @@ class VoxAugDataset(torch.utils.data.Dataset):
                 X, aug = Y, True
 
             if aug and np.random.uniform() > 0.02:
-                V = self._get_vocals()
+                V = self._get_vocals(idx)
                 X = Y + V
                 c = np.max([Xc, np.abs(X).max()])
 
