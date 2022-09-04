@@ -4,6 +4,10 @@ This is a collection of tools for working with spectrograms using transformers. 
 
 I'm calling this architecture a frame transformer. It consists of a position-wise linear residual u-net with a multichannel transformer. Currently training a version of this out, it is learning way faster than I would have thought so I'm pretty excited. It is able to keep up with the convolutional variant with half the context and struggles less with stuff like fretless bass. This effectively breaks the spectrogram down into smaller dimensions and uses parallel transformers to process that information in the same way multihead attention breaks scaled dot product attention down into multiple heads.
 
+Current architecture is summed up by this diagram: ![image](https://user-images.githubusercontent.com/30326384/188300380-0909e70e-2b39-4f55-91dc-7c89c9205176.png)
+
+Currently training it and will post checkpoints soon hopefully, current run is doing pretty well. 
+
 This fork also makes use of a dataset I refer to as voxaug in order to satisfy the transformers need for large amounts of data. This dataset randomly selects from a library of instrumental music and a library of vocal tracks and mixes them together for the neural network to train on. This has the benefit of inflating data exponentially as well as ensuring data is perfect for the removal process. To an extent you could view this as self-supervised learning in that its learning to remove a mask of vocals. My instrumental dataset consists of 30.88 days worth of music while my vocal stem library consists of 1416 full song vocal tracks. I will be uploading checkpoints for a 357,493,618 parameter model after it trains for a few days.
 
 The gan script is not currently ready, nor is the vector quantized frame transformer just yet. I will be working on those shortly. Also want to look into a diffusion training script soon.
