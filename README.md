@@ -4,7 +4,7 @@ This is a collection of tools for working with spectrograms using transformers. 
 
 I'm calling this architecture a frame transformer. It consists of a position-wise linear residual u-net with a multichannel transformer. Currently training a version of this out, it is learning way faster than I would have thought so I'm pretty excited. It is able to keep up with the convolutional variant with half the context and struggles less with stuff like fretless bass. This effectively breaks the spectrogram down into smaller dimensions and uses parallel transformers to process that information in the same way multihead attention breaks scaled dot product attention down into multiple heads.
 
-Current architecture is summed up by this diagram: ![image](https://user-images.githubusercontent.com/30326384/188300803-f0b6b070-6c60-42d3-9c88-0e66c70c7b82.png)
+Current architecture is summed up by this diagram: ![image](https://user-images.githubusercontent.com/30326384/188300836-e17150aa-9d18-4663-a29f-98f809b0047b.png)
 
 Currently training it and will post checkpoints soon hopefully, current run is doing pretty well. 
 
