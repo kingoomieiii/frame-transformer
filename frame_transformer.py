@@ -127,10 +127,10 @@ class FrameDecoder(nn.Module):
         super(FrameDecoder, self).__init__()
         
         self.activate = SquaredReLU()
-        self.norm = FrameNorm(in_channels, features // 2)
-        self.linear1 = MultichannelLinear(in_channels, out_channels, features // 2, features * 2)
+        self.norm = FrameNorm(in_channels, features // 2 if upsample else features)
+        self.linear1 = MultichannelLinear(in_channels, out_channels, features // 2 if upsample else features, features * 2)
         self.linear2 = MultichannelLinear(out_channels, out_channels, features * 2, features)
-        self.identity = MultichannelLinear(in_channels, out_channels, features // 2, features)
+        self.identity = MultichannelLinear(in_channels, out_channels, features // 2 if upsample else features, features)
         self.dropout = nn.Dropout(dropout) if dropout > 0 else nn.Identity()
 
         if has_skip:
@@ -241,42 +241,5 @@ class FrameTransformerDecoder(nn.Module):
         z = self.linear2(self.activate(self.linear1(z)))
         z = self.dropout3(z)
         x = x + z
-
-        return x
-
-class ConvFrameEncoder(nn.Module):
-    def __init__(self, in_channels, out_channels, features, downsample=True, expansion=2, dropout=0.1):
-        super(ConvFrameEncoder, self).__init__()
-
-        self.relu = SquaredReLU()
-        self.norm = FrameNorm(in_channels, features)
-        self.conv1 = nn.Conv2d(in_channels, out_channels * 2, kernel_size=(3,1), padding=(1,0), bias=False)
-        self.conv2 = nn.Conv2d(out_channels * 2, out_channels, kernel_size=(3,1), padding=(1,0), stride=(2,1) if downsample else 1, bias=False)
-        self.identity = nn.Conv2d(in_channels, out_channels, kernel_size=1, padding=0, stride=(2,1) if downsample else 1, bias=False)
-
-    def __call__(self, x):
-        h = self.norm(x.transpose(2,3)).transpose(2,3)
-        h = self.conv2(self.relu(self.conv1(h)))
-        x = self.identity(x) + h
-
-        return x
-
-class ConvFrameDecoder(nn.Module):
-    def __init__(self, in_channels, out_channels, features, upsample=True, expansion=2, dropout=0.1, has_skip=True):
-        super(ConvFrameDecoder, self).__init__()
-
-        self.upsample = nn.Upsample(scale_factor=(2,1), mode='bilinear', align_corners=True)
-
-        self.relu = SquaredReLU()
-        self.norm = FrameNorm(in_channels + out_channels, features)
-        self.conv1 = nn.Conv2d(in_channels + out_channels, out_channels * 2, kernel_size=(3,1), padding=(1,0), bias=False)
-        self.conv2 = nn.Conv2d(out_channels * 2, out_channels, kernel_size=(3,1), padding=(1,0), bias=False)
-        self.identity = nn.Conv2d(in_channels + out_channels, out_channels, kernel_size=1, padding=0, bias=False)
-
-    def __call__(self, x, skip):
-        x = torch.cat((self.upsample(x), skip), dim=1)
-        h = self.norm(x.transpose(2,3)).transpose(2,3)
-        h = self.conv2(self.relu(self.conv1(h)))
-        x = self.identity(x) + h
 
         return x
