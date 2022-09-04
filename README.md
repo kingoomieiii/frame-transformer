@@ -1,6 +1,6 @@
 # frame-transformer
 
-This is a collection of tools for working with spectrograms using transformers. It includes a vocal remover that has evolved from tsurumeso's vocal remover, a phase predictor, pretraining, a gan, and a vector quantizer for frames. Right now I am working on training the vocal remover, however I will be moving onto these others after that is complete.
+This is a collection of tools for working with spectrograms using transformers. It includes a vocal remover that has evolved from tsurumeso's vocal remover, a phase predictor, pretraining, a gan, and a vector quantizer for frames. Right now I am working on training the vocal remover, however I will be moving onto these others after that is complete. GAN script isn't ready (mnight work but I haven't really tried). My plan is to finish up training of the current vocal remover and then work on a conditional gan using the frame transformer architecture similar to how pix2pix works.
 
 I'm calling this architecture a frame transformer. The neural network is a position-wise linear residual u-net coupled with what I call a multichannel transformer. Current training is going very well at 62459 optimization steps on a cropsize of 256, my plan is to allow it to run to 150k optimization steps at a cropsize of 256 and then up it to 512 to allow for it to build more of an understanding of long distance relationships between frames of audio. For this model I will likely only take it to 250k optimization steps. Given the method of training, to an extent this is self-supervised in that it constructs training data from instrumental tracks and vocal tracks rather than using a fixed dataset. I suspect once trained the model will be able to be finetuned for downstream tasks such as remastering.
 
@@ -10,9 +10,8 @@ Technically, this transformer can be applied to typical problems that transforme
 
 This fork also makes use of a dataset I refer to as voxaug in order to satisfy the transformers need for large amounts of data. This dataset randomly selects from a library of instrumental music and a library of vocal tracks and mixes them together for the neural network to train on. This has the benefit of inflating data exponentially as well as ensuring data is perfect for the removal process. To an extent you could view this as self-supervised learning in that its learning to remove a mask of vocals. My instrumental dataset consists of 30.88 days worth of music while my vocal stem library consists of 1416 full song vocal tracks. I will be uploading checkpoints for a 357,493,618 parameter model after it trains for a few days.
 
-Current architecture is summed up by this diagram: ![image](https://user-images.githubusercontent.com/30326384/188300836-e17150aa-9d18-4663-a29f-98f809b0047b.png)
-
-The gan script is not currently ready, nor is the vector quantized frame transformer just yet. I will be working on those shortly. Also want to look into a diffusion training script soon.
+## Architecture Diagram ##
+![image](https://user-images.githubusercontent.com/30326384/188300836-e17150aa-9d18-4663-a29f-98f809b0047b.png)
 
 ## Module Descriptions ##
 
