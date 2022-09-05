@@ -1,8 +1,9 @@
 # frame-transformer
 
-This is a collection of tools for working with spectrograms using transformers. It includes a vocal remover that has evolved from tsurumeso's vocal remover, a phase predictor, pretraining, a gan, and a vector quantizer for frames. Right now I am working on training the vocal remover, however I will be moving onto these others after that is complete. GAN script isn't ready (mnight work but I haven't really tried). My plan is to finish up training of the current vocal remover and then work on a conditional gan using the frame transformer architecture similar to how pix2pix works.
+This fork is mainly a research fork, although I think I've converged on a solid architecture that applies transformers to audio in a meaningful manner. I call this architecture a frame transformer; it is a position-wise residual multichannel transformer u-net. Currently training the vocal remover, at 120k optimization steps currently and still learning steadily. After this I will be switching to a frame transformer GAN (script is in the repo but probably needs some updating).
 
-I'm calling this architecture a frame transformer. The neural network is a position-wise linear residual u-net coupled with what I call a multichannel transformer. Current training is going very well at 62459 optimization steps on a cropsize of 256, my plan is to allow it to run to 150k optimization steps at a cropsize of 256 and then up it to 512 to allow for it to build more of an understanding of long distance relationships between frames of audio. For this model I will likely only take it to 250k optimization steps. Given the method of training, to an extent this is self-supervised in that it constructs training data from instrumental tracks and vocal tracks rather than using a fixed dataset. I suspect once trained the model will be able to be finetuned for downstream tasks such as remastering. Edit: Validation loss is still steadily dropping after 48 hours of training... Think this is going to take a while to unlock its full potential lol. One fun parallel that I like to draw when thinking about this architecture is to that of cortical columns, though this is still wildly different from how the brain works obviously lol. But each channel you could say represents a cortical column that processes the audio with the depth-wise transform representing lateral connections between each 'layer' of neurons (if you consider each feature in the frame to be its own layer which is taking a bit of liberty I guess lol)
+## Architecture Diagram ##
+![image](https://user-images.githubusercontent.com/30326384/188337890-d92faa0e-0565-4a2a-9e2e-e678f11b4f6b.png)
 
 This neural network at its core relies on a type of layer that I refer to as a multichannel linear layer. This has two weight tensors: a 3d weight tensor which is the weight matrices for each channels position-wise transform and then a 2d weight matrix for the depth-wise transform. This allows each channel to have its own position-wise linear layer that is applied to each frame while taking advantage of batched matrix multiplication. Compared to conv1d, this is around 2x faster when using smaller numbers of channels and far faster when using many channels/parallel linear layers.
 
@@ -14,10 +15,6 @@ Current training at a cropsize of 256; orange at the bottom is on 10 seconds of 
 
 I might let this train for longer, however I have the max step count set to 350k which is 150k less than the primer architecture and 650k less than BERT. I suspect once trained to matching number of steps this architecture will be able to be finetuned fairly well for downstream tasks such as remastering.
 
-
-
-## Architecture Diagram ##
-![image](https://user-images.githubusercontent.com/30326384/188337890-d92faa0e-0565-4a2a-9e2e-e678f11b4f6b.png)
 
 ## Module Descriptions ##
 
