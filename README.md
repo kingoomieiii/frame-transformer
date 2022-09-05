@@ -1,6 +1,6 @@
 # frame-transformer
 
-This fork is mainly a research fork, although I think I've converged on a solid architecture that applies transformers to audio in a meaningful manner. I call this architecture a frame transformer; it is a position-wise residual multichannel transformer u-net. Currently training the vocal remover, at 120k optimization steps currently and still learning steadily. After this I will be switching to a frame transformer GAN (script is in the repo but probably needs some updating).
+This fork is mainly a research fork, although I think I've converged on a solid architecture that applies transformers to audio in a meaningful manner. I call this architecture a frame transformer; it is a position-wise residual multichannel transformer u-net. Currently training the vocal remover, at 120k optimization steps currently and still learning steadily. After this I will be switching to a frame transformer GAN (script is in the repo but probably needs some updating). The vocal remover could in a sense be considered self-supervised, as training data is constructed on the fly using a large library of instrumental tracks and vocal tracks (around 28 days of instrumental music with 1400+ vocal tracks).
 
 ## Architecture Diagram ##
 ![image](https://user-images.githubusercontent.com/30326384/188337890-d92faa0e-0565-4a2a-9e2e-e678f11b4f6b.png)
