@@ -5,7 +5,7 @@ This fork is mainly a research fork, although I think I've converged on a solid 
 The vocal remover could in a sense be considered self-supervised, as training data is constructed on the fly using a large library of instrumental tracks and vocal tracks (around 28 days of instrumental music with 1400+ vocal tracks). Although I also have a pretraining dataset with over 80 days of music and a pretraining script to go with it for a self-supervised denoising task which will inevitably help.
 
 ## Architecture Diagram ##
-![image](https://user-images.githubusercontent.com/30326384/188557473-f1eb1c9b-70c1-41ce-b098-220466ff085c.png)
+![image](https://user-images.githubusercontent.com/30326384/188557676-af84b966-007a-430c-a10a-1d26ebfda242.png)
 
 This neural network at its core relies on a type of layer that I refer to as a multichannel linear layer. This has two weight tensors: a 3d weight tensor which is the weight matrices for each channels position-wise transform and then a 2d weight matrix for the depth-wise transform. This allows each channel to have its own position-wise linear layer that is applied to each frame while taking advantage of batched matrix multiplication. Compared to conv1d, this is around 2x faster when using smaller numbers of channels and far faster when using many channels/parallel linear layers.
 
