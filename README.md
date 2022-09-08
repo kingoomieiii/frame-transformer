@@ -4,9 +4,15 @@ This fork is mainly a research fork, although I think I've converged on a solid 
 
 Update on training: At 150k optimization steps from 256 cropsize it does very well, however there is one song I typically test with given the difficulty it poses to demucs and the original fork that had some vocals left in which is unacceptable to me. Trying out a new architecture, however will also try simply training the current one to 500k optimization steps rather than stopping so early at 150k. The quality where it works is extremely high and has a far more crisp output than from the convolutional variant at even 2 input channels only. The architecture clearly works and works well, however it still needs some tweaking. Would be so happy to not be going at this alone with just a 3080 ti... If you took this architecture and used the level of compute and parameters Google uses it would likely have some very interesting results. Here is a song made with the model at 150k steps that includes fretless bass; while some vocals are still audible, it handles the fretless bass flawlessly (batch size of 16 for a total of 4096 tokens per batch): https://www.youtube.com/watch?v=yjd0VilzQXA 
 
+Currently training a multichannel primer, will probably stick with that as it seems to be doing even better.
+
 The vocal remover could in a sense be considered self-supervised, as training data is constructed on the fly using a large library of instrumental tracks and vocal tracks (around 28 days of instrumental music with 1400+ vocal tracks). Although I also have a pretraining dataset with over 80 days of music and a pretraining script to go with it for a self-supervised denoising task which will inevitably help.
 
 ## Architecture Diagram ##
+### Primer Variant ### 
+![image](https://user-images.githubusercontent.com/30326384/189053163-b3a3a2e2-31d4-4e79-bd45-4fcabccbc721.png)
+
+### Transformer ###
 ![image](https://user-images.githubusercontent.com/30326384/188557676-af84b966-007a-430c-a10a-1d26ebfda242.png)
 
 This neural network at its core relies on a type of layer that I refer to as a multichannel linear layer. This has two weight tensors: a 3d weight tensor which is the weight matrices for each channels position-wise transform and then a 2d weight matrix for the depth-wise transform. This allows each channel to have its own position-wise linear layer that is applied to each frame while taking advantage of batched matrix multiplication. Compared to conv1d, this is around 2x faster when using smaller numbers of channels and far faster when using many channels/parallel linear layers.
