@@ -9,8 +9,8 @@ Currently training a multichannel primer, will probably stick with that as it se
 The vocal remover could in a sense be considered self-supervised, as training data is constructed on the fly using a large library of instrumental tracks and vocal tracks (around 28 days of instrumental music with 1400+ vocal tracks). Although I also have a pretraining dataset with over 80 days of music and a pretraining script to go with it for a self-supervised denoising task which will inevitably help.
 
 ## Architecture Diagram ##
-### Primer Variant ### 
-![image](https://user-images.githubusercontent.com/30326384/189055036-ecc1598f-43a4-4d91-bdfb-1e54598b23f9.png)
+### Primer Variant ###  
+![image](https://user-images.githubusercontent.com/30326384/189055164-2b22ffa8-ca55-4bef-ba8d-fd2f153a1d5d.png)
 
 ### Transformer ###
 ![image](https://user-images.githubusercontent.com/30326384/188557676-af84b966-007a-430c-a10a-1d26ebfda242.png)
