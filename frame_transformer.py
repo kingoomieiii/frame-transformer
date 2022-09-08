@@ -147,7 +147,7 @@ class FrameDecoder(nn.Module):
         if skip is not None:
             h = self.norm2(torch.cat((x, skip), dim=1).transpose(2,3)).transpose(2,3)
             h = self.linear4(self.activate(self.linear3(h)))
-            x = x + h
+            x = x + self.dropout2(h)
 
         return x
 
@@ -159,10 +159,19 @@ class MultichannelMultiheadAttention(nn.Module):
         self.num_heads = num_heads
         self.rotary_embedding = RotaryEmbedding(dim = features // num_heads)
         
-        self.q_proj = MultichannelLinear(channels, channels, features, features)
-        self.k_proj = MultichannelLinear(channels, channels, features, features)
-        self.v_proj = MultichannelLinear(channels, channels, features, features)
-        self.out_proj = MultichannelLinear(channels, channels, features, features)
+        self.q_proj = nn.Sequential(
+            MultichannelLinear(channels, channels, features, features, depthwise=False),
+            nn.Conv2d(channels, channels, kernel_size=(1,3), padding=(0,1), bias=False, groups=channels))
+
+        self.k_proj = nn.Sequential(
+            MultichannelLinear(channels, channels, features, features, depthwise=False),
+            nn.Conv2d(channels, channels, kernel_size=(1,3), padding=(0,1), bias=False, groups=channels))
+            
+        self.v_proj = nn.Sequential(
+            MultichannelLinear(channels, channels, features, features, depthwise=False),
+            nn.Conv2d(channels, channels, kernel_size=(1,3), padding=(0,1), bias=False, groups=channels))
+            
+        self.out_proj = MultichannelLinear(channels, channels, features, features, depthwise=False)
 
     def __call__(self, x, mem=None):
         b,c,h,w = x.shape
@@ -190,8 +199,8 @@ class FrameTransformerEncoder(nn.Module):
         self.dropout1 = nn.Dropout(dropout) if dropout > 0 else nn.Identity()
 
         self.norm2 = FrameNorm(channels, features)
-        self.linear1 = MultichannelLinear(channels, channels, features, features * expansion)
-        self.linear2 = MultichannelLinear(channels, channels, features * expansion, features)
+        self.linear1 = MultichannelLinear(channels, channels, features, features * expansion, depthwise=False)
+        self.linear2 = MultichannelLinear(channels, channels, features * expansion, features, depthwise=False)
         self.dropout2 = nn.Dropout(dropout) if dropout > 0 else nn.Identity()
         
     def __call__(self, x):
@@ -222,8 +231,8 @@ class FrameTransformerDecoder(nn.Module):
         self.dropout2 = nn.Dropout(dropout) if dropout > 0 else nn.Identity()
 
         self.norm3 = FrameNorm(channels, features)
-        self.linear1 = MultichannelLinear(channels, channels, features, features * expansion)
-        self.linear2 = MultichannelLinear(channels, channels, features * expansion, features)
+        self.linear1 = MultichannelLinear(channels, channels, features, features * expansion, depthwise=False)
+        self.linear2 = MultichannelLinear(channels, channels, features * expansion, features, depthwise=False)
         self.dropout3 = nn.Dropout(dropout) if dropout > 0 else nn.Identity()
 
     def __call__(self, x, skip):
