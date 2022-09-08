@@ -7,11 +7,11 @@ import torch
 import torch.utils.data
 
 class VoxAugDataset(torch.utils.data.Dataset):
-    def __init__(self, path=[], vocal_path=[], is_validation=False, mul=1, downsamples=0, epoch_size=None, cropsize=256, vocal_mixup_rate=0, mixup_rate=0, mixup_alpha=1, include_phase=False, force_voxaug=False, use_noise=True, gamma=0.95, sigma=0.25):
+    def __init__(self, path=[], vocal_path=[], is_validation=False, mul=1, downsamples=0, epoch_size=None, cropsize=256, vocal_mix_rate=0, mixup_rate=0, mixup_alpha=1, include_phase=False, force_voxaug=False, use_noise=True, gamma=0.95, sigma=0.25):
         self.epoch_size = epoch_size
         self.mul = mul
         self.cropsize = cropsize
-        self.vocal_mixup_rate = vocal_mixup_rate
+        self.vocal_mix_rate = vocal_mix_rate
         self.mixup_rate = mixup_rate
         self.mixup_alpha = mixup_alpha
         self.include_phase = include_phase
@@ -69,6 +69,8 @@ class VoxAugDataset(torch.utils.data.Dataset):
         vdata = np.load(str(vpath))
         V = vdata['X']
 
+        V = np.abs(V)
+
         if V.shape[2] > self.cropsize:
             start = np.random.randint(0, V.shape[2] - self.cropsize + 1)
             stop = start + self.cropsize
@@ -79,13 +81,13 @@ class VoxAugDataset(torch.utils.data.Dataset):
 
         if np.random.uniform() < 0.025:
             if np.random.uniform() < 0.5:
-                V[0] = V[0] * 0
+                V[0] = 0
             else:
-                V[1] = V[1] * 0
+                V[1] = 0
 
-        if np.random.uniform() < self.vocal_mixup_rate and root:
-            V2 = self._get_vocals(np.random.randint(len(self.vocal_list)), root=False)
-            V = V + V2
+        if np.random.uniform() < self.vocal_mix_rate and root:
+            V2 = self._get_vocals(np.random.randint(len(self.vocal_list)), root=False if np.random.uniform() < self.vocal_mix_rate * 0.1 else True)
+            V = np.maximum(V, V2)
 
         return V
 
@@ -105,6 +107,9 @@ class VoxAugDataset(torch.utils.data.Dataset):
             X, Xc = data['X'], data['c']
             Y = X if aug else data['Y']
 
+        X = np.abs(X)
+        Y = np.abs(Y)
+
         if X.shape[2] > self.cropsize:
             start = np.random.randint(0, X.shape[2] - self.cropsize + 1)
             stop = start + self.cropsize
@@ -117,8 +122,8 @@ class VoxAugDataset(torch.utils.data.Dataset):
 
             if aug and np.random.uniform() > 0.02:
                 V = self._get_vocals(idx)
-                X = Y + V
-                c = np.max([Xc, np.abs(X).max()])
+                X = np.maximum(Y, V)
+                c = np.max([Xc, X.max()])
 
                 if np.random.uniform() < 0.025:
                     X = Y
@@ -134,19 +139,12 @@ class VoxAugDataset(torch.utils.data.Dataset):
                 vpath = self.vocal_list[idx % len(self.vocal_list)]
                 vdata = np.load(str(vpath))
                 V = vdata['X']
-                X = Y + V
-                c = np.max([Xc, np.abs(X).max()])
+                X = np.maximum(Y, V)
+                c = np.max([Xc, X.max()])
             else:
                 c = Xc
 
-        if np.random.uniform() < self.mixup_rate and root and not self.is_validation:
-            MX, MY = self.__getitem__(np.random.randint(len(self)), root=False)
-            a = np.random.beta(self.mixup_alpha, self.mixup_alpha)
-            X = X * a + (1 - a) * MX
-            Y = Y * a + (1 - a) * MY
-            
-        if root:
-            X = np.clip(np.abs(X) / c, 0, 1)
-            Y = np.clip(np.abs(Y) / c, 0, 1)
-
+        X = X / c
+        Y = Y / c
+        
         return X, Y
