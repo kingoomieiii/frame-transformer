@@ -10,7 +10,7 @@ The vocal remover could in a sense be considered self-supervised, as training da
 
 ## Architecture Diagram ##
 ### Primer Variant ###  
-![image](https://user-images.githubusercontent.com/30326384/189056319-fc796891-1f2d-486c-8217-5940f006ef8e.png)
+![image](https://user-images.githubusercontent.com/30326384/189245807-1e5dc611-9d79-4e82-95e6-d3e7729a2870.png)
 
 ### Transformer ###
 ![image](https://user-images.githubusercontent.com/30326384/188557676-af84b966-007a-430c-a10a-1d26ebfda242.png)
