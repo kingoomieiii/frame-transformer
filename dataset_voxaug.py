@@ -65,11 +65,9 @@ class VoxAugDataset(torch.utils.data.Dataset):
         return len(self.curr_list) * self.mul
 
     def _get_vocals(self, idx, root=True):          
-        vpath = self.vocal_list[idx % len(self.vocal_list)]
+        vpath = self.vocal_list[idx]
         vdata = np.load(str(vpath))
         V = vdata['X']
-
-        V = np.abs(V)
 
         if V.shape[2] > self.cropsize:
             start = np.random.randint(0, V.shape[2] - self.cropsize + 1)
@@ -81,13 +79,13 @@ class VoxAugDataset(torch.utils.data.Dataset):
 
         if np.random.uniform() < 0.025:
             if np.random.uniform() < 0.5:
-                V[0] = 0
+                V[0] = V[0] * 0
             else:
-                V[1] = 0
+                V[1] = V[1] * 0
 
         if np.random.uniform() < self.vocal_mix_rate and root:
-            V2 = self._get_vocals(np.random.randint(len(self.vocal_list)), root=False if np.random.uniform() < self.vocal_mix_rate * 0.1 else True)
-            V = np.maximum(V, V2)
+            V2 = self._get_vocals(np.random.randint(len(self.vocal_list)), root=False)
+            V = V + V2
 
         return V
 
@@ -97,18 +95,15 @@ class VoxAugDataset(torch.utils.data.Dataset):
         aug = 'Y' not in data.files
 
         try:
-            X, Xc = data['X'], data['c']
+            X, c = data['X'], data['c']
             Y = X if aug else data['Y']
         except Exception as err:
             print(f'error loading {path}, substituting with random sample - {err}')
             path = self.curr_list[np.random.randint(len(self.curr_list))]
             data = np.load(str(path))
             aug = 'Y' not in data.files
-            X, Xc = data['X'], data['c']
+            X, c = data['X'], data['c']
             Y = X if aug else data['Y']
-
-        X = np.abs(X)
-        Y = np.abs(Y)
 
         if X.shape[2] > self.cropsize:
             start = np.random.randint(0, X.shape[2] - self.cropsize + 1)
@@ -121,15 +116,11 @@ class VoxAugDataset(torch.utils.data.Dataset):
                 X, aug = Y, True
 
             if aug and np.random.uniform() > 0.02:
-                V = self._get_vocals(idx)
-                X = np.maximum(Y, V)
-                c = np.max([Xc, X.max()])
+                V = self._get_vocals(np.random.randint(len(self.vocal_list)))
+                X = Y + V
 
                 if np.random.uniform() < 0.025:
                     X = Y
-                    c = Xc
-            else:
-                c = Xc
 
             if np.random.uniform() < 0.5:
                 X = X[::-1]
@@ -139,12 +130,10 @@ class VoxAugDataset(torch.utils.data.Dataset):
                 vpath = self.vocal_list[idx % len(self.vocal_list)]
                 vdata = np.load(str(vpath))
                 V = vdata['X']
-                X = np.maximum(Y, V)
-                c = np.max([Xc, X.max()])
-            else:
-                c = Xc
+                X = Y + V
+            
+        if root:
+            X = np.clip(np.abs(X) / c, 0, 1)
+            Y = np.clip(np.abs(Y) / c, 0, 1)
 
-        X = X / c
-        Y = Y / c
-        
         return X, Y
