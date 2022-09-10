@@ -7,11 +7,9 @@ from lib import spec_utils
 
 class Conv2DBNActiv(nn.Module):
 
-    def __init__(self, nin, nout, ksize=3, stride=1, pad=1, dilation=1, activ=nn.ReLU, norm=True):
+    def __init__(self, nin, nout, ksize=3, stride=1, pad=1, dilation=1, activ=nn.ReLU):
         super(Conv2DBNActiv, self).__init__()
         self.conv = nn.Sequential(
-            nn.BatchNorm2d(nin) if norm else nn.Identity(),
-            activ() if activ is not None else nn.Identity(),
             nn.Conv2d(
                 nin, nout,
                 kernel_size=ksize,
@@ -19,7 +17,9 @@ class Conv2DBNActiv(nn.Module):
                 padding=pad,
                 dilation=dilation,
                 bias=False
-            )
+            ),
+            nn.BatchNorm2d(nout),
+            activ()
         )
 
     def __call__(self, x):
@@ -57,6 +57,7 @@ class Encoder(nn.Module):
 
     def __init__(self, nin, nout, ksize=3, stride=1, pad=1, activ=nn.LeakyReLU):
         super(Encoder, self).__init__()
+
         self.conv1 = Conv2DBNActiv(nin, nout, ksize, stride, pad, activ=activ)
         self.conv2 = Conv2DBNActiv(nout, nout, ksize, 1, pad, activ=activ)
 
