@@ -50,17 +50,14 @@ def init_epoch(dataloader, model, device):
 
         break
 
-def train_epoch(dataloader, model, device, optimizer, accumulation_steps, progress_bar, mixup_rate, mixup_alpha, lr_warmup=None, grad_scaler=None, use_wandb=True, step=0, cascade_net: CascadedNetPerceptualLoss=None):
+def train_epoch(dataloader, model, device, optimizer, accumulation_steps, progress_bar, mixup_rate, mixup_alpha, lr_warmup=None, grad_scaler=None, use_wandb=True, step=0):
     model.train()
     sum_loss = 0
     crit = nn.L1Loss()
     batch_loss = 0
-    batch_ploss = 0
     batches = 0
     
     model.zero_grad()
-
-    reset = False
 
     pbar = tqdm(dataloader) if progress_bar else dataloader
     for itr, (X_batch, y_batch) in enumerate(pbar):
@@ -70,12 +67,10 @@ def train_epoch(dataloader, model, device, optimizer, accumulation_steps, progre
         with torch.cuda.amp.autocast_mode.autocast(enabled=grad_scaler is not None):
             pred = torch.sigmoid(model(X_batch))
 
-        p_loss = cascade_net(X_batch * pred, y_batch) / accumulation_steps
         l1_loss = crit(X_batch * pred, y_batch) / accumulation_steps
 
         batch_loss = batch_loss + l1_loss
-        batch_ploss = batch_ploss + p_loss
-        accum_loss = p_loss + l1_loss
+        accum_loss = l1_loss
 
         if torch.logical_or(accum_loss.isnan(), accum_loss.isinf()):
             print('nan training loss; aborting')
@@ -88,7 +83,7 @@ def train_epoch(dataloader, model, device, optimizer, accumulation_steps, progre
 
         if (itr + 1) % accumulation_steps == 0:
             if progress_bar:
-                pbar.set_description(f'{step}: {str(batch_loss.item())}|{str(batch_ploss.item())}')
+                pbar.set_description(f'{step}: {str(batch_loss.item())}')
 
             if use_wandb:
                 wandb.log({
@@ -112,7 +107,6 @@ def train_epoch(dataloader, model, device, optimizer, accumulation_steps, progre
             batches = batches + 1
             sum_loss = sum_loss + batch_loss.item()
             batch_loss = 0
-            batch_ploss = 0
 
         #sum_loss += accum_loss.item() * len(X_batch) * accumulation_steps
 
@@ -173,10 +167,10 @@ def main():
     p.add_argument('--cropsizes', type=str, default='256,512')
     p.add_argument('--steps', type=str, default='200000,300000')
     p.add_argument('--epochs', type=str, default='20,100')
-    p.add_argument('--batch_sizes', type=str, default='1,1')
+    p.add_argument('--batch_sizes', type=str, default='2,1')
     p.add_argument('--accumulation_steps', '-A', type=str, default='8,16')
 
-    p.add_argument('--loss_model', type=str, default="models/baseline.pth")
+    p.add_argument('--loss_model', type=str, default="models/model_iter10.pth")
 
     p.add_argument('--gpu', '-g', type=int, default=-1)
     p.add_argument('--optimizer', type=str.lower, choices=['adam', 'adamw', 'sgd', 'radam', 'rmsprop'], default='adamw')
@@ -217,7 +211,7 @@ def main():
     args.cropsizes = [int(cropsize) for cropsize in args.cropsizes.split(',')]
     args.batch_sizes = [int(batch_size) for batch_size in args.batch_sizes.split(',')]
     args.accumulation_steps = [int(steps) for steps in args.accumulation_steps.split(',')]
-    
+
     if args.wandb:
         wandb.init(project=args.wandb_project, entity=args.wandb_entity, config=args, id=args.wandb_run_id, resume="must" if args.wandb_run_id is not None else None)
 
@@ -257,10 +251,6 @@ def main():
     device = torch.device('cpu')
     model = FrameTransformer(channels=args.channels, n_fft=args.n_fft, dropout=args.dropout, expansion=args.feedforward_expansion, num_heads=args.num_heads)
 
-    cascade_net = CascadedNet(args.n_fft)
-    cascade_net.load_state_dict(torch.load(args.loss_model, map_location=device))
-    cascade_net = CascadedNetPerceptualLoss(cascade_net)
-
     # model.enc1.requires_grad_(False)
     # model.enc1_transformer.requires_grad_(False)
 
@@ -273,7 +263,7 @@ def main():
         
     model_parameters = filter(lambda p: p.requires_grad, model.parameters())
     params = sum([np.prod(p.size()) for p in model_parameters])
-    print(f'# num params: {params}')    
+    print(f'# {wandb.run.name}; num params: {params}')    
     
     #model.lock_encoder()
 
@@ -322,7 +312,6 @@ def main():
     if torch.cuda.is_available() and args.gpu >= 0:
         device = torch.device('cuda:{}'.format(args.gpu))
         model.to(device)
-        cascade_net.to(device)
 
     val_dataset = None
     curr_idx = 0
@@ -368,7 +357,7 @@ def main():
 
         print('# epoch {}'.format(epoch))
 
-        train_loss, step = train_epoch(train_dataloader, model, device, optimizer, accum_steps, args.progress_bar, args.mixup_rate, args.mixup_alpha, lr_warmup=scheduler, grad_scaler=grad_scaler, use_wandb=args.wandb, step=step, cascade_net=cascade_net)
+        train_loss, step = train_epoch(train_dataloader, model, device, optimizer, accum_steps, args.progress_bar, args.mixup_rate, args.mixup_alpha, lr_warmup=scheduler, grad_scaler=grad_scaler, use_wandb=args.wandb, step=step)
         val_loss = validate_epoch(val_dataloader, model, device)
 
         if args.wandb:
@@ -386,7 +375,7 @@ def main():
             best_loss = val_loss
             print('  * best validation loss')
 
-        model_path = f'{args.model_dir}models/model_iter{epoch}.remover.pth'
+        model_path = f'{args.model_dir}models/{wandb.run.name}.{epoch}.remover.pth'
         torch.save(model.state_dict(), model_path)
 
 if __name__ == '__main__':

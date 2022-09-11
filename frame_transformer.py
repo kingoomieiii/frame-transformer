@@ -161,15 +161,15 @@ class MultichannelMultiheadAttention(nn.Module):
         
         self.q_proj = nn.Sequential(
             MultichannelLinear(channels, channels, features, features, depthwise=False),
-            nn.Conv2d(channels, channels, kernel_size=(1,3), padding=(0,1), bias=False, groups=channels))
+            nn.Conv2d(channels, channels, kernel_size=(1,7), padding=(0,3), bias=False, groups=channels))
 
         self.k_proj = nn.Sequential(
             MultichannelLinear(channels, channels, features, features, depthwise=False),
-            nn.Conv2d(channels, channels, kernel_size=(1,3), padding=(0,1), bias=False, groups=channels))
+            nn.Conv2d(channels, channels, kernel_size=(1,7), padding=(0,3), bias=False, groups=channels))
             
         self.v_proj = nn.Sequential(
             MultichannelLinear(channels, channels, features, features, depthwise=False),
-            nn.Conv2d(channels, channels, kernel_size=(1,3), padding=(0,1), bias=False, groups=channels))
+            nn.Conv2d(channels, channels, kernel_size=(1,7), padding=(0,3), bias=False, groups=channels))
             
         self.out_proj = MultichannelLinear(channels, channels, features, features, depthwise=False)
 
