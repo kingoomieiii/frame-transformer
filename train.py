@@ -183,7 +183,7 @@ def main():
     p.add_argument('--lr_scheduler_decay_target', type=int, default=1e-12)
     p.add_argument('--lr_scheduler_decay_power', type=float, default=1.0)
     p.add_argument('--progress_bar', '-pb', type=str, default='true')
-    p.add_argument('--force_voxaug', type=str, default='true')
+    p.add_argument('--force_voxaug', type=str, default='false')
     p.add_argument('--save_all', type=str, default='true')
     p.add_argument('--model_dir', type=str, default='J://')
     p.add_argument('--llrd', type=str, default='false')
@@ -251,9 +251,6 @@ def main():
     device = torch.device('cpu')
     model = FrameTransformer(channels=args.channels, n_fft=args.n_fft, dropout=args.dropout, expansion=args.feedforward_expansion, num_heads=args.num_heads)
 
-    # model.enc1.requires_grad_(False)
-    # model.enc1_transformer.requires_grad_(False)
-
     if args.pretrained_model is not None:
         model.load_state_dict(torch.load(args.pretrained_model, map_location=device))
 
@@ -263,10 +260,8 @@ def main():
         
     model_parameters = filter(lambda p: p.requires_grad, model.parameters())
     params = sum([np.prod(p.size()) for p in model_parameters])
-    print(f'# {wandb.run.name}; num params: {params}')    
+    print(f'# {wandb.run.name if args.wandb else ""}; num params: {params}')    
     
-    #model.lock_encoder()
-
     if args.optimizer == 'adam':
         optimizer = torch.optim.Adam(
             groups,

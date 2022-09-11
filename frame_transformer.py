@@ -108,17 +108,16 @@ class FrameEncoder(nn.Module):
     def __init__(self, in_channels, out_channels, features, downsample=True, expansion=2, dropout=0.1):
         super(FrameEncoder, self).__init__()
 
-        self.relu = SquaredReLU()
-        self.norm1 = FrameNorm(in_channels, features)
+        self.activate = SquaredReLU()
         self.linear1 = MultichannelLinear(in_channels, out_channels, features, features * 2)
         self.linear2 = MultichannelLinear(out_channels, out_channels, features * 2, features // 2 if downsample else features)
         self.identity = MultichannelLinear(in_channels, out_channels, features, features // 2 if downsample else features)
         self.dropout = nn.Dropout(dropout) if dropout > 0 else nn.Identity()
+        self.norm1 = FrameNorm(out_channels, features // 2 if downsample else features)
 
     def __call__(self, x):
-        h = self.norm1(x.transpose(2,3)).transpose(2,3)
-        h = self.linear2(self.relu(self.linear1(h)))
-        x = self.identity(x) + self.dropout(h)
+        h = self.linear2(self.activate(self.linear1(x)))
+        x = self.norm1((self.identity(x) + self.dropout(h)).transpose(2,3)).transpose(2,3)
         
         return x
 
@@ -127,27 +126,25 @@ class FrameDecoder(nn.Module):
         super(FrameDecoder, self).__init__()
         
         self.activate = SquaredReLU()
-        self.norm = FrameNorm(in_channels, features // 2 if upsample else features)
+        self.dropout = nn.Dropout(dropout) if dropout > 0 else nn.Identity()
+
         self.linear1 = MultichannelLinear(in_channels, out_channels, features // 2 if upsample else features, features * 2)
         self.linear2 = MultichannelLinear(out_channels, out_channels, features * 2, features)
         self.identity = MultichannelLinear(in_channels, out_channels, features // 2 if upsample else features, features)
-        self.dropout = nn.Dropout(dropout) if dropout > 0 else nn.Identity()
+        self.norm1 = FrameNorm(out_channels, features)
 
         if has_skip:
-            self.norm2 = FrameNorm(out_channels * 2, features)
+            self.norm2 = FrameNorm(out_channels, features)
             self.linear3 = MultichannelLinear(out_channels * 2, out_channels, features, features * 2)
             self.linear4 = MultichannelLinear(out_channels, out_channels, features * 2, features)
-            self.dropout2 = nn.Dropout(dropout) if dropout > 0 else nn.Identity()
 
     def __call__(self, x, skip=None):
-        h = self.norm(x.transpose(2,3)).transpose(2,3)
-        h = self.linear2(self.activate(self.linear1(h)))
-        x = self.identity(x) + self.dropout(h)
+        h = self.linear2(self.activate(self.linear1(x)))
+        x = self.norm1((self.identity(x) + self.dropout(h)).transpose(2,3)).transpose(2,3)
 
         if skip is not None:
-            h = self.norm2(torch.cat((x, skip), dim=1).transpose(2,3)).transpose(2,3)
-            h = self.linear4(self.activate(self.linear3(h)))
-            x = x + self.dropout2(h)
+            h = self.linear4(self.activate(self.linear3(torch.cat((x, skip), dim=1))))
+            x = self.norm2((x + self.dropout(h)).transpose(2,3)).transpose(2,3)
 
         return x
 
@@ -161,15 +158,15 @@ class MultichannelMultiheadAttention(nn.Module):
         
         self.q_proj = nn.Sequential(
             MultichannelLinear(channels, channels, features, features, depthwise=False),
-            nn.Conv2d(channels, channels, kernel_size=(1,7), padding=(0,3), bias=False, groups=channels))
+            nn.Conv2d(channels, channels, kernel_size=(1,9), padding=(0,4), bias=False, groups=channels))
 
         self.k_proj = nn.Sequential(
             MultichannelLinear(channels, channels, features, features, depthwise=False),
-            nn.Conv2d(channels, channels, kernel_size=(1,7), padding=(0,3), bias=False, groups=channels))
+            nn.Conv2d(channels, channels, kernel_size=(1,9), padding=(0,4), bias=False, groups=channels))
             
         self.v_proj = nn.Sequential(
             MultichannelLinear(channels, channels, features, features, depthwise=False),
-            nn.Conv2d(channels, channels, kernel_size=(1,7), padding=(0,3), bias=False, groups=channels))
+            nn.Conv2d(channels, channels, kernel_size=(1,9), padding=(0,4), bias=False, groups=channels))
             
         self.out_proj = MultichannelLinear(channels, channels, features, features, depthwise=False)
 
@@ -193,26 +190,21 @@ class FrameTransformerEncoder(nn.Module):
         super(FrameTransformerEncoder, self).__init__()
 
         self.activate = SquaredReLU()
+        self.dropout = nn.Dropout(dropout) if dropout > 0 else nn.Identity()
 
-        self.norm1 = FrameNorm(channels, features)
         self.attn = MultichannelMultiheadAttention(channels, num_heads, features)
-        self.dropout1 = nn.Dropout(dropout) if dropout > 0 else nn.Identity()
+        self.norm1 = FrameNorm(channels, features)
 
-        self.norm2 = FrameNorm(channels, features)
         self.linear1 = MultichannelLinear(channels, channels, features, features * expansion, depthwise=False)
         self.linear2 = MultichannelLinear(channels, channels, features * expansion, features, depthwise=False)
-        self.dropout2 = nn.Dropout(dropout) if dropout > 0 else nn.Identity()
+        self.norm2 = FrameNorm(channels, features)
         
     def __call__(self, x):
-        z = self.norm1(x.transpose(2,3)).transpose(2,3)
-        z = self.attn(z)
-        z = self.dropout1(z)
-        x = x + z
+        z = self.attn(x)
+        x = self.norm1((x + self.dropout(z)).transpose(2,3)).transpose(2,3)
 
-        z = self.norm2(x.transpose(2,3)).transpose(2,3)
-        z = self.linear2(self.activate(self.linear1(z)))
-        z = self.dropout2(z)
-        x = x + z
+        z = self.linear2(self.activate(self.linear1(x)))
+        x = self.norm2((x + self.dropout(z)).transpose(2,3)).transpose(2,3)
 
         return x
 
@@ -221,34 +213,26 @@ class FrameTransformerDecoder(nn.Module):
         super(FrameTransformerDecoder, self).__init__()
         
         self.activate = SquaredReLU()
+        self.dropout = nn.Dropout(dropout) if dropout > 0 else nn.Identity()
 
-        self.norm1 = FrameNorm(channels, features)
         self.attn1 = MultichannelMultiheadAttention(channels, num_heads, features)
-        self.dropout1 = nn.Dropout(dropout) if dropout > 0 else nn.Identity()
+        self.norm1 = FrameNorm(channels, features)
 
-        self.norm2 = FrameNorm(channels, features)
         self.attn2 = MultichannelMultiheadAttention(channels, num_heads, features)
-        self.dropout2 = nn.Dropout(dropout) if dropout > 0 else nn.Identity()
+        self.norm2 = FrameNorm(channels, features)
 
-        self.norm3 = FrameNorm(channels, features)
         self.linear1 = MultichannelLinear(channels, channels, features, features * expansion, depthwise=False)
         self.linear2 = MultichannelLinear(channels, channels, features * expansion, features, depthwise=False)
-        self.dropout3 = nn.Dropout(dropout) if dropout > 0 else nn.Identity()
+        self.norm3 = FrameNorm(channels, features)
 
     def __call__(self, x, skip):
-        z = self.norm1(x.transpose(2,3)).transpose(2,3)
-        z = self.attn1(z)
-        z = self.dropout1(z)
-        x = x + z
+        z = self.attn1(x)
+        x = self.norm1((x + self.dropout(z)).transpose(2,3)).transpose(2,3)
 
-        z = self.norm2(x.transpose(2,3)).transpose(2,3)
-        z = self.attn2(z, mem=skip)
-        z = self.dropout2(z)
-        x = x + z
+        z = self.attn2(x)
+        x = self.norm2((x + self.dropout(z)).transpose(2,3)).transpose(2,3)
 
-        z = self.norm3(x.transpose(2,3)).transpose(2,3)
-        z = self.linear2(self.activate(self.linear1(z)))
-        z = self.dropout3(z)
-        x = x + z
+        z = self.linear2(self.activate(self.linear1(x)))
+        x = self.norm3((x + self.dropout(z)).transpose(2,3)).transpose(2,3)
 
         return x
