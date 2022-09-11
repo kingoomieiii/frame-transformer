@@ -8,10 +8,10 @@ https://www.youtube.com/watch?v=yjd0VilzQXA
 Currently training a multichannel primer, will probably stick with that as it seems to be doing much better now that I removed the depth-wise component of the transformer modules. I use a separable 1x7 convolution which is equivalent to their use of separable 1d convolutions extended into 2d.
 
 ## Architecture Diagram ##
-### Primer Variant ###  
+### Frame Primer ###  
 ![image](https://user-images.githubusercontent.com/30326384/189513744-43eeeb70-ecf5-42ef-8f62-d482fc7ae8e7.png)
 
-### Transformer ###
+### Frame Transformer ###
 ![image](https://user-images.githubusercontent.com/30326384/188557676-af84b966-007a-430c-a10a-1d26ebfda242.png)
 
 This neural network at its core relies on a type of layer that I refer to as a multichannel linear layer. This has two weight tensors: a 3d weight tensor which is the weight matrices for each channels position-wise transform and then a 2d weight matrix for the depth-wise transform. This allows each channel to have its own position-wise linear layer that is applied to each frame while taking advantage of batched matrix multiplication. Compared to conv1d, this is around 2x faster when using smaller numbers of channels and far faster when using many channels/parallel linear layers.
