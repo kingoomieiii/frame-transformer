@@ -11,11 +11,10 @@ import wandb
 from tqdm import tqdm
 
 from dataset_voxaug import VoxAugDataset
-from frame_transformer import FrameTransformer
+from frame_transformer_prenorm import FrameTransformer
 
 from lib.lr_scheduler_linear_warmup import LinearWarmupScheduler
 from lib.lr_scheduler_polynomial_decay import PolynomialDecayScheduler
-from lib.nets import CascadedNet, CascadedNetPerceptualLoss
 
 def setup_logger(name, logfile='LOGFILENAME.log', out_dir='logs'):
     logger = logging.getLogger(name)
@@ -169,8 +168,7 @@ def main():
     p.add_argument('--epochs', type=str, default='20,100')
     p.add_argument('--batch_sizes', type=str, default='2,1')
     p.add_argument('--accumulation_steps', '-A', type=str, default='8,16')
-
-    p.add_argument('--loss_model', type=str, default="models/model_iter10.pth")
+    p.add_argument('--force_voxaug', type=str, default='false')
 
     p.add_argument('--gpu', '-g', type=int, default=-1)
     p.add_argument('--optimizer', type=str.lower, choices=['adam', 'adamw', 'sgd', 'radam', 'rmsprop'], default='adamw')
@@ -183,7 +181,6 @@ def main():
     p.add_argument('--lr_scheduler_decay_target', type=int, default=1e-12)
     p.add_argument('--lr_scheduler_decay_power', type=float, default=1.0)
     p.add_argument('--progress_bar', '-pb', type=str, default='true')
-    p.add_argument('--force_voxaug', type=str, default='false')
     p.add_argument('--save_all', type=str, default='true')
     p.add_argument('--model_dir', type=str, default='J://')
     p.add_argument('--llrd', type=str, default='false')
@@ -314,7 +311,7 @@ def main():
     print(f'{args.epochs[-1]} epochs')
 
     best_loss = np.inf
-    for epoch in range(args.epoch):
+    for epoch in range(args.curr_epoch, args.epoch):
         train_dataset.rebuild()
 
         if step > args.steps[curr_idx] or val_dataset is None:
