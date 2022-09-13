@@ -259,8 +259,8 @@ class ConvFrameEncoder(nn.Module):
 
         self.relu = SquaredReLU()
         self.norm = FrameNorm(in_channels, features)
-        self.conv1 = nn.Conv2d(in_channels, out_channels * 2, kernel_size=3, padding=1, bias=False)
-        self.conv2 = nn.Conv2d(out_channels * 2, out_channels, kernel_size=3, padding=1, stride=(2,1) if downsample else 1, bias=False)
+        self.conv1 = nn.Conv2d(in_channels, out_channels * 2, kernel_size=(7,1), padding=(3,0), bias=False)
+        self.conv2 = nn.Conv2d(out_channels * 2, out_channels, kernel_size=(7,1), padding=(3,0), stride=(2,1) if downsample else 1, bias=False)
         self.identity = nn.Conv2d(in_channels, out_channels, kernel_size=1, padding=0, stride=(2,1) if downsample else 1, bias=False)
 
     def __call__(self, x):
@@ -278,8 +278,8 @@ class ConvFrameDecoder(nn.Module):
 
         self.relu = SquaredReLU()
         self.norm = FrameNorm(in_channels + out_channels, features)
-        self.conv1 = nn.Conv2d(in_channels + out_channels, out_channels * 2, kernel_size=3, padding=1, bias=False)
-        self.conv2 = nn.Conv2d(out_channels * 2, out_channels, kernel_size=3, padding=1, bias=False)
+        self.conv1 = nn.Conv2d(in_channels + out_channels, out_channels * 2, kernel_size=(7,1), padding=(3,0), bias=False)
+        self.conv2 = nn.Conv2d(out_channels * 2, out_channels, kernel_size=(7,1), padding=(3,0), bias=False)
         self.identity = nn.Conv2d(in_channels + out_channels, out_channels, kernel_size=1, padding=0, bias=False)
 
     def __call__(self, x, skip):
