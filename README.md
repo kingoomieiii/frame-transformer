@@ -9,7 +9,7 @@ Currently training a multichannel primer, will probably stick with that as it se
 
 ## Architecture Diagram ##
 ### Conv Frame Primer ###
-![image](https://user-images.githubusercontent.com/30326384/189787921-846883f9-8be7-4fcb-829f-670f02b7f7a5.png)
+![image](https://user-images.githubusercontent.com/30326384/189788070-fcf4184e-1835-44ab-9e08-0d553731f3c5.png)
 
 ### Frame Primer ###  
 ![image](https://user-images.githubusercontent.com/30326384/189513744-43eeeb70-ecf5-42ef-8f62-d482fc7ae8e7.png)
