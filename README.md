@@ -1,6 +1,6 @@
 # multichannel-transformer
 
-This fork is mainly a research fork, although I think I've converged on a solid architecture that applies transformers to audio in a meaningful manner. Renaming from frame-transformer to multichannel-transformer since non-audio related scripts will be being added in coming days and frame transformer is more specific. I call this architecture a frame transformer; it is a position-wise residual multichannel transformer u-net. Multichannel transformers are an extension of transformers into the channel dimension; to make this possible without absurd delays in training, I created a layer that I call multichannel linear that consists of a position-wise transform for each channel as well as a depth-wise transform to increase/reduce channels which relies on batched matrix multiplication and a shared weight tensor for parallel linear layers.
+This fork is mainly a research fork, although I think I've converged on a solid architecture that applies transformers to audio in a meaningful manner. Renaming from frame-transformer to multichannel-transformer since non-audio related scripts will be being added in coming days and frame transformer is more specific. I call this architecture a frame transformer; it is a position-wise residual multichannel transformer u-net. Multichannel transformers are an extension of transformers into the channel dimension; to make this possible without absurd delays in training, I created a layer that I call multichannel linear that consists of a position-wise transform for each channel as well as a depth-wise transform to increase/reduce channels which relies on batched matrix multiplication and a shared weight tensor for parallel linear layers. Currently training a frame primer variant with convolutional encoders/decoders as they allow for adding more channels which means more parallel transformer layers; currently training with 6 channels which means 6 parallel transformer layers kick things off, then 12, 24, 48, 96, and finally 192 parallel transformer layers at the core of the u-net.
 
 Example of conversion with frame transformer at 150k optimization steps with a batch size of 16 (300 million parameters):
 https://www.youtube.com/watch?v=yjd0VilzQXA 
@@ -8,6 +8,9 @@ https://www.youtube.com/watch?v=yjd0VilzQXA
 Currently training a multichannel primer, will probably stick with that as it seems to be doing much better now that I removed the depth-wise component of the transformer modules. I use a separable 1x7 convolution which is equivalent to their use of separable 1d convolutions extended into 2d.
 
 ## Architecture Diagram ##
+### Conv Frame Primer ###
+![image](https://user-images.githubusercontent.com/30326384/189787499-fb6200df-dabc-470d-91a1-f0efb242dbd8.png)
+
 ### Frame Primer ###  
 ![image](https://user-images.githubusercontent.com/30326384/189513744-43eeeb70-ecf5-42ef-8f62-d482fc7ae8e7.png)
 
