@@ -11,37 +11,37 @@ class FrameTransformer(nn.Module):
         self.max_bin = n_fft // 2
         self.output_bin = n_fft // 2 + 1
 
-        self.enc1 = ConvFrameEncoder(in_channels, channels, self.max_bin, downsample=False, expansion=expansion)
+        self.enc1 = ConvFrameEncoder(in_channels, channels, self.max_bin, downsample=False)
         self.enc1_transformer = FrameTransformerEncoder(channels, self.max_bin, num_heads=num_heads, dropout=dropout, expansion=expansion)
 
-        self.enc2 = ConvFrameEncoder(channels, channels * 2, self.max_bin, expansion=expansion)
+        self.enc2 = ConvFrameEncoder(channels, channels * 2, self.max_bin)
         self.enc2_transformer = FrameTransformerEncoder(channels * 2, self.max_bin // 2, num_heads=num_heads, dropout=dropout, expansion=expansion)
 
-        self.enc3 = ConvFrameEncoder(channels * 2, channels * 4, self.max_bin // 2, expansion=expansion)
+        self.enc3 = ConvFrameEncoder(channels * 2, channels * 4, self.max_bin // 2)
         self.enc3_transformer = FrameTransformerEncoder(channels * 4, self.max_bin // 4, num_heads=num_heads, dropout=dropout, expansion=expansion)
 
-        self.enc4 = ConvFrameEncoder(channels * 4, channels * 8, self.max_bin // 4, expansion=expansion)
+        self.enc4 = ConvFrameEncoder(channels * 4, channels * 8, self.max_bin // 4)
         self.enc4_transformer = FrameTransformerEncoder(channels * 8, self.max_bin // 8, num_heads=num_heads, dropout=dropout, expansion=expansion)
 
-        self.enc5 = ConvFrameEncoder(channels * 8, channels * 16, self.max_bin // 8, expansion=expansion)
+        self.enc5 = ConvFrameEncoder(channels * 8, channels * 16, self.max_bin // 8)
         self.enc5_transformer = FrameTransformerEncoder(channels * 16, self.max_bin // 16, num_heads=num_heads, dropout=dropout, expansion=expansion)
 
-        self.enc6 = ConvFrameEncoder(channels * 16, channels * 32, self.max_bin // 16, expansion=expansion)
+        self.enc6 = ConvFrameEncoder(channels * 16, channels * 32, self.max_bin // 16)
         self.enc6_transformer = FrameTransformerEncoder(channels * 32, self.max_bin // 32, num_heads=num_heads, dropout=dropout, expansion=expansion)
 
-        self.dec5 = ConvFrameDecoder(channels * 32, channels * 16, self.max_bin // 16, expansion=expansion)
+        self.dec5 = ConvFrameDecoder(channels * 32, channels * 16, self.max_bin // 16)
         self.dec5_transformer = FrameTransformerDecoder(channels * 16, self.max_bin // 16, num_heads=num_heads, dropout=dropout, expansion=expansion)
 
-        self.dec4 = ConvFrameDecoder(channels * 16, channels * 8, self.max_bin // 8, expansion=expansion)
+        self.dec4 = ConvFrameDecoder(channels * 16, channels * 8, self.max_bin // 8)
         self.dec4_transformer = FrameTransformerDecoder(channels * 8, self.max_bin // 8, num_heads=num_heads, dropout=dropout, expansion=expansion)
 
-        self.dec3 = ConvFrameDecoder(channels * 8, channels * 4, self.max_bin // 4, expansion=expansion)
+        self.dec3 = ConvFrameDecoder(channels * 8, channels * 4, self.max_bin // 4)
         self.dec3_transformer = FrameTransformerDecoder(channels * 4, self.max_bin // 4, num_heads=num_heads, dropout=dropout, expansion=expansion)
 
-        self.dec2 = ConvFrameDecoder(channels * 4, channels * 2, self.max_bin // 2, expansion=expansion)
+        self.dec2 = ConvFrameDecoder(channels * 4, channels * 2, self.max_bin // 2)
         self.dec2_transformer = FrameTransformerDecoder(channels * 2, self.max_bin // 2, num_heads=num_heads, dropout=dropout, expansion=expansion)
 
-        self.dec1 = ConvFrameDecoder(channels * 2, channels * 1, self.max_bin, expansion=expansion)
+        self.dec1 = ConvFrameDecoder(channels * 2, channels * 1, self.max_bin)
         self.dec1_transformer = FrameTransformerDecoder(channels * 1, self.max_bin, num_heads=num_heads, dropout=dropout, expansion=expansion)
 
         self.out = nn.Parameter(torch.empty(in_channels, channels))
@@ -105,7 +105,7 @@ class FrameNorm(nn.Module):
         return torch.layer_norm(x, (self.weight.shape[-1],), eps=self.eps) * self.weight + self.bias
 
 class FrameEncoder(nn.Module):
-    def __init__(self, in_channels, out_channels, features, downsample=True, expansion=2, dropout=0.1):
+    def __init__(self, in_channels, out_channels, features, downsample=True, dropout=0.1):
         super(FrameEncoder, self).__init__()
 
         self.relu = SquaredReLU()
@@ -123,7 +123,7 @@ class FrameEncoder(nn.Module):
         return x
 
 class FrameDecoder(nn.Module):
-    def __init__(self, in_channels, out_channels, features, upsample=True, expansion=2, dropout=0.1, has_skip=True):
+    def __init__(self, in_channels, out_channels, features, upsample=True, dropout=0.1, has_skip=True):
         super(FrameDecoder, self).__init__()
         
         self.activate = SquaredReLU()
@@ -254,7 +254,7 @@ class FrameTransformerDecoder(nn.Module):
         return x
 
 class ConvFrameEncoder(nn.Module):
-    def __init__(self, in_channels, out_channels, features, downsample=True, expansion=2, dropout=0.1):
+    def __init__(self, in_channels, out_channels, features, downsample=True, dropout=0.1):
         super(ConvFrameEncoder, self).__init__()
 
         self.relu = SquaredReLU()
@@ -271,7 +271,7 @@ class ConvFrameEncoder(nn.Module):
         return x
 
 class ConvFrameDecoder(nn.Module):
-    def __init__(self, in_channels, out_channels, features, upsample=True, expansion=2, dropout=0.1, has_skip=True):
+    def __init__(self, in_channels, out_channels, features, upsample=True, dropout=0.1, has_skip=True):
         super(ConvFrameDecoder, self).__init__()
 
         self.upsample = nn.Upsample(scale_factor=(2,1), mode='bilinear', align_corners=True)
