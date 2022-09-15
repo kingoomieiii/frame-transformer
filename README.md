@@ -2,6 +2,12 @@
 
 This fork is mainly a research fork, although I think I've converged on a solid architecture that applies transformers to audio in a meaningful manner. Renaming from frame-transformer to multichannel-transformer since non-audio related scripts will be being added in coming days and frame transformer is more specific. I call this architecture a frame transformer; it is a position-wise residual multichannel transformer u-net. Multichannel transformers are an extension of transformers into the channel dimension; to make this possible without absurd delays in training, I created a layer that I call multichannel linear that consists of a position-wise transform for each channel as well as a depth-wise transform to increase/reduce channels which relies on batched matrix multiplication and a shared weight tensor for parallel linear layers. Currently training a frame primer variant with convolutional encoders/decoders as they allow for adding more channels which means more parallel transformer layers; currently training with 6 channels which means 6 parallel transformer layers kick things off, then 12, 24, 48, 96, and finally 192 parallel transformer layers at the core of the u-net.
 
+Currently at 129,354 optimization steps with my current training session which at its deepest has 192 parallel transformer layers. 
+
+This video compares the current model at a cropsize of 256 and a cropsize of 2080, clearly showing that the model is contextualizing audio: https://www.youtube.com/watch?v=9Q9v4Okbvs4
+
+This video compares the baseline cascaded net from the parent repo with my architecture; the first half is cascaded net while the second half is the convolutional frame primer: https://www.youtube.com/watch?v=92hAweHzpis
+
 Example of conversion with frame transformer at 150k optimization steps with a batch size of 16 (300 million parameters):
 https://www.youtube.com/watch?v=yjd0VilzQXA 
 
