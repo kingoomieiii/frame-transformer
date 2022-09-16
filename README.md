@@ -1,6 +1,16 @@
 # multichannel-transformer
 
-This fork is mainly a research fork, although I think I've converged on a solid architecture that applies transformers to audio in a meaningful manner. Renaming from frame-transformer to multichannel-transformer since non-audio related scripts will be being added in coming days and frame transformer is more specific. I call this architecture a frame transformer; it is a position-wise residual multichannel transformer u-net. Multichannel transformers are an extension of transformers into the channel dimension; to make this possible without absurd delays in training, I created a layer that I call multichannel linear that consists of a position-wise transform for each channel as well as a depth-wise transform to increase/reduce channels which relies on batched matrix multiplication and a shared weight tensor for parallel linear layers.
+This fork is mainly a research fork, although I think I've converged on a solid architecture that applies transformers to audio in a meaningful manner. Renaming from frame-transformer to multichannel-transformer since non-audio related scripts will be being added in coming days and frame transformer is more specific. 
+
+The vocal remover I'm calling a frame transformer, or more specifically a convolutional multichannel frame primer. Multichannel transformers are an extension of transformers into the channel dimension; to make this possible without absurd delays in training, I created a layer that I call multichannel linear that consists of a position-wise transform for each channel as well as a depth-wise transform to increase/reduce channels which relies on batched matrix multiplication and a shared weight tensor for parallel linear layers. For encoding frames and decoding frames, 7x1 convolutions are used in a standard two layer perceptron setup as in the transformer architecture. These expand and shrink the number of channels respectively while also downsampling along the frequency axis.
+
+Currently training a convolutional frame primer variant that is doing quite well; currently training with 6 channels which means 6 parallel transformer layers kick things off, then 12, 24, 48, 96, and finally 192 parallel transformer layers at the core of the u-net. I'm currently only using one head of attention per channel, however I will be testing out multiple heads in another run once this variant is fully trained as I suspect that will probably help (it also increases memory consumption quite a bit and lowers the number of dimensions per head to very small number of features, but given this occurs in the deep portion of the u-net where features are more abstract this makes sense imo).
+
+Currently at 161,319 optimization steps with my current training session which at its deepest has 192 parallel transformer layers and still learning steadily, videos below show the current convolutional multichannel frame primer in use: 
+
+This video compares the current model at a cropsize of 256 and a cropsize of 2080, clearly showing that the model is contextualizing audio: https://www.youtube.com/watch?v=9Q9v4Okbvs4
+
+This video compares the baseline cascaded net from the parent repo with my architecture; the first half is cascaded net while the second half is the convolutional frame primer: https://www.youtube.com/watch?v=92hAweHzpis
 
 Example of conversion with frame transformer at 150k optimization steps with a batch size of 16 (300 million parameters):
 https://www.youtube.com/watch?v=yjd0VilzQXA 
@@ -8,6 +18,9 @@ https://www.youtube.com/watch?v=yjd0VilzQXA
 Currently training a multichannel primer, will probably stick with that as it seems to be doing much better now that I removed the depth-wise component of the transformer modules. I use a separable 1x7 convolution which is equivalent to their use of separable 1d convolutions extended into 2d.
 
 ## Architecture Diagram ##
+### Conv Frame Primer ###
+![image](https://user-images.githubusercontent.com/30326384/189788070-fcf4184e-1835-44ab-9e08-0d553731f3c5.png)
+
 ### Frame Primer ###  
 ![image](https://user-images.githubusercontent.com/30326384/189513744-43eeeb70-ecf5-42ef-8f62-d482fc7ae8e7.png)
 
