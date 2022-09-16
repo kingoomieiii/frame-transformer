@@ -164,7 +164,7 @@ def main():
     p.add_argument('--dropout', type=float, default=0.1)
 
     p.add_argument('--cropsizes', type=str, default='256,512')
-    p.add_argument('--steps', type=str, default='300000,400000')
+    p.add_argument('--steps', type=str, default='400000,500000')
     p.add_argument('--epochs', type=str, default='20,100')
     p.add_argument('--batch_sizes', type=str, default='2,1')
     p.add_argument('--accumulation_steps', '-A', type=str, default='8,16')

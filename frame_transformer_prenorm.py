@@ -161,15 +161,15 @@ class MultichannelMultiheadAttention(nn.Module):
         
         self.q_proj = nn.Sequential(
             MultichannelLinear(channels, channels, features, features, depthwise=False),
-            nn.Conv2d(channels, channels, kernel_size=(1,3), padding=(0,1), bias=False, groups=channels))
+            nn.Conv2d(channels, channels, kernel_size=(1,7), padding=(0,3), bias=False, groups=channels))
 
         self.k_proj = nn.Sequential(
             MultichannelLinear(channels, channels, features, features, depthwise=False),
-            nn.Conv2d(channels, channels, kernel_size=(1,3), padding=(0,1), bias=False, groups=channels))
+            nn.Conv2d(channels, channels, kernel_size=(1,7), padding=(0,3), bias=False, groups=channels))
             
         self.v_proj = nn.Sequential(
             MultichannelLinear(channels, channels, features, features, depthwise=False),
-            nn.Conv2d(channels, channels, kernel_size=(1,3), padding=(0,1), bias=False, groups=channels))
+            nn.Conv2d(channels, channels, kernel_size=(1,7), padding=(0,3), bias=False, groups=channels))
             
         self.out_proj = MultichannelLinear(channels, channels, features, features, depthwise=False)
 
@@ -254,13 +254,13 @@ class FrameTransformerDecoder(nn.Module):
         return x
 
 class ConvFrameEncoder(nn.Module):
-    def __init__(self, in_channels, out_channels, features, downsample=True, kernel_size=3, padding=1):
+    def __init__(self, in_channels, out_channels, features, downsample=True, dropout=0.1):
         super(ConvFrameEncoder, self).__init__()
 
         self.relu = SquaredReLU()
         self.norm = FrameNorm(in_channels, features)
-        self.conv1 = nn.Conv2d(in_channels, out_channels, kernel_size=kernel_size, padding=padding, bias=False)
-        self.conv2 = nn.Conv2d(out_channels, out_channels, kernel_size=kernel_size, padding=padding, stride=(2,1) if downsample else 1, bias=False)
+        self.conv1 = nn.Conv2d(in_channels, out_channels * 2, kernel_size=(7,1), padding=(3,0), bias=False)
+        self.conv2 = nn.Conv2d(out_channels * 2, out_channels, kernel_size=(7,1), padding=(3,0), stride=(2,1) if downsample else 1, bias=False)
         self.identity = nn.Conv2d(in_channels, out_channels, kernel_size=1, padding=0, stride=(2,1) if downsample else 1, bias=False)
 
     def __call__(self, x):
@@ -271,15 +271,15 @@ class ConvFrameEncoder(nn.Module):
         return x
 
 class ConvFrameDecoder(nn.Module):
-    def __init__(self, in_channels, out_channels, features, kernel_size=3, padding=1):
+    def __init__(self, in_channels, out_channels, features, upsample=True, dropout=0.1, has_skip=True):
         super(ConvFrameDecoder, self).__init__()
 
         self.upsample = nn.Upsample(scale_factor=(2,1), mode='bilinear', align_corners=True)
 
         self.relu = SquaredReLU()
         self.norm = FrameNorm(in_channels + out_channels, features)
-        self.conv1 = nn.Conv2d(in_channels + out_channels, out_channels, kernel_size=kernel_size, padding=padding, bias=False)
-        self.conv2 = nn.Conv2d(out_channels, out_channels, kernel_size=kernel_size, padding=padding, bias=False)
+        self.conv1 = nn.Conv2d(in_channels + out_channels, out_channels * 2, kernel_size=(7,1), padding=(3,0), bias=False)
+        self.conv2 = nn.Conv2d(out_channels * 2, out_channels, kernel_size=(7,1), padding=(3,0), bias=False)
         self.identity = nn.Conv2d(in_channels + out_channels, out_channels, kernel_size=1, padding=0, bias=False)
 
     def __call__(self, x, skip):
