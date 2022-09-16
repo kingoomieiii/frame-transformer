@@ -164,7 +164,7 @@ def main():
     p.add_argument('--dropout', type=float, default=0.1)
 
     p.add_argument('--cropsizes', type=str, default='256,512')
-    p.add_argument('--steps', type=str, default='200000,300000')
+    p.add_argument('--steps', type=str, default='300000,400000')
     p.add_argument('--epochs', type=str, default='20,100')
     p.add_argument('--batch_sizes', type=str, default='2,1')
     p.add_argument('--accumulation_steps', '-A', type=str, default='8,16')
@@ -231,14 +231,14 @@ def main():
         ],
         vocal_path=[
             "D://cs2048_sr44100_hl1024_nf2048_of0_VOCALS",
-            "J://cs2048_sr44100_hl1024_nf2048_of0_VOCALS",
+            "F://cs2048_sr44100_hl1024_nf2048_of0_VOCALS",
             "K://cs2048_sr44100_hl1024_nf2048_of0_VOCALS",
         ],
         is_validation=False,
         epoch_size=args.epoch_size,
         mixup_rate=args.mixup_rate,
         mixup_alpha=args.mixup_alpha,
-        force_voxaug=args.force_voxaug
+        force_voxaug=True#args.force_voxaug
     )
     
     random.seed(args.seed)
