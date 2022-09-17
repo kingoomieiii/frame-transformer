@@ -51,9 +51,6 @@ class FrameTransformer(nn.Module):
         nn.init.uniform_(self.out, a=-1/math.sqrt(in_channels), b=1/math.sqrt(in_channels))
 
     def _generate_mask(self, src):
-        if not self.training:
-            return None
-
         if self.mask is None or src.shape[3] != self.mask.shape[0]:
             self.mask = torch.triu(torch.ones(src.shape[3], src.shape[3]) * float('-inf'), diagonal=1).to(src.device)
 
