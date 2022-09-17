@@ -4,26 +4,6 @@ from torch import nn
 import torch.nn.functional as F
 from rotary_embedding_torch import RotaryEmbedding
 
-class CausalConv2d(nn.Module):
-    def __init__(self, in_channels, out_channels, kernel_size=1, padding=0, stride=1, groups=1):
-        super(CausalConv2d, self).__init__()
-
-        self.causal_padding = (kernel_size // 2) + padding
-        self.conv = nn.Conv2d(in_channels, out_channels, kernel_size=kernel_size, stride=(stride,1), padding=(padding, 0), bias=False, groups=groups)
-
-    def __call__(self, x):
-        return self.conv(F.pad(x, (self.causal_padding, 0)))
-
-class CausalConv1xN(nn.Module):
-    def __init__(self, in_channels, out_channels, kernel_size=1, padding=0, stride=1, groups=1):
-        super(CausalConv1xN, self).__init__()
-
-        self.causal_padding = (kernel_size // 2) + padding
-        self.conv = nn.Conv2d(in_channels, out_channels, kernel_size=(1,kernel_size), stride=(stride,1), bias=False, groups=groups)
-
-    def __call__(self, x):
-        return self.conv(F.pad(x, (self.causal_padding, 0)))
-
 class FrameTransformer(nn.Module):
     def __init__(self, in_channels=2, channels=2, dropout=0.1, n_fft=2048, num_heads=4, expansion=4, num_layers=6):
         super(FrameTransformer, self).__init__()
@@ -84,6 +64,26 @@ class FrameTransformer(nn.Module):
         out = torch.matmul(d1.transpose(1,3), self.out.t()).transpose(1,3)    
 
         return out
+
+class CausalConv2d(nn.Module):
+    def __init__(self, in_channels, out_channels, kernel_size=1, padding=0, stride=1, groups=1):
+        super(CausalConv2d, self).__init__()
+
+        self.causal_padding = (kernel_size // 2) + padding
+        self.conv = nn.Conv2d(in_channels, out_channels, kernel_size=kernel_size, stride=(stride,1), padding=(padding, 0), bias=False, groups=groups)
+
+    def __call__(self, x):
+        return self.conv(F.pad(x, (self.causal_padding, 0)))
+
+class CausalConv1xN(nn.Module):
+    def __init__(self, in_channels, out_channels, kernel_size=1, padding=0, stride=1, groups=1):
+        super(CausalConv1xN, self).__init__()
+
+        self.causal_padding = (kernel_size // 2) + padding
+        self.conv = nn.Conv2d(in_channels, out_channels, kernel_size=(1,kernel_size), stride=(stride,1), bias=False, groups=groups)
+
+    def __call__(self, x):
+        return self.conv(F.pad(x, (self.causal_padding, 0)))
 
 class MultichannelLinear(nn.Module):
     def __init__(self, in_channels, out_channels, in_features, out_features, positionwise=True, depthwise=True):
