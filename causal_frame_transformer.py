@@ -36,12 +36,10 @@ class FrameTransformer(nn.Module):
         self.enc3 = FrameEncoder(channels * 2, channels * 4, self.max_bin // 2)
         self.enc4 = FrameEncoder(channels * 4, channels * 8, self.max_bin // 4)
         self.enc5 = FrameEncoder(channels * 8, channels * 16, self.max_bin // 8)
-        self.enc6 = FrameEncoder(channels * 16, channels * 32, self.max_bin // 16)
 
-        self.encoder = nn.ModuleList([FrameTransformerEncoder(channels * 32, self.max_bin // 32, num_heads=num_heads, dropout=dropout, expansion=expansion) for _ in range(num_layers)])
-        self.decoder = nn.ModuleList([FrameTransformerDecoder(channels * 32, self.max_bin // 32, num_heads=num_heads, dropout=dropout, expansion=expansion) for _ in range(num_layers)])
+        self.encoder = nn.ModuleList([FrameTransformerEncoder(channels * 16, self.max_bin // 16, num_heads=num_heads, dropout=dropout, expansion=expansion) for _ in range(num_layers)])
+        self.decoder = nn.ModuleList([FrameTransformerDecoder(channels * 16, self.max_bin // 16, num_heads=num_heads, dropout=dropout, expansion=expansion) for _ in range(num_layers)])
         
-        self.dec5 = FrameDecoder(channels * 32, channels * 16, self.max_bin // 16)
         self.dec4 = FrameDecoder(channels * 16, channels * 8, self.max_bin // 8)
         self.dec3 = FrameDecoder(channels * 8, channels * 4, self.max_bin // 4)
         self.dec2 = FrameDecoder(channels * 4, channels * 2, self.max_bin // 2)
@@ -66,27 +64,23 @@ class FrameTransformer(nn.Module):
         se3 = self.enc3(se2)
         se4 = self.enc4(se3)
         se5 = self.enc5(se4)
-        se6 = self.enc6(se5)
 
         te1 = self.enc1(tgt)
         te2 = self.enc2(te1)
         te3 = self.enc3(te2)
         te4 = self.enc4(te3)
         te5 = self.enc5(te4)
-        te6 = self.enc6(te5)
 
         for encoder in self.encoder:
-            se6 = encoder(se6)
+            se5 = encoder(se5)
 
         for decoder in self.decoder:
-            te5 = decoder(te6, se6, mask)
+            te5 = decoder(te5, se5, mask)
 
-        d5 = self.dec5(te6, se5)
-        d4 = self.dec4(d5, se4)
-        d3 = self.dec3(d4, se3)
-        d2 = self.dec2(d3, se2)
-        d1 = self.dec1(d2, se1)
-
+        d4 = self.dec4(te5, te4, se4)
+        d3 = self.dec3(d4, te3, se3)
+        d2 = self.dec2(d3, te2, se2)
+        d1 = self.dec1(d2, te1, se1)
         out = torch.matmul(d1.transpose(1,3), self.out.t()).transpose(1,3)    
 
         return out
@@ -154,7 +148,7 @@ class FrameDecoder(nn.Module):
 
         self.upsample = nn.Upsample(scale_factor=(2,1), mode='bilinear', align_corners=True)
 
-        channels = in_channels + out_channels * 1
+        channels = in_channels + out_channels * 2
         self.channels = channels
         self.relu = SquaredReLU()
         self.norm = FrameNorm(channels, features)
@@ -162,8 +156,8 @@ class FrameDecoder(nn.Module):
         self.conv2 = CausalConv2d(channels, out_channels, kernel_size=3, padding=1)
         self.identity = nn.Conv2d(channels, out_channels, kernel_size=1, padding=0, bias=False)
 
-    def __call__(self, x, skip):
-        x = torch.cat((self.upsample(x), skip), dim=1)
+    def __call__(self, x, skip1, skip2):
+        x = torch.cat((self.upsample(x), skip1, skip2), dim=1)
         h = self.norm(x.transpose(2,3)).transpose(2,3)
         h = self.conv2(self.relu(self.conv1(h)))
         x = self.identity(x) + h
