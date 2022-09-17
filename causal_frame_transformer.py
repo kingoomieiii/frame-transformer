@@ -39,17 +39,11 @@ class FrameTransformer(nn.Module):
     def __call__(self, src, tgt):
         mask = self._generate_mask(src)
 
-        se1 = self.enc1(src)
-        se2 = self.enc2(se1)
-        se3 = self.enc3(se2)
-        se4 = self.enc4(se3)
-        se5 = self.enc5(se4)
-
-        te1 = self.enc1(tgt)
-        te2 = self.enc2(te1)
-        te3 = self.enc3(te2)
-        te4 = self.enc4(te3)
-        te5 = self.enc5(te4)
+        se1, te1 = self.enc1(src), self.enc1(tgt)
+        se2, te2 = self.enc2(se1), self.enc2(te1)
+        se3, te3 = self.enc3(se2), self.enc3(te2)
+        se4, te4 = self.enc4(se3), self.enc4(te3)
+        se5, te5 = self.enc5(se4), self.enc5(te4)
 
         for encoder in self.encoder:
             se5 = encoder(se5)
