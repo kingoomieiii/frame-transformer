@@ -36,10 +36,12 @@ class FrameTransformer(nn.Module):
         self.enc3 = FrameEncoder(channels * 2, channels * 4, self.max_bin // 2)
         self.enc4 = FrameEncoder(channels * 4, channels * 8, self.max_bin // 4)
         self.enc5 = FrameEncoder(channels * 8, channels * 16, self.max_bin // 8)
+        self.enc6 = FrameEncoder(channels * 16, channels * 32, self.max_bin // 16)
 
-        self.encoder = nn.ModuleList([FrameTransformerEncoder(channels * 16, self.max_bin // 16, num_heads=num_heads, dropout=dropout, expansion=expansion) for _ in range(num_layers)])
-        self.decoder = nn.ModuleList([FrameTransformerDecoder(channels * 16, self.max_bin // 16, num_heads=num_heads, dropout=dropout, expansion=expansion) for _ in range(num_layers)])
+        self.encoder = nn.ModuleList([FrameTransformerEncoder(channels * 32, self.max_bin // 32, num_heads=num_heads, dropout=dropout, expansion=expansion) for _ in range(num_layers)])
+        self.decoder = nn.ModuleList([FrameTransformerDecoder(channels * 32, self.max_bin // 32, num_heads=num_heads, dropout=dropout, expansion=expansion) for _ in range(num_layers)])
         
+        self.dec5 = FrameDecoder(channels * 32, channels * 16, self.max_bin // 16)
         self.dec4 = FrameDecoder(channels * 16, channels * 8, self.max_bin // 8)
         self.dec3 = FrameDecoder(channels * 8, channels * 4, self.max_bin // 4)
         self.dec2 = FrameDecoder(channels * 4, channels * 2, self.max_bin // 2)
@@ -64,20 +66,23 @@ class FrameTransformer(nn.Module):
         se3 = self.enc3(se2)
         se4 = self.enc4(se3)
         se5 = self.enc5(se4)
-
-        for encoder in self.encoder:
-            se5 = encoder(se5)
+        se6 = self.enc6(se5)
 
         te1 = self.enc1(tgt)
         te2 = self.enc2(te1)
         te3 = self.enc3(te2)
         te4 = self.enc4(te3)
         te5 = self.enc5(te4)
+        te6 = self.enc6(te5)
 
+        for encoder in self.encoder:
+            se6 = encoder(se6)
+            
         for decoder in self.decoder:
-            te5 = decoder(te5, se5, mask)
+            te5 = decoder(te6, se6, mask)
 
-        d4 = self.dec4(te5, se4)
+        d5 = self.dec5(te6, se5)
+        d4 = self.dec4(d5, se4)
         d3 = self.dec3(d4, se3)
         d2 = self.dec2(d3, se2)
         d1 = self.dec1(d2, se1)

@@ -101,17 +101,21 @@ def validate_epoch(dataloader, model, device):
     crit = nn.L1Loss()
     sum_loss = 0
 
+    pbar = tqdm(dataloader)
+
     with torch.no_grad():
-        for src, tgt in tqdm(dataloader):
+        for src, tgt in pbar:
             src = src.to(device)[:, :, :model.max_bin]
             tgt = tgt.to(device)[:, :, :model.max_bin]
             curr = torch.zeros_like(tgt).to(device)
 
             for w in range(curr.shape[3]):
                 pred = torch.sigmoid(model(src, F.pad(src * curr, (1,0), value=1)[:, :, :, :-1]))
-                curr[:, :, :, :w] = pred[:, :, :, :w]
+                curr[:, :, :, w] = pred[:, :, :, w]
             
             mag_loss = crit(src * curr, tgt)
+
+            pbar.set_description(f'{mag_loss} | {curr.max()} | {curr.min()}')
 
             if torch.logical_or(mag_loss.isnan(), mag_loss.isinf()):
                 print('nan validation loss; aborting')
@@ -148,7 +152,7 @@ def main():
     p.add_argument('--steps', type=str, default='400000,500000')
     p.add_argument('--epochs', type=str, default='20,100')
     p.add_argument('--batch_sizes', type=str, default='2,1')
-    p.add_argument('--accumulation_steps', '-A', type=str, default='8,16')
+    p.add_argument('--accumulation_steps', '-A', type=str, default='16,16')
     p.add_argument('--force_voxaug', type=str, default='false')
 
     p.add_argument('--gpu', '-g', type=int, default=-1)
@@ -158,7 +162,7 @@ def main():
     p.add_argument('--num_workers', '-w', type=int, default=4)
     p.add_argument('--epoch', '-E', type=int, default=1000)
     p.add_argument('--epoch_size', type=int, default=None)
-    p.add_argument('--learning_rate', '-l', type=float, default=1e-4)
+    p.add_argument('--learning_rate', '-l', type=float, default=1e-3)
     p.add_argument('--lr_scheduler_decay_target', type=int, default=1e-12)
     p.add_argument('--lr_scheduler_decay_power', type=float, default=1.0)
     p.add_argument('--progress_bar', '-pb', type=str, default='true')
@@ -219,7 +223,7 @@ def main():
         epoch_size=args.epoch_size,
         mixup_rate=args.mixup_rate,
         mixup_alpha=args.mixup_alpha,
-        force_voxaug=False#args.force_voxaug
+        force_voxaug=args.force_voxaug
     )
     
     random.seed(args.seed)
