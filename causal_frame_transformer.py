@@ -77,7 +77,7 @@ class FrameTransformer(nn.Module):
 
         for encoder in self.encoder:
             se6 = encoder(se6)
-            
+
         for decoder in self.decoder:
             te5 = decoder(te6, se6, mask)
 
@@ -180,15 +180,15 @@ class MultichannelMultiheadAttention(nn.Module):
         
         self.q_proj = nn.Sequential(
             MultichannelLinear(channels, channels, features, features, depthwise=False),
-            CausalConv1xN(channels, channels, kernel_size=7, padding=3, groups=channels))
+            CausalConv1xN(channels, channels, kernel_size=3, padding=1, groups=channels))
 
         self.k_proj = nn.Sequential(
             MultichannelLinear(channels, channels, features, features, depthwise=False),
-            CausalConv1xN(channels, channels, kernel_size=7, padding=3, groups=channels))
+            CausalConv1xN(channels, channels, kernel_size=3, padding=1, groups=channels))
             
         self.v_proj = nn.Sequential(
             MultichannelLinear(channels, channels, features, features, depthwise=False),
-            CausalConv1xN(channels, channels, kernel_size=7, padding=3, groups=channels))
+            CausalConv1xN(channels, channels, kernel_size=3, padding=1, groups=channels))
             
         self.out_proj = MultichannelLinear(channels, channels, features, features, depthwise=False)
 
