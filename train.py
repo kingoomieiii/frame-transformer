@@ -11,7 +11,7 @@ import wandb
 from tqdm import tqdm
 
 from dataset_voxaug import VoxAugDataset
-from frame_transformer_prenorm import FrameTransformer
+from frame_transformer2 import FrameTransformer
 
 from lib.lr_scheduler_linear_warmup import LinearWarmupScheduler
 from lib.lr_scheduler_polynomial_decay import PolynomialDecayScheduler
@@ -171,7 +171,7 @@ def main():
     p.add_argument('--force_voxaug', type=str, default='false')
 
     p.add_argument('--gpu', '-g', type=int, default=-1)
-    p.add_argument('--optimizer', type=str.lower, choices=['adam', 'adamw', 'sgd', 'radam', 'rmsprop'], default='adamw')
+    p.add_argument('--optimizer', type=str.lower, choices=['adam', 'adamw', 'sgd', 'radam', 'rmsprop'], default='adam')
     p.add_argument('--amsgrad', type=str, default='false')
     p.add_argument('--weight_decay', type=float, default=0)
     p.add_argument('--num_workers', '-w', type=int, default=4)
@@ -238,7 +238,7 @@ def main():
         epoch_size=args.epoch_size,
         mixup_rate=args.mixup_rate,
         mixup_alpha=args.mixup_alpha,
-        force_voxaug=True#args.force_voxaug
+        force_voxaug=args.force_voxaug
     )
     
     random.seed(args.seed)
@@ -367,8 +367,8 @@ def main():
             best_loss = val_loss
             print('  * best validation loss')
 
-        model_path = f'{args.model_dir}models/{wandb.run.name}.{epoch}.remover.pth'
-        torch.save(model.state_dict(), model_path)
+        model_path = f'{args.model_dir}models/{wandb.run.name if args.wandb else "local"}.{epoch}.remover.pth'
+        #torch.save(model.state_dict(), model_path)
 
 if __name__ == '__main__':
     main()

@@ -136,4 +136,7 @@ class VoxAugDataset(torch.utils.data.Dataset):
             X = np.clip(np.abs(X) / c, 0, 1)
             Y = np.clip(np.abs(Y) / c, 0, 1)
 
+            if not self.is_validation:
+                Y = np.where(Y <= X, Y, X)
+
         return X, Y
