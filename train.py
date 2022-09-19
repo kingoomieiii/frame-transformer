@@ -368,7 +368,7 @@ def main():
             print('  * best validation loss')
 
         model_path = f'{args.model_dir}models/{wandb.run.name if args.wandb else "local"}.{epoch}.remover.pth'
-        #torch.save(model.state_dict(), model_path)
+        torch.save(model.state_dict(), model_path)
 
 if __name__ == '__main__':
     main()
