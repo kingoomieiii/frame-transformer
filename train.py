@@ -225,9 +225,12 @@ def main():
             "F://cs2048_sr44100_hl1024_nf2048_of0",
             "H://cs2048_sr44100_hl1024_nf2048_of0",
             "J://cs2048_sr44100_hl1024_nf2048_of0",
+            "K://cs2048_sr44100_hl1024_nf2048_of0",
+        ],
+        pair_path=[
+            "F://cs2048_sr44100_hl1024_nf2048_of0_PAIRS",
             "K://cs2048_sr44100_hl1024_nf2048_of0_PAIRS",
             "J://cs2048_sr44100_hl1024_nf2048_of0_PAIRS",
-            "K://cs2048_sr44100_hl1024_nf2048_of0",
         ],
         vocal_path=[
             "D://cs2048_sr44100_hl1024_nf2048_of0_VOCALS",
@@ -238,7 +241,8 @@ def main():
         epoch_size=args.epoch_size,
         mixup_rate=args.mixup_rate,
         mixup_alpha=args.mixup_alpha,
-        force_voxaug=args.force_voxaug
+        force_voxaug=args.force_voxaug,
+        pair_mul=3
     )
     
     random.seed(args.seed)
