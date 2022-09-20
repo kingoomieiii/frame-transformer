@@ -141,6 +141,7 @@ class MultichannelMultiheadAttention(nn.Module):
         self.mixed_precision = mixed_precision
         self.num_heads = num_heads
         self.rotary_embedding = RotaryEmbedding(dim = features // num_heads)
+        self.dropout = nn.Dropout2d(dropout)
         
         self.q_proj = nn.Sequential(
             nn.Conv2d(channels, channels, kernel_size=3, padding=1, bias=False),
@@ -148,8 +149,7 @@ class MultichannelMultiheadAttention(nn.Module):
 
         self.k_proj = nn.Sequential(
             nn.Conv2d(channels, channels, kernel_size=3, padding=1, bias=False),
-            MultichannelLinear(channels, channels, features, features, depthwise=False),
-            FrameDrop(dropout))
+            MultichannelLinear(channels, channels, features, features, depthwise=False))
             
         self.v_proj = nn.Sequential(
             nn.Conv2d(channels, channels, kernel_size=3, padding=1, bias=False),
@@ -161,8 +161,11 @@ class MultichannelMultiheadAttention(nn.Module):
         b,c,h,w = x.shape
 
         q = self.rotary_embedding.rotate_queries_or_keys(self.q_proj(x).transpose(2,3).reshape(b,c,w,self.num_heads,-1).permute(0,1,3,2,4))
-        k = self.rotary_embedding.rotate_queries_or_keys(self.k_proj(x if mem is None else mem).transpose(2,3).reshape(b,c,w,self.num_heads,-1).permute(0,1,3,2,4)).transpose(3,4)
+        k = self.rotary_embedding.rotate_queries_or_keys(self.k_proj(x if mem is None else mem).transpose(2,3).reshape(b,c,w,self.num_heads,-1).permute(0,1,3,2,4))
         v = self.v_proj(x if mem is None else mem).transpose(2,3).reshape(b,c,w,self.num_heads,-1).permute(0,1,3,2,4)
+
+        b,c,h,w,f = k.shape
+        k = self.dropout(k.reshape(b,c*h*w,f,1)).reshape(b,c,h,w,f).transpose(3,4)
 
         with torch.cuda.amp.autocast_mode.autocast(enabled=False):
             qk = torch.matmul(q.float(), k.float()) / math.sqrt(h)
