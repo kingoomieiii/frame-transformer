@@ -85,7 +85,6 @@ class FrameDecoder(nn.Module):
 
         self.upsample = nn.Upsample(scale_factor=(2,1), mode='bilinear', align_corners=True)
         self.activate = SquaredReLU()
-        self.dropout = nn.Dropout2d(dropout)
         
         self.norm = FrameNorm(in_channels + out_channels, features)
         self.conv1 = nn.Conv2d(in_channels + out_channels, out_channels, kernel_size=3, padding=1, bias=False)
@@ -93,7 +92,7 @@ class FrameDecoder(nn.Module):
         self.identity = nn.Conv2d(in_channels + out_channels, out_channels, kernel_size=1, padding=0, bias=False)
 
     def __call__(self, x, skip):
-        x = torch.cat((self.upsample(x), self.dropout(skip)), dim=1)
+        x = torch.cat((self.upsample(x), skip), dim=1)
         h = self.norm(x.transpose(2,3)).transpose(2,3)
         h = self.conv2(self.activate(self.conv1(h)))
         x = self.identity(x) + h
