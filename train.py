@@ -159,14 +159,14 @@ def main():
     p.add_argument('--lr_verbosity', type=int, default=1000)
 
     p.add_argument('--channels', type=int, default=16)
-    p.add_argument('--num_heads', type=int, default=4)
-    p.add_argument('--feedforward_expansion', type=int, default=4)
+    p.add_argument('--num_heads', type=int, default=1)
+    p.add_argument('--feedforward_expansion', type=int, default=3)
     p.add_argument('--dropout', type=float, default=0.1)
 
     p.add_argument('--cropsizes', type=str, default='256,512')
     p.add_argument('--steps', type=str, default='400000,500000')
     p.add_argument('--epochs', type=str, default='20,100')
-    p.add_argument('--batch_sizes', type=str, default='2,1')
+    p.add_argument('--batch_sizes', type=str, default='3,1')
     p.add_argument('--accumulation_steps', '-A', type=str, default='8,16')
     p.add_argument('--force_voxaug', type=str, default='false')
 
@@ -242,7 +242,7 @@ def main():
         mixup_rate=args.mixup_rate,
         mixup_alpha=args.mixup_alpha,
         force_voxaug=args.force_voxaug,
-        pair_mul=3
+        pair_mul=4
     )
     
     random.seed(args.seed)

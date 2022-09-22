@@ -68,8 +68,8 @@ class FrameEncoder(nn.Module):
 
         self.relu = SquaredReLU()
         self.norm = FrameNorm(in_channels, features)
-        self.conv1 = nn.Conv2d(in_channels, out_channels, kernel_size=3, padding=1, bias=False)
-        self.conv2 = nn.Conv2d(out_channels, out_channels, kernel_size=3, padding=1, stride=(2,1) if downsample else 1, bias=False)
+        self.conv1 = nn.Conv2d(in_channels, out_channels * 2, kernel_size=3, padding=1, bias=False)
+        self.conv2 = nn.Conv2d(out_channels * 2, out_channels, kernel_size=3, padding=1, stride=(2,1) if downsample else 1, bias=False)
         self.identity = nn.Conv2d(in_channels, out_channels, kernel_size=1, padding=0, stride=(2,1) if downsample else 1, bias=False)
 
     def __call__(self, x):
@@ -88,8 +88,8 @@ class FrameDecoder(nn.Module):
         self.dropout = nn.Dropout2d(dropout)
         
         self.norm = FrameNorm(in_channels + out_channels, features)
-        self.conv1 = nn.Conv2d(in_channels + out_channels, out_channels, kernel_size=3, padding=1, bias=False)
-        self.conv2 = nn.Conv2d(out_channels, out_channels, kernel_size=3, padding=1, bias=False)
+        self.conv1 = nn.Conv2d(in_channels + out_channels, out_channels * 2, kernel_size=3, padding=1, bias=False)
+        self.conv2 = nn.Conv2d(out_channels * 2, out_channels, kernel_size=3, padding=1, bias=False)
         self.identity = nn.Conv2d(in_channels + out_channels, out_channels, kernel_size=1, padding=0, bias=False)
 
     def __call__(self, x, skip):
@@ -141,7 +141,6 @@ class MultichannelMultiheadAttention(nn.Module):
         self.mixed_precision = mixed_precision
         self.num_heads = num_heads
         self.rotary_embedding = RotaryEmbedding(dim = features // num_heads)
-        self.dropout = nn.Dropout2d(dropout)
         
         self.q_proj = nn.Sequential(
             nn.Conv2d(channels, channels, kernel_size=3, padding=1, bias=False),
@@ -161,11 +160,8 @@ class MultichannelMultiheadAttention(nn.Module):
         b,c,h,w = x.shape
 
         q = self.rotary_embedding.rotate_queries_or_keys(self.q_proj(x).transpose(2,3).reshape(b,c,w,self.num_heads,-1).permute(0,1,3,2,4))
-        k = self.rotary_embedding.rotate_queries_or_keys(self.k_proj(x if mem is None else mem).transpose(2,3).reshape(b,c,w,self.num_heads,-1).permute(0,1,3,2,4))
+        k = self.rotary_embedding.rotate_queries_or_keys(self.k_proj(x if mem is None else mem).transpose(2,3).reshape(b,c,w,self.num_heads,-1).permute(0,1,3,2,4)).transpose(3,4)
         v = self.v_proj(x if mem is None else mem).transpose(2,3).reshape(b,c,w,self.num_heads,-1).permute(0,1,3,2,4)
-
-        b,c,h,w,f = k.shape
-        k = self.dropout(k.reshape(b,c*h*w,f,1)).reshape(b,c,h,w,f).transpose(3,4)
 
         with torch.cuda.amp.autocast_mode.autocast(enabled=False):
             qk = torch.matmul(q.float(), k.float()) / math.sqrt(h)
