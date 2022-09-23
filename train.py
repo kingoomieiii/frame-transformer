@@ -155,7 +155,7 @@ def main():
 
     p.add_argument('--curr_epoch', type=int, default=0)
     p.add_argument('--curr_step', type=int, default=0)
-    p.add_argument('--warmup_steps', type=int, default=3)
+    p.add_argument('--warmup_steps', type=int, default=2)
     p.add_argument('--curr_warmup_step', type=int, default=0)
     p.add_argument('--lr_verbosity', type=int, default=1000)
 
@@ -167,7 +167,7 @@ def main():
     p.add_argument('--cropsizes', type=str, default='256,512')
     p.add_argument('--steps', type=str, default='400000,500000')
     p.add_argument('--epochs', type=str, default='30,40')
-    p.add_argument('--batch_sizes', type=str, default='3,1')
+    p.add_argument('--batch_sizes', type=str, default='2,1')
     p.add_argument('--accumulation_steps', '-A', type=str, default='8,16')
     p.add_argument('--force_voxaug', type=str, default='false')
 

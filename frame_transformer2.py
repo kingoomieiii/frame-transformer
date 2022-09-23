@@ -11,12 +11,14 @@ class FrameTransformer(nn.Module):
         self.max_bin = n_fft // 2
         self.output_bin = n_fft // 2 + 1
 
+        self.dropout = nn.Dropout2d(dropout)
+
         self.enc1 = FrameEncoder(in_channels, channels, self.max_bin, downsample=False)
         self.enc2 = FrameEncoder(channels, channels * 2, self.max_bin)
         self.enc3 = FrameEncoder(channels * 2, channels * 4, self.max_bin // 2)
         self.enc4 = FrameEncoder(channels * 4, channels * 8, self.max_bin // 4)
-        self.enc5 = FrameEncoder(channels * 8, channels * 16, self.max_bin // 8)        
-        self.encoder = nn.ModuleList([FrameTransformerEncoder(channels * 16, self.max_bin // 16, num_heads=num_heads, dropout=dropout, expansion=expansion) for _ in range(num_layers)])
+        self.enc5 = FrameEncoder(channels * 8, channels * 16, self.max_bin // 8)
+        self.encoder = nn.Sequential(*[MultichannelTransformerEncoder(channels * 16, self.max_bin // 16, num_heads=num_heads, dropout=dropout, expansion=expansion) for _ in range(num_layers)])
         self.dec4 = FrameDecoder(channels * 16, channels * 8, self.max_bin // 8)
         self.dec3 = FrameDecoder(channels * 8, channels * 4, self.max_bin // 4)
         self.dec2 = FrameDecoder(channels * 4, channels * 2, self.max_bin // 2)
@@ -31,12 +33,8 @@ class FrameTransformer(nn.Module):
         e3 = self.enc3(e2)
         e4 = self.enc4(e3)
         e5 = self.enc5(e4)
-
-        pqk = None
-        for encoder in self.encoder:
-            e5, pqk = encoder(e5, pqk)
-
-        d4 = self.dec4(e5, e4)
+        h = self.dropout(self.encoder(e5))
+        d4 = self.dec4(h, e4)
         d3 = self.dec3(d4, e3)
         d2 = self.dec2(d3, e2)
         d1 = self.dec1(d2, e1)
@@ -68,8 +66,8 @@ class FrameEncoder(nn.Module):
 
         self.relu = SquaredReLU()
         self.norm = FrameNorm(in_channels, features)
-        self.conv1 = nn.Conv2d(in_channels, out_channels * 2, kernel_size=3, padding=1, bias=False)
-        self.conv2 = nn.Conv2d(out_channels * 2, out_channels, kernel_size=3, padding=1, stride=(2,1) if downsample else 1, bias=False)
+        self.conv1 = nn.Conv2d(in_channels, out_channels, kernel_size=3, padding=1, bias=False)
+        self.conv2 = nn.Conv2d(out_channels, out_channels, kernel_size=3, padding=1, stride=(2,1) if downsample else 1, bias=False)
         self.identity = nn.Conv2d(in_channels, out_channels, kernel_size=1, padding=0, stride=(2,1) if downsample else 1, bias=False)
 
     def __call__(self, x):
@@ -88,8 +86,8 @@ class FrameDecoder(nn.Module):
         self.dropout = nn.Dropout2d(dropout)
         
         self.norm = FrameNorm(in_channels + out_channels, features)
-        self.conv1 = nn.Conv2d(in_channels + out_channels, out_channels * 2, kernel_size=3, padding=1, bias=False)
-        self.conv2 = nn.Conv2d(out_channels * 2, out_channels, kernel_size=3, padding=1, bias=False)
+        self.conv1 = nn.Conv2d(in_channels + out_channels, out_channels, kernel_size=3, padding=1, bias=False)
+        self.conv2 = nn.Conv2d(out_channels, out_channels, kernel_size=3, padding=1, bias=False)
         self.identity = nn.Conv2d(in_channels + out_channels, out_channels, kernel_size=1, padding=0, bias=False)
 
     def __call__(self, x, skip):
@@ -101,12 +99,12 @@ class FrameDecoder(nn.Module):
         return x
 
 class MultichannelLinear(nn.Module):
-    def __init__(self, in_channels, out_channels, in_features, out_features, positionwise=True, depthwise=True):
+    def __init__(self, in_channels, out_channels, in_features, out_features, positionwise=True, depthwise=False):
         super(MultichannelLinear, self).__init__()
 
         self.weight_pw = None
         if in_features != out_features or positionwise:
-            self.weight_pw = nn.Parameter(torch.empty(out_channels, out_features, in_features))
+            self.weight_pw = nn.Parameter(torch.empty(in_channels, out_features, in_features))
             nn.init.uniform_(self.weight_pw, a=-1/math.sqrt(in_features), b=1/math.sqrt(in_features))
 
         self.weight_dw = None
@@ -115,11 +113,11 @@ class MultichannelLinear(nn.Module):
             nn.init.uniform_(self.weight_dw, a=-1/math.sqrt(in_channels), b=1/math.sqrt(in_channels))
 
     def __call__(self, x):
-        if self.weight_dw is not None:
-            x = torch.matmul(x.transpose(1,3), self.weight_dw.t()).transpose(1,3)
-            
         if self.weight_pw is not None:
             x = torch.matmul(x.transpose(2,3), self.weight_pw.transpose(1,2)).transpose(2,3)
+
+        if self.weight_dw is not None:
+            x = torch.matmul(x.transpose(1,3), self.weight_dw.t()).transpose(1,3)
         
         return x
 
@@ -141,22 +139,12 @@ class MultichannelAttention(nn.Module):
         self.mixed_precision = mixed_precision
         self.num_heads = num_heads
         self.rotary_embedding = RotaryEmbedding(dim = features // num_heads)
-        
-        self.q_proj = nn.Sequential(
-            nn.Conv2d(channels, channels, kernel_size=3, padding=1, bias=False),
-            MultichannelLinear(channels, channels, features, features, depthwise=False))
+        self.q_proj = MultichannelLinear(channels, channels, features, features)
+        self.k_proj = MultichannelLinear(channels, channels, features, features)
+        self.v_proj = MultichannelLinear(channels, channels, features, features)
+        self.out_proj = MultichannelLinear(channels, channels, features, features)
 
-        self.k_proj = nn.Sequential(
-            nn.Conv2d(channels, channels, kernel_size=3, padding=1, bias=False),
-            MultichannelLinear(channels, channels, features, features, depthwise=False))
-            
-        self.v_proj = nn.Sequential(
-            nn.Conv2d(channels, channels, kernel_size=3, padding=1, bias=False),
-            MultichannelLinear(channels, channels, features, features, depthwise=False))
-            
-        self.out_proj = MultichannelLinear(channels, channels, features, features, depthwise=True)
-
-    def __call__(self, x, mem=None, pqk=None):
+    def __call__(self, x, mem=None):
         b,c,h,w = x.shape
 
         q = self.rotary_embedding.rotate_queries_or_keys(self.q_proj(x).transpose(2,3).reshape(b,c,w,-1))
@@ -165,37 +153,32 @@ class MultichannelAttention(nn.Module):
 
         with torch.cuda.amp.autocast_mode.autocast(enabled=False):
             qk = torch.matmul(q.float(), k.float()) / math.sqrt(h)
-
-            if pqk is not None:
-                qk = qk + pqk
-
             a = torch.matmul(F.softmax(qk, dim=-1),v.float()).transpose(2,3).reshape(b,c,w,-1).transpose(2,3)
 
         x = self.out_proj(a)
 
-        return x, qk
+        return x
 
-class FrameTransformerEncoder(nn.Module):
+class MultichannelTransformerEncoder(nn.Module):
     def __init__(self, channels, features, num_heads=4, dropout=0.1, expansion=4):
-        super(FrameTransformerEncoder, self).__init__()
+        super(MultichannelTransformerEncoder, self).__init__()
 
         self.activate = SquaredReLU()
-        self.dropout = nn.Dropout2d(dropout)
 
         self.norm1 = FrameNorm(channels, features)
         self.attn = MultichannelAttention(channels, num_heads, features)
 
         self.norm2 = FrameNorm(channels, features)
-        self.linear1 = MultichannelLinear(channels, channels, features, features * expansion)
-        self.linear2 = MultichannelLinear(channels, channels, features * expansion, features)
+        self.conv1 = nn.Conv2d(channels, channels * expansion, kernel_size=1, padding=0, bias=False)
+        self.conv2 = nn.Conv2d(channels * expansion, channels, kernel_size=1, padding=0, bias=False)
         
-    def __call__(self, x, pqk=None):
+    def __call__(self, x):
         z = self.norm1(x.transpose(2,3)).transpose(2,3)
-        z, qk = self.attn(z, pqk=pqk)
-        x = x + self.dropout(z)
+        z = self.attn(z)
+        x = x + z
 
         z = self.norm2(x.transpose(2,3)).transpose(2,3)
-        z = self.linear2(self.activate(self.linear1(z)))
-        x = x + self.dropout(z)
+        z = self.conv2(self.activate(self.conv1(z)))
+        x = x + z
 
-        return x, qk
+        return x
