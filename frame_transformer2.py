@@ -106,7 +106,7 @@ class MultichannelLinear(nn.Module):
 
         self.weight_pw = None
         if in_features != out_features or positionwise:
-            self.weight_pw = nn.Parameter(torch.empty(in_channels, out_features, in_features))
+            self.weight_pw = nn.Parameter(torch.empty(out_channels, out_features, in_features))
             nn.init.uniform_(self.weight_pw, a=-1/math.sqrt(in_features), b=1/math.sqrt(in_features))
 
         self.weight_dw = None
@@ -115,11 +115,11 @@ class MultichannelLinear(nn.Module):
             nn.init.uniform_(self.weight_dw, a=-1/math.sqrt(in_channels), b=1/math.sqrt(in_channels))
 
     def __call__(self, x):
+        if self.weight_dw is not None:
+            x = torch.matmul(x.transpose(1,3), self.weight_dw.t()).transpose(1,3)
+            
         if self.weight_pw is not None:
             x = torch.matmul(x.transpose(2,3), self.weight_pw.transpose(1,2)).transpose(2,3)
-
-        if self.weight_dw is not None:
-            x = torch.matmul(x.transpose(1,3), self.weight_dw.t()).transpose(1,3) 
         
         return x
 
@@ -134,7 +134,7 @@ class FrameDrop(nn.Module):
         x = self.dropout(x.transpose(2,3).reshape(b,c*w,h,1))
         return x.reshape(b,c,w,h).transpose(2,3)
 
-class MultichannelMultiheadAttention(nn.Module):
+class MultichannelAttention(nn.Module):
     def __init__(self, channels, num_heads, features, mixed_precision=False, dropout=0.1):
         super().__init__()
 
@@ -159,9 +159,9 @@ class MultichannelMultiheadAttention(nn.Module):
     def __call__(self, x, mem=None, pqk=None):
         b,c,h,w = x.shape
 
-        q = self.rotary_embedding.rotate_queries_or_keys(self.q_proj(x).transpose(2,3).reshape(b,c,w,self.num_heads,-1).permute(0,1,3,2,4))
-        k = self.rotary_embedding.rotate_queries_or_keys(self.k_proj(x if mem is None else mem).transpose(2,3).reshape(b,c,w,self.num_heads,-1).permute(0,1,3,2,4)).transpose(3,4)
-        v = self.v_proj(x if mem is None else mem).transpose(2,3).reshape(b,c,w,self.num_heads,-1).permute(0,1,3,2,4)
+        q = self.rotary_embedding.rotate_queries_or_keys(self.q_proj(x).transpose(2,3).reshape(b,c,w,-1))
+        k = self.rotary_embedding.rotate_queries_or_keys(self.k_proj(x if mem is None else mem).transpose(2,3).reshape(b,c,w,-1)).transpose(2,3)
+        v = self.v_proj(x if mem is None else mem).transpose(2,3).reshape(b,c,w,-1)
 
         with torch.cuda.amp.autocast_mode.autocast(enabled=False):
             qk = torch.matmul(q.float(), k.float()) / math.sqrt(h)
@@ -183,11 +183,11 @@ class FrameTransformerEncoder(nn.Module):
         self.dropout = nn.Dropout2d(dropout)
 
         self.norm1 = FrameNorm(channels, features)
-        self.attn = MultichannelMultiheadAttention(channels, num_heads, features)
+        self.attn = MultichannelAttention(channels, num_heads, features)
 
         self.norm2 = FrameNorm(channels, features)
-        self.linear1 = MultichannelLinear(channels, channels, features, features * expansion, depthwise=True)
-        self.linear2 = MultichannelLinear(channels, channels, features * expansion, features, depthwise=True)
+        self.linear1 = MultichannelLinear(channels, channels, features, features * expansion)
+        self.linear2 = MultichannelLinear(channels, channels, features * expansion, features)
         
     def __call__(self, x, pqk=None):
         z = self.norm1(x.transpose(2,3)).transpose(2,3)

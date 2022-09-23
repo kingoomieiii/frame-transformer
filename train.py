@@ -154,7 +154,8 @@ def main():
     p.add_argument('--mixed_precision', type=str, default='false')
 
     p.add_argument('--curr_epoch', type=int, default=0)
-    p.add_argument('--warmup_steps', type=int, default=8000)
+    p.add_argument('--curr_step', type=int, default=0)
+    p.add_argument('--warmup_steps', type=int, default=3)
     p.add_argument('--curr_warmup_step', type=int, default=0)
     p.add_argument('--lr_verbosity', type=int, default=1000)
 
@@ -165,7 +166,7 @@ def main():
 
     p.add_argument('--cropsizes', type=str, default='256,512')
     p.add_argument('--steps', type=str, default='400000,500000')
-    p.add_argument('--epochs', type=str, default='20,100')
+    p.add_argument('--epochs', type=str, default='30,40')
     p.add_argument('--batch_sizes', type=str, default='3,1')
     p.add_argument('--accumulation_steps', '-A', type=str, default='8,16')
     p.add_argument('--force_voxaug', type=str, default='false')
@@ -292,11 +293,10 @@ def main():
         )
     elif args.optimizer == 'rmsprop':
         optimizer = torch.optim.RMSprop(groups, lr=args.learning_rate)
-        
-    step = args.curr_warmup_step
-
-    warmup_steps = args.warmup_steps
-    decay_steps = args.steps[-1]
+    
+    steps = len(train_dataset) // (args.batch_sizes[0] * args.accumulation_steps[0])
+    warmup_steps = steps * args.warmup_steps
+    decay_steps = steps * args.epoch - warmup_steps
 
     scheduler = torch.optim.lr_scheduler.ChainedScheduler([
         LinearWarmupScheduler(optimizer, target_lr=args.learning_rate, num_steps=warmup_steps, current_step=args.curr_warmup_step, verbose_skip_steps=args.lr_verbosity),
@@ -311,6 +311,7 @@ def main():
 
     val_dataset = None
     curr_idx = 0
+    step = args.curr_step
 
     print(f'{args.epochs[-1]} epochs')
 
@@ -318,9 +319,9 @@ def main():
     for epoch in range(args.curr_epoch, args.epoch):
         train_dataset.rebuild()
 
-        if step > args.steps[curr_idx] or val_dataset is None:
-            for i,e in enumerate(args.steps):
-                if step > e:
+        if epoch > args.epochs[curr_idx] or val_dataset is None:
+            for i,e in enumerate(args.epochs):
+                if epoch > e:
                     curr_idx = i + 1
             
             curr_idx = min(curr_idx, len(args.cropsizes) - 1)

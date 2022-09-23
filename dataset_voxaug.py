@@ -7,7 +7,7 @@ import torch
 import torch.utils.data
 
 class VoxAugDataset(torch.utils.data.Dataset):
-    def __init__(self, path=[], vocal_path=[], is_validation=False, mul=1, downsamples=0, epoch_size=None, cropsize=256, vocal_mix_rate=0, mixup_rate=0, mixup_alpha=1, include_phase=False, force_voxaug=False, use_noise=True, gamma=0.95, sigma=0.25):
+    def __init__(self, path=[], vocal_path=[], pair_path=[], is_validation=False, mul=1, pair_mul=1, downsamples=0, epoch_size=None, cropsize=256, vocal_mix_rate=0, mixup_rate=0, mixup_alpha=1, include_phase=False, force_voxaug=False, use_noise=True, gamma=0.95, sigma=0.25):
         self.epoch_size = epoch_size
         self.mul = mul
         self.cropsize = cropsize
@@ -32,6 +32,13 @@ class VoxAugDataset(torch.utils.data.Dataset):
 
             for m in mixes:
                 patch_list.append(m)
+
+        for mp in pair_path:
+            mixes = [os.path.join(mp, f) for f in os.listdir(mp) if os.path.isfile(os.path.join(mp, f))]
+
+            for m in mixes:
+                for _ in range(pair_mul):
+                    patch_list.append(m)
         
         if not is_validation and len(vocal_path) != 0:
             for vp in vocal_path:
