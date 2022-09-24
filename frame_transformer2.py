@@ -61,19 +61,6 @@ class SquaredReLU(nn.Module):
     def __call__(self, x):
         return torch.relu(x) ** 2
 
-class FrameNorm(nn.Module):
-    def __init__(self, channels, features, eps=0.00001):
-        super(FrameNorm, self).__init__()
-        
-        self.eps = eps
-        self.weight = nn.Parameter(torch.empty(channels, 1, features))
-        self.bias = nn.Parameter(torch.empty(channels, 1, features))
-        nn.init.ones_(self.weight)
-        nn.init.zeros_(self.bias)
-
-    def __call__(self, x):
-        return torch.layer_norm(x, (self.weight.shape[-1],), eps=self.eps) * self.weight + self.bias
-
 class ResBlock(nn.Module):
     def __init__(self, in_channels, out_channels, features, downsample=False):
         super(ResBlock, self).__init__()
@@ -139,17 +126,6 @@ class MultichannelLinear(nn.Module):
             x = torch.matmul(x.transpose(1,3), self.weight_dw.t()).transpose(1,3)
         
         return x
-
-class FrameDrop(nn.Module):
-    def __init__(self, dropout=0.1):
-        super().__init__()
-
-        self.dropout = nn.Dropout2d(dropout)
-
-    def __call__(self, x):
-        b,c,h,w = x.shape
-        x = self.dropout(x.transpose(2,3).reshape(b,c*w,h,1))
-        return x.reshape(b,c,w,h).transpose(2,3)
 
 class MultichannelAttention(nn.Module):
     def __init__(self, channels, num_heads, features, mixed_precision=False, dropout=0.1):
