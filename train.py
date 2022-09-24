@@ -251,7 +251,7 @@ def main():
     torch.manual_seed(args.seed)
 
     device = torch.device('cpu')
-    model = FrameTransformer(channels=args.channels, n_fft=args.n_fft, dropout=args.dropout, expansion=args.feedforward_expansion, num_heads=args.num_heads)
+    model = FrameTransformer(channels=args.channels, n_fft=args.n_fft, dropout=args.dropout, expansion=args.feedforward_expansion, num_heads=args.num_heads, num_res_blocks=1)
 
     if args.pretrained_model is not None:
         model.load_state_dict(torch.load(args.pretrained_model, map_location=device))

@@ -54,7 +54,11 @@ class DenoisingDataset(torch.utils.data.Dataset):
             X = X[:,:,start:stop]
 
         X = (np.abs(X) / c) * 2 - 1.0
+        Y = X.copy()
         eps = np.random.normal(scale=self.sigma, size=X.shape)
         X = np.sqrt(self.gamma) * X + np.sqrt(1 - self.gamma) * eps
+
+        X = np.clip((X + 1) * 0.5, 0, 1)
+        Y = np.clip((Y + 1) * 0.5, 0, 1)
         
-        return X.astype(np.float32), eps.astype(np.float32)
+        return X.astype(np.float32), Y.astype(np.float32)
