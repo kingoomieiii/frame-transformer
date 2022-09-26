@@ -38,8 +38,7 @@ class FrameEncoder(nn.Module):
         self.activate = SquaredReLU()
 
     def __call__(self, x):
-        x = self.conv1(x)
-        x = self.conv2(x)
+        x = self.conv2(self.activate(self.conv1(x)))
 
         return x
 
