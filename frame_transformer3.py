@@ -127,17 +127,25 @@ class TransformerEncoder(nn.Module):
         return x
 
 class MultichannelMultiheadAttention(nn.Module):
-    def __init__(self, channels, num_heads, features, mixed_precision=False):
+    def __init__(self, channels, num_heads, features, kernel_size=5, padding=2):
         super().__init__()
 
-        self.mixed_precision = mixed_precision
         self.num_heads = num_heads
         self.rotary_embedding = RotaryEmbedding(dim = features // num_heads)
         
-        self.q_proj = MultichannelLinear(channels, channels, features, features, depthwise=True)
-        self.k_proj = MultichannelLinear(channels, channels, features, features, depthwise=True)
-        self.v_proj =  MultichannelLinear(channels, channels, features, features, depthwise=True)
-        self.out_proj = MultichannelLinear(channels, channels, features, features)
+        self.q_proj = nn.Sequential(
+            MultichannelLinear(channels, channels, features, features),
+            nn.Conv2d(channels, channels, kernel_size=(1,kernel_size), padding=(0,padding), bias=False))
+
+        self.k_proj = nn.Sequential(
+            MultichannelLinear(channels, channels, features, features),
+            nn.Conv2d(channels, channels, kernel_size=(1,kernel_size), padding=(0,padding), bias=False))
+            
+        self.v_proj =  nn.Sequential(
+            MultichannelLinear(channels, channels, features, features),
+            nn.Conv2d(channels, channels, kernel_size=(1,kernel_size), padding=(0,padding), bias=False))
+            
+        self.out_proj = MultichannelLinear(channels, channels, features, features, depthwise=True)
 
     def __call__(self, x, mem=None):
         b,c,h,w = x.shape

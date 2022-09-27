@@ -11,7 +11,7 @@ import wandb
 from tqdm import tqdm
 
 from dataset_voxaug import VoxAugDataset
-from frame_transformer2 import FrameTransformer
+from frame_transformer import FrameTransformer
 
 from lib.lr_scheduler_linear_warmup import LinearWarmupScheduler
 from lib.lr_scheduler_polynomial_decay import PolynomialDecayScheduler
@@ -243,7 +243,7 @@ def main():
         mixup_rate=args.mixup_rate,
         mixup_alpha=args.mixup_alpha,
         force_voxaug=args.force_voxaug,
-        pair_mul=4
+        pair_mul=2
     )
     
     random.seed(args.seed)
@@ -251,7 +251,7 @@ def main():
     torch.manual_seed(args.seed)
 
     device = torch.device('cpu')
-    model = FrameTransformer(channels=args.channels, n_fft=args.n_fft, dropout=args.dropout, expansion=args.feedforward_expansion, num_heads=args.num_heads, num_res_blocks=1)
+    model = FrameTransformer(channels=args.channels, n_fft=args.n_fft, dropout=args.dropout, expansion=args.feedforward_expansion, num_heads=args.num_heads)
 
     if args.pretrained_model is not None:
         model.load_state_dict(torch.load(args.pretrained_model, map_location=device))
