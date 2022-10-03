@@ -11,33 +11,42 @@ class FrameTransformer(nn.Module):
         self.max_bin = n_fft // 2
         self.output_bin = n_fft // 2 + 1
 
-        self.encoder = FrameEncoder(in_channels, channels, n_fft // 2, n_fft // 4)
-        self.transformer = nn.ModuleList([TransformerEncoder(channels, n_fft // 4, expansion=expansion, num_heads=num_heads, dropout=dropout) for _ in range(num_layers)])
-        self.decoder = FrameDecoder(channels, out_channels, n_fft // 4, n_fft // 2)
+        self.transformer = nn.ModuleList([TransformerEncoder(in_channels, n_fft // 2, expansion=expansion, num_heads=num_heads, dropout=dropout) for _ in range(num_layers)])
+        self.out = nn.Linear(in_channels, out_channels) if in_channels != out_channels else nn.Identity()
 
     def __call__(self, x):
-        e = self.encoder(x)
-
         for encoder in self.transformer:
-            e = encoder(e)
+            x = encoder(x)
 
-        d = self.decoder(e)
+        x = self.out(x.transpose(1,3)).transpose(1,3)
 
-        return d
+        return x
 
 class MultichannelLinear(nn.Module):
-    def __init__(self, in_channels, out_channels, in_features, out_features, positionwise=True, depthwise=False):
+    def __init__(self, in_channels, out_channels, in_features, out_features, positionwise=True, depthwise=False, bias=True):
         super(MultichannelLinear, self).__init__()
 
         self.weight_pw = None
+        self.bias_pw = None
         if in_features != out_features or positionwise:
             self.weight_pw = nn.Parameter(torch.empty(in_channels, out_features, in_features))
             nn.init.uniform_(self.weight_pw, a=-1/math.sqrt(in_features), b=1/math.sqrt(in_features))
 
+            if bias:
+                self.bias_pw = nn.Parameter(torch.empty(in_channels, out_features, 1))
+                bound = 1 / math.sqrt(in_features)
+                nn.init.uniform_(self.bias_pw, -bound, bound)
+
         self.weight_dw = None
+        self.bias_dw = None
         if in_channels != out_channels or depthwise:
             self.weight_dw = nn.Parameter(torch.empty(out_channels, in_channels))
             nn.init.uniform_(self.weight_dw, a=-1/math.sqrt(in_channels), b=1/math.sqrt(in_channels))
+
+            if bias:
+                self.bias_dw = nn.Parameter(torch.empty(out_channels, 1, 1))
+                bound = 1 / math.sqrt(in_channels)
+                nn.init.uniform_(self.bias_pw, -bound, bound)
 
     def __call__(self, x):
         if self.weight_pw is not None:
@@ -47,7 +56,6 @@ class MultichannelLinear(nn.Module):
             x = torch.matmul(x.transpose(1,3), self.weight_dw.t()).transpose(1,3) 
         
         return x
-
         
 class SquaredReLU(nn.Module):
     def __call__(self, x):
@@ -64,7 +72,7 @@ class FrameNorm(nn.Module):
         nn.init.zeros_(self.bias)
 
     def __call__(self, x):
-        return torch.layer_norm(x, (self.weight.shape[-1],), eps=self.eps) * self.weight + self.bias
+        return (torch.layer_norm(x.transpose(2,3), (self.weight.shape[-1],), eps=self.eps) * self.weight + self.bias).transpose(2,3)
 
 class FrameEncoder(nn.Module):
     def __init__(self, in_channels, out_channels, in_features, out_features, n_fft=2048):
@@ -116,18 +124,18 @@ class TransformerEncoder(nn.Module):
         self.activate = SquaredReLU()
 
     def __call__(self, x):
-        h = self.norm1(x.transpose(2,3)).transpose(2,3)
+        h = self.norm1(x)
         h = self.attn(h)
         x = x + self.dropout(h)
 
-        h = self.norm2(x.transpose(2,3)).transpose(2,3)
+        h = self.norm2(x)
         h = self.linear2(self.activate(self.linear1(h)))
         x = x + self.dropout(h)
 
         return x
 
 class MultichannelMultiheadAttention(nn.Module):
-    def __init__(self, channels, num_heads, features, kernel_size=5, padding=2):
+    def __init__(self, channels, num_heads, features, kernel_size=7, padding=3):
         super().__init__()
 
         self.num_heads = num_heads
@@ -135,15 +143,15 @@ class MultichannelMultiheadAttention(nn.Module):
         
         self.q_proj = nn.Sequential(
             MultichannelLinear(channels, channels, features, features),
-            nn.Conv2d(channels, channels, kernel_size=(1,kernel_size), padding=(0,padding), bias=False))
+            nn.Conv2d(channels, channels, kernel_size=(1,kernel_size), padding=(0,padding)))
 
         self.k_proj = nn.Sequential(
             MultichannelLinear(channels, channels, features, features),
-            nn.Conv2d(channels, channels, kernel_size=(1,kernel_size), padding=(0,padding), bias=False))
+            nn.Conv2d(channels, channels, kernel_size=(1,kernel_size), padding=(0,padding)))
             
         self.v_proj =  nn.Sequential(
             MultichannelLinear(channels, channels, features, features),
-            nn.Conv2d(channels, channels, kernel_size=(1,kernel_size), padding=(0,padding), bias=False))
+            nn.Conv2d(channels, channels, kernel_size=(1,kernel_size), padding=(0,padding)))
             
         self.out_proj = MultichannelLinear(channels, channels, features, features, depthwise=True)
 
