@@ -50,10 +50,16 @@ class MultichannelLinear(nn.Module):
 
     def __call__(self, x):
         if self.weight_pw is not None:
-            x = torch.matmul(x.transpose(2,3), self.weight_pw.transpose(1,2)).transpose(2,3) + self.bias_pw
+            x = torch.matmul(x.transpose(2,3), self.weight_pw.transpose(1,2)).transpose(2,3)
+
+            if self.bias_pw is not None:
+                x = x + self.bias_pw
 
         if self.weight_dw is not None:
-            x = torch.matmul(x.transpose(1,3), self.weight_dw.t()).transpose(1,3) + self.bias_dw
+            x = torch.matmul(x.transpose(1,3), self.weight_dw.t()).transpose(1,3)
+
+            if self.bias_dw is not None:
+                x = x + self.bias_dw
         
         return x
         
