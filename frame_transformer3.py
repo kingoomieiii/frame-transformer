@@ -12,15 +12,17 @@ class FrameTransformer(nn.Module):
         self.output_bin = n_fft // 2 + 1
 
         self.encoder = FrameEncoder(in_channels, channels)
-        self.transformer = nn.Sequential(*[TransformerEncoder(channels + i, n_fft // 4, expansion=expansion, num_heads=num_heads, dropout=dropout) for i in range(num_layers)])
-        self.decoder = FrameDecoder(channels + num_layers, channels)
-        self.out = nn.Conv2d(channels + in_channels, out_channels, kernel_size=1, padding=0, bias=False)
+        self.transformer = nn.ModuleList([TransformerEncoder(channels, n_fft // 4, expansion=expansion, num_heads=num_heads, dropout=dropout) for i in range(num_layers)])
+        self.decoder = FrameDecoder(channels, out_channels)
 
     def __call__(self, x):
         h = self.encoder(x)
-        h = self.transformer(h)
+
+        prev_qk = None
+        for encoder in self.transformer:
+            h, prev_qk = encoder(h, prev_qk=prev_qk)
+            
         h = self.decoder(h)
-        h = self.out(torch.cat((x, h), dim=1))
 
         return h
 
@@ -120,26 +122,25 @@ class TransformerEncoder(nn.Module):
     def __init__(self, channels, features, expansion=4, num_heads=8, dropout=0.1):
         super().__init__()
 
-        self.dropout = nn.Dropout(dropout)
+        self.dropout = nn.Dropout2d(dropout)
 
         self.norm1 = FrameNorm(channels, features)
         self.attn = MultichannelMultiheadAttention(channels, num_heads, features)
 
         self.norm2 = FrameNorm(channels, features)
-        self.linear1 = MultichannelLinear(channels, channels + 1, features, features * expansion)
-        self.linear2 = MultichannelLinear(channels + 1, channels + 1, features * expansion, features)
-        self.identity = nn.Conv2d(channels, channels + 1, kernel_size=1, padding=0)
+        self.conv1 = nn.Conv2d(channels, channels * expansion, kernel_size=3, padding=1, groups=1, bias=False)
+        self.conv2 = nn.Conv2d(channels * expansion, channels, kernel_size=3, padding=1, groups=1, bias=False)
 
         self.activate = SquaredReLU()
 
-    def __call__(self, x):
-        h = self.attn(self.norm1(x))
+    def __call__(self, x, prev_qk=None):
+        h, prev_qk = self.attn(self.norm1(x), prev_qk=prev_qk)
         x = x + self.dropout(h)
 
-        h = self.linear2(self.activate(self.linear1(self.norm2(x))))
-        x = self.identity(x) + self.dropout(h)
+        h = self.conv2(self.activate(self.conv1(self.norm2(x))))
+        x = x + self.dropout(h)
 
-        return x
+        return x, prev_qk
 
 class MultichannelMultiheadAttention(nn.Module):
     def __init__(self, channels, num_heads, features, kernel_size=3, padding=1):
@@ -147,22 +148,12 @@ class MultichannelMultiheadAttention(nn.Module):
 
         self.num_heads = num_heads
         self.rotary_embedding = RotaryEmbedding(dim = features // num_heads)
-        
-        self.q_proj = nn.Sequential(
-            MultichannelLinear(channels, channels, features, features),
-            nn.Conv2d(channels, channels, kernel_size=(1,kernel_size), padding=(0,padding), bias=False))
+        self.q_proj = MultichannelLinear(channels, channels, features, features, depthwise=False)
+        self.k_proj = MultichannelLinear(channels, channels, features, features, depthwise=False)
+        self.v_proj = MultichannelLinear(channels, channels, features, features, depthwise=False)
+        self.out_proj = MultichannelLinear(channels, channels, features, features, depthwise=False)
 
-        self.k_proj = nn.Sequential(
-            MultichannelLinear(channels, channels, features, features),
-            nn.Conv2d(channels, channels, kernel_size=(1,kernel_size), padding=(0,padding), bias=False))
-            
-        self.v_proj =  nn.Sequential(
-            MultichannelLinear(channels, channels, features, features),
-            nn.Conv2d(channels, channels, kernel_size=(1,kernel_size), padding=(0,padding), bias=False))
-            
-        self.out_proj = MultichannelLinear(channels, channels, features, features, depthwise=True)
-
-    def __call__(self, x, mem=None):
+    def __call__(self, x, mem=None, prev_qk=None):
         b,c,h,w = x.shape
         q = self.rotary_embedding.rotate_queries_or_keys(self.q_proj(x).transpose(2,3).reshape(b,c,w,self.num_heads,-1).permute(0,1,3,2,4))
         k = self.rotary_embedding.rotate_queries_or_keys(self.k_proj(x if mem is None else mem).transpose(2,3).reshape(b,c,w,self.num_heads,-1).permute(0,1,3,2,4)).transpose(3,4)
@@ -170,8 +161,12 @@ class MultichannelMultiheadAttention(nn.Module):
 
         with torch.cuda.amp.autocast_mode.autocast(enabled=False):
             qk = torch.matmul(q.float(), k.float()) / math.sqrt(h)
+
+            if prev_qk is not None:
+                qk = qk + prev_qk
+
             a = torch.matmul(F.softmax(qk, dim=-1),v.float()).transpose(2,3).reshape(b,c,w,-1).transpose(2,3)
 
         x = self.out_proj(a)
 
-        return x
+        return x, qk
