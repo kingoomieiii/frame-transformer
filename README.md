@@ -5,6 +5,9 @@ This fork is mainly a research fork, although I think I've converged on a solid 
 Trying out simply using a multichannel transformer. Multichannel transformers utilize multichannel linear module which is my implementation of parallel position-wise linear layers with a depth-wise component to allow for parallel transformers. Aside from being extended into the channel dimension, this architecture follows the Primer paper's findings and uses squared ReLU for activation as well as 1xN convolutions after the multichannel linear projections in the attention mechanism; this is simply an extension of the Primer's use of conv1d into 2d. I also use a residual attention connection as seen in the realformer architecture. Currently training a frame transformer with 957 million parameters, will do this version first and then will train a diffusion model in my other repo using a slightly modified architecture.
 
 ## Architecture Diagram ##
+### Current experiment (frame_transformer3.py)
+![image](https://user-images.githubusercontent.com/30326384/194731789-625281ff-6563-4732-a0f1-66c888b27f3f.png)
+
 ### Conv Frame Primer ###
 ![image](https://user-images.githubusercontent.com/30326384/189788070-fcf4184e-1835-44ab-9e08-0d553731f3c5.png)
 
