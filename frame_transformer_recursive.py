@@ -85,40 +85,6 @@ class FrameNorm(nn.Module):
     def __call__(self, x):
         return (torch.layer_norm(x.transpose(2,3), (self.weight.shape[-1],), eps=self.eps) * self.weight + self.bias).transpose(2,3)
 
-class FrameEncoder(nn.Module):
-    def __init__(self, in_channels, out_channels, n_fft=2048):
-        super().__init__()
-
-        self.norm1 = FrameNorm(in_channels, n_fft // 2)
-        self.conv1 = nn.Conv2d(in_channels, out_channels, kernel_size=3, padding=1, bias=False)
-        self.conv2 = nn.Conv2d(out_channels, out_channels, kernel_size=3, padding=1, stride=2, bias=False)
-        self.identity = nn.Conv2d(in_channels, out_channels, kernel_size=1, padding=0, stride=2, bias=False)
-        self.activate = SquaredReLU()
-
-    def __call__(self, x):
-        h = self.conv2(self.activate(self.conv1(self.norm1(x))))
-        x = self.identity(x) + h
-
-        return x
-
-class FrameDecoder(nn.Module):
-    def __init__(self, in_channels, out_channels, n_fft=2048):
-        super().__init__()
-
-        self.upsample = nn.Upsample(scale_factor=2, mode='bilinear', align_corners=True)
-        self.norm1 = FrameNorm(in_channels, n_fft // 2)
-        self.conv1 = nn.Conv2d(in_channels, out_channels, kernel_size=3, padding=1, bias=False)
-        self.conv2 = nn.Conv2d(out_channels, out_channels, kernel_size=3, padding=1, stride=1, bias=False)
-        self.identity = nn.Conv2d(in_channels, out_channels, kernel_size=1, padding=0, stride=1, bias=False)
-        self.activate = SquaredReLU()
-
-    def __call__(self, x):
-        x = self.upsample(x)
-        h = self.conv2(self.activate(self.conv1(self.norm1(x))))
-        x = self.identity(x) + h
-
-        return x
-
 class TransformerEncoder(nn.Module):
     def __init__(self, channels, features, expansion=4, num_heads=8, dropout=0.1):
         super().__init__()
