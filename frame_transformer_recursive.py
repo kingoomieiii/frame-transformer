@@ -13,17 +13,17 @@ class FrameTransformer(nn.Module):
         self.output_bin = n_fft // 2 + 1
         self.num_layers = num_layers
         self.encoder = TransformerEncoder(in_channels, n_fft // 2, expansion=expansion, num_heads=num_heads, dropout=dropout)
-        self.out = nn.Conv2d(in_channels, out_channels, 1) if in_channels != out_channels else nn.Identity()
+        self.out = nn.Conv2d(in_channels * 2, out_channels, 1)
 
     def __call__(self, x):
-        prev_qk = None
+        idt, prev_qk = x, None
 
         num_layers = self.num_layers if not self.training else numpy.random.randint(6, self.num_layers)
         
         for _ in range(num_layers):
             x, prev_qk = self.encoder(x, prev_qk=prev_qk)
 
-        x = self.out(x)
+        x = self.out(torch.cat((x, idt), dim=1))
 
         return x
 
