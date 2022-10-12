@@ -84,6 +84,9 @@ class VoxAugDataset(torch.utils.data.Dataset):
         if np.random.uniform() < 0.5:
             V = V[::-1]
 
+        if np.random.uniform() < 0.5:
+            V = V * (np.random.uniform() + 0.5)
+
         if np.random.uniform() < 0.025:
             if np.random.uniform() < 0.5:
                 V[0] = V[0] * 0
