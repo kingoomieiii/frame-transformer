@@ -10,6 +10,8 @@ I am training this on around 31 days of instrumental music and 1839 vocal tracks
 
 Preview checkpoint at the 20th epoch / 174,108 optimization steps (192,699,428 parameters, validation loss of 0.001519 at a cropsize of 256 but still dropping most epochs) for frame_transformer_v4.py and inference_v4.py is here: https://mega.nz/file/SkhhhQTS#PzzTgrroud8yz_TW8agQfImGRWBwdlLwOcHIs4KH1rk (this uses the deafult hyperparameters in train4.py and inference_v4.py).
 
+I also have a pretraining script and around 90+ days worth of general music with and without vocals. I will shift to pretraining once I get a fully trained checkpoint with the standard training script. I also have a denoising diffusion probablistic model implementation of the model, however I'm probably going to write a latent diffusion model from scratch instead in order to gain some speed when sampling.
+
 ## References
 - [1] Jansson et al., "Singing Voice Separation with Deep U-Net Convolutional Networks", https://ismir2017.smcnus.org/wp-content/uploads/2017/10/171_Paper.pdf
 - [2] Takahashi et al., "Multi-scale Multi-band DenseNets for Audio Source Separation", https://arxiv.org/pdf/1706.09588.pdf
@@ -18,5 +20,4 @@ Preview checkpoint at the 20th epoch / 174,108 optimization steps (192,699,428 p
 - [5] Vaswani et al., "Attention Is All You Need", https://arxiv.org/pdf/1706.03762.pdf
 - [6] So et al., "Primer: Searching for Efficient Transformers for Language Modeling", https://arxiv.org/pdf/2109.08668v2.pdf
 - [7] Su et al., "RoFormer: Enhanced Transformer with Rotary Position Embedding", https://arxiv.org/abs/2104.09864
-- [8] Henry et al., "Query-Key Normalization for Transformers", https://arxiv.org/pdf/2010.04245.pdf
 - [9] Asiedu et all., "Decoder Denoising Pretraining for Semantic Segmentation", https://arxiv.org/abs/2205.11423
