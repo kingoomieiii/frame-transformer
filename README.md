@@ -6,7 +6,7 @@ The current architecture being trained is in frame_transformer_v4.py. I will be 
 
 I am training this on around 31 days of instrumental music and 1839 vocal tracks (idk exactly how many instrumental songs at this point but there are a lot and include many genres, if they were all 4 minutes it would have around 11,147 songs to mix with the 1839 vocal tracks of varying genres for a total of 20,499,639 unique song pairs). There is also a 978 song subset of my dataset that consists of instrumental songs with their vocal counterparts so that the neural network can learn the relationship between vocals and musical cues as that is one piece of information lost when randomly coupling vocals to instrumental music as the voxaug dataset does.
 
-Preview checkpoint at the 19th epoch / 174,108 optimization steps (192,699,428 parameters, validation loss of 0.001519 at a cropsize of 256 but still dropping most epochs) for frame_transformer_v4.py and inference_v4.py is here: https://mega.nz/file/SkhhhQTS#PzzTgrroud8yz_TW8agQfImGRWBwdlLwOcHIs4KH1rk, all hyperparameters are default aside from the following: channels = 32, feedforward_expansion = 4, num_heads = 8.
+Preview checkpoint at the 20th epoch / 174,108 optimization steps (192,699,428 parameters, validation loss of 0.001519 at a cropsize of 256 but still dropping most epochs) for frame_transformer_v4.py and inference_v4.py is here: https://mega.nz/file/SkhhhQTS#PzzTgrroud8yz_TW8agQfImGRWBwdlLwOcHIs4KH1rk, all hyperparameters are default aside from the following: channels = 32, feedforward_expansion = 4, num_heads = 8.
 
 ## References
 - [1] Jansson et al., "Singing Voice Separation with Deep U-Net Convolutional Networks", https://ismir2017.smcnus.org/wp-content/uploads/2017/10/171_Paper.pdf
