@@ -2,8 +2,6 @@ import math
 import torch
 from torch import nn
 import torch.nn.functional as F
-from frame_transformer4 import MultichannelLinear
-from frame_transformer_dense import FrameNorm
 from rotary_embedding_torch import RotaryEmbedding
 
 class FrameTransformer(nn.Module):
@@ -90,6 +88,60 @@ class FrameTransformer(nn.Module):
 class SquaredReLU(nn.Module):
     def __call__(self, x):
         return torch.relu(x) ** 2
+
+class FrameNorm(nn.Module):
+    def __init__(self, channels, features, eps=0.00001):
+        super(FrameNorm, self).__init__()
+        
+        self.eps = eps
+        self.weight = nn.Parameter(torch.empty(channels, 1, features))
+        self.bias = nn.Parameter(torch.empty(channels, 1, features))
+        nn.init.ones_(self.weight)
+        nn.init.zeros_(self.bias)
+
+    def __call__(self, x):
+        return (torch.layer_norm(x.transpose(2,3), (self.weight.shape[-1],), eps=self.eps) * self.weight + self.bias).transpose(2,3)
+
+class MultichannelLinear(nn.Module):
+    def __init__(self, in_channels, out_channels, in_features, out_features, positionwise=True, depthwise=False, bias=False):
+        super(MultichannelLinear, self).__init__()
+
+        self.weight_pw = None
+        self.bias_pw = None
+        if in_features != out_features or positionwise:
+            self.weight_pw = nn.Parameter(torch.empty(in_channels, out_features, in_features))
+            nn.init.uniform_(self.weight_pw, a=-1/math.sqrt(in_features), b=1/math.sqrt(in_features))
+
+            if bias:
+                self.bias_pw = nn.Parameter(torch.empty(in_channels, out_features, 1))
+                bound = 1 / math.sqrt(in_features)
+                nn.init.uniform_(self.bias_pw, -bound, bound)
+
+        self.weight_dw = None
+        self.bias_dw = None
+        if in_channels != out_channels or depthwise:
+            self.weight_dw = nn.Parameter(torch.empty(out_channels, in_channels))
+            nn.init.uniform_(self.weight_dw, a=-1/math.sqrt(in_channels), b=1/math.sqrt(in_channels))
+
+            if bias:
+                self.bias_dw = nn.Parameter(torch.empty(out_channels, 1, 1))
+                bound = 1 / math.sqrt(in_channels)
+                nn.init.uniform_(self.bias_pw, -bound, bound)
+
+    def __call__(self, x):
+        if self.weight_pw is not None:
+            x = torch.matmul(x.transpose(2,3), self.weight_pw.transpose(1,2)).transpose(2,3)
+
+            if self.bias_pw is not None:
+                x = x + self.bias_pw
+
+        if self.weight_dw is not None:
+            x = torch.matmul(x.transpose(1,3), self.weight_dw.t()).transpose(1,3)
+
+            if self.bias_dw is not None:
+                x = x + self.bias_dw
+        
+        return x
 
 class ResBlock(nn.Module):
     def __init__(self, in_channels, out_channels, features, downsample=False):
