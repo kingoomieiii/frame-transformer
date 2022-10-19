@@ -71,11 +71,17 @@ class VoxAugDataset(torch.utils.data.Dataset):
     def __len__(self):
         return len(self.curr_list) * self.mul
 
-    def _get_vocals(self, idx, root=True):          
-        vpath = self.vocal_list[idx]
+    def _get_vocals(self):          
+        vpath = self.vocal_list[np.random.randint(len(self.vocal_list))]
         vdata = np.load(str(vpath))
-        V = vdata['X']
+        V, c = vdata['X'], vdata['c']
 
+        if np.random.uniform() > 0.5:
+            vr = V.real / c 
+            vr = np.where(np.abs(V) > 0.1, vr + (np.random.normal(size=vr.shape) / (c * 0.5)) * np.random.uniform(), vr)
+            vr = vr * c
+            V.real = vr
+        
         if V.shape[2] > self.cropsize:
             start = np.random.randint(0, V.shape[2] - self.cropsize + 1)
             stop = start + self.cropsize
@@ -89,17 +95,13 @@ class VoxAugDataset(torch.utils.data.Dataset):
 
         if np.random.uniform() < 0.025:
             if np.random.uniform() < 0.5:
-                V[0] = V[0] * 0
+                V[0] = 0
             else:
-                V[1] = V[1] * 0
-
-        if np.random.uniform() < self.vocal_mix_rate and root:
-            V2 = self._get_vocals(np.random.randint(len(self.vocal_list)), root=False)
-            V = V + V2
+                V[1] = 0
 
         return V
 
-    def __getitem__(self, idx, root=True):
+    def __getitem__(self, idx):
         path = self.curr_list[idx % len(self.curr_list)]
         data = np.load(str(path))
         aug = 'Y' not in data.files
@@ -118,7 +120,7 @@ class VoxAugDataset(torch.utils.data.Dataset):
                 X, aug = Y, True
 
             if aug and np.random.uniform() > 0.02:
-                V = self._get_vocals(np.random.randint(len(self.vocal_list)))
+                V = self._get_vocals()
                 X = Y + V
 
                 if np.random.uniform() < 0.025:
@@ -134,11 +136,10 @@ class VoxAugDataset(torch.utils.data.Dataset):
                 V = vdata['X']
                 X = Y + V
             
-        if root:
-            X = np.clip(np.abs(X) / c, 0, 1)
-            Y = np.clip(np.abs(Y) / c, 0, 1)
+        X = np.clip(np.abs(X) / c, 0, 1)
+        Y = np.clip(np.abs(Y) / c, 0, 1)
 
-            if not self.is_validation:
-                Y = np.where(Y <= X, Y, X)
+        if not self.is_validation:
+            Y = np.where(Y <= X, Y, X)
 
         return X, Y
