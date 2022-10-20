@@ -76,9 +76,7 @@ class VoxAugDataset(torch.utils.data.Dataset):
         vdata = np.load(str(vpath))
         V, c = vdata['X'], vdata['c']
 
-        if np.random.uniform() > 0.5:
-            vr = V.real / c
-            V.real = np.where(np.abs(V) > 0.1, vr + (np.random.normal(size=vr.shape) / (c * 0.5)) * np.random.uniform(), vr) * c
+        V.real = np.where(np.abs(V) > 0.1, V.real / c + (np.random.normal(size=V.real.shape) / (c * 0.5)) * np.random.uniform(), V.real / c) * c
         
         if V.shape[2] > self.cropsize:
             start = np.random.randint(0, V.shape[2] - self.cropsize + 1)
