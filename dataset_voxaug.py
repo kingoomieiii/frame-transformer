@@ -7,7 +7,7 @@ import torch
 import torch.utils.data
 
 class VoxAugDataset(torch.utils.data.Dataset):
-    def __init__(self, path=[], vocal_path=[], pair_path=[], is_validation=False, mul=1, pair_mul=1, downsamples=0, epoch_size=None, cropsize=256, vocal_mix_rate=0, mixup_rate=0, mixup_alpha=1, include_phase=False, force_voxaug=False, use_noise=True, gamma=0.95, sigma=0.25):
+    def __init__(self, path=[], vocal_path=[], pair_path=[], is_validation=False, mul=1, pair_mul=1, downsamples=0, epoch_size=None, cropsize=256, vocal_mix_rate=0, mixup_rate=0, mixup_alpha=1, include_phase=False, force_voxaug=False, use_noise=True, noise_rate=1.0):
         self.epoch_size = epoch_size
         self.mul = mul
         self.cropsize = cropsize
@@ -17,8 +17,7 @@ class VoxAugDataset(torch.utils.data.Dataset):
         self.include_phase = include_phase
         self.force_voxaug = force_voxaug
         self.use_noise = use_noise
-        self.gamma = gamma
-        self.sigma = sigma
+        self.noise_rate = noise_rate
         self.vidx = 0
 
         if self.force_voxaug:
@@ -76,13 +75,13 @@ class VoxAugDataset(torch.utils.data.Dataset):
         vdata = np.load(str(vpath))
         V, c = vdata['X'], vdata['c']
 
-        V.real = np.where(np.abs(V) > 0.1, V.real / c + (np.random.normal(size=V.real.shape) / (c * 0.5)) * np.random.uniform(), V.real / c) * c
-        
         if V.shape[2] > self.cropsize:
             start = np.random.randint(0, V.shape[2] - self.cropsize + 1)
             stop = start + self.cropsize
             V = V[:,:,start:stop]
 
+        V.real = np.where(np.abs(V) > 0.1, V.real / c + (np.random.normal(size=V.shape) / (c * (np.random.uniform() * 0.5 + 0.5))) * np.random.uniform(), V.real / c) * c
+        
         if np.random.uniform() < 0.5:
             V = V[::-1]
 
@@ -119,8 +118,8 @@ class VoxAugDataset(torch.utils.data.Dataset):
                 V = self._get_vocals()
                 X = Y + V
 
-                if np.random.uniform() < 0.025:
-                    X = Y
+            if np.random.uniform() < 0.025:
+                X = Y
 
             if np.random.uniform() < 0.5:
                 X = X[::-1]
