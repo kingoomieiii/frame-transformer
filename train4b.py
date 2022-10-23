@@ -64,7 +64,7 @@ def train_epoch(dataloader, model, device, optimizer, accumulation_steps, progre
         V = V.to(device)[:, :, :model.max_bin]
 
         with torch.cuda.amp.autocast_mode.autocast(enabled=grad_scaler is not None):
-            v_pred = model(X)
+            v_pred = torch.sigmoid(model(X))
 
         l1_loss = crit(v_pred, V) / accumulation_steps
 
@@ -128,7 +128,7 @@ def validate_epoch(dataloader, model, device):
             X = X.to(device)[:, :, :model.max_bin]
             Y = Y.to(device)[:, :, :model.max_bin]
 
-            v_pred = model(X)
+            v_pred = torch.sigmoid(model(X))
             mag_loss = crit(X - v_pred, Y)
 
             if torch.logical_or(mag_loss.isnan(), mag_loss.isinf()):

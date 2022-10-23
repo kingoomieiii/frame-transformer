@@ -126,24 +126,24 @@ class VoxAugDataset(torch.utils.data.Dataset):
         Y = np.abs(Y) / c
 
         if not self.is_validation:
-            V = self._get_vocals()
-            V = V / c
-
             if np.random.uniform() < 0.5:
                 X = X[::-1]
                 Y = Y[::-1]
+                
+            V = self._get_vocals()
+            V = V / c
 
             if np.random.uniform() < 0.025:
                 V = np.zeros_like(V)
 
-            X = Y + V
+            X = np.clip(Y + V, 0, 1)
         else:
             if len(self.vocal_list) > 0:                              
                 vpath = self.vocal_list[idx % len(self.vocal_list)]
                 vdata = np.load(str(vpath))
                 V = vdata['X']
                 V = np.abs(V) / c
-                X = Y + V
+                X = np.clip(Y + V, 0, 1)
             else:
                 V = np.zeros_like(X)
 
