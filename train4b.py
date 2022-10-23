@@ -82,7 +82,7 @@ def train_epoch(dataloader, model, device, optimizer, accumulation_steps, progre
 
         if (itr + 1) % accumulation_steps == 0:
             if progress_bar:
-                pbar.set_description(f'{step}: {str(batch_loss.item())} / {str(batch_loss.item() / 2)}')
+                pbar.set_description(f'{step}: {str(batch_loss.item())}')
 
             if use_wandb:
                 wandb.log({

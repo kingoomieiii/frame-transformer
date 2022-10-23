@@ -87,15 +87,16 @@ class VoxAugDataset(torch.utils.data.Dataset):
         if np.random.uniform() < 0.5:
             V = V * (np.random.uniform() + 0.5)
 
-        gamma = np.random.uniform(self.gamma, 1.0)
-        sigma = np.random.uniform(self.sigma, 1)
-        alpha = np.random.uniform(self.alpha, 0)
-        
-        vp = np.angle(V)
-        vm = (np.abs(V) / c) * 2 - 1
-        vm = np.where(vm > alpha, vm * gamma + np.sqrt(1 - gamma) * np.random.normal(scale=sigma, size=vm.shape), vm)
-        vm = (vm + 1) * 0.5
-        V = vm * np.exp(1.j * vp)
+        V = np.abs(V) / c
+
+        if np.random.uniform() < 0.5:
+            gamma = np.random.uniform(self.gamma, 1.0)
+            sigma = np.random.uniform(self.sigma, 1)
+            alpha = np.random.uniform(self.alpha, 0)
+            
+            V = V * 2 - 1
+            V = np.where(V > alpha, V * gamma + np.sqrt(1 - gamma) * np.random.normal(scale=sigma, size=V.shape), V)
+            V = np.clip((V + 1) * 0.5, 0, 1) * c
         
         if np.random.uniform() < 0.5:
             V = V[::-1]
@@ -121,31 +122,30 @@ class VoxAugDataset(torch.utils.data.Dataset):
             X = X[:,:,start:stop]
             Y = Y[:,:,start:stop]
 
-        X = (np.abs(X) / c) * 2 - 1
-        Y = (np.abs(Y) / c) * 2 - 1
+        X = np.abs(X) / c
+        Y = np.abs(Y) / c
 
         if not self.is_validation:
             V = self._get_vocals()
-            V = (np.abs(V) / c) * 2 - 1
+            V = V / c
 
             if np.random.uniform() < 0.5:
                 X = X[::-1]
                 Y = Y[::-1]
 
-            X = Y + V
-
             if np.random.uniform() < 0.025:
-                X = Y
-                V = np.full_like(X, -1.0)
+                V = np.zeros_like(V)
+
+            X = Y + V
         else:
             if len(self.vocal_list) > 0:                              
                 vpath = self.vocal_list[idx % len(self.vocal_list)]
                 vdata = np.load(str(vpath))
                 V = vdata['X']
-                V = (np.abs(V) / c) * 2 - 1
+                V = np.abs(V) / c
                 X = Y + V
             else:
-                V = np.full_like(X, -1.0)
+                V = np.zeros_like(X)
 
         if self.clip_validation or not self.is_validation:
             Y = np.where(Y <= X, Y, X)
