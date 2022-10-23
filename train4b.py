@@ -219,12 +219,12 @@ def main():
 
     train_dataset = VoxAugDataset(
         path=[
-            "C://cs2048_sr44100_hl1024_nf2048_of0",
-            "D://cs2048_sr44100_hl1024_nf2048_of0",
-            "F://cs2048_sr44100_hl1024_nf2048_of0",
-            "H://cs2048_sr44100_hl1024_nf2048_of0",
-            "J://cs2048_sr44100_hl1024_nf2048_of0",
-            "K://cs2048_sr44100_hl1024_nf2048_of0",
+            # "C://cs2048_sr44100_hl1024_nf2048_of0",
+            # "D://cs2048_sr44100_hl1024_nf2048_of0",
+            # "F://cs2048_sr44100_hl1024_nf2048_of0",
+            # "H://cs2048_sr44100_hl1024_nf2048_of0",
+            # "J://cs2048_sr44100_hl1024_nf2048_of0",
+            # "K://cs2048_sr44100_hl1024_nf2048_of0",
         ],
         pair_path=[
             "F://cs2048_sr44100_hl1024_nf2048_of0_PAIRS",
@@ -338,8 +338,7 @@ def main():
             val_dataset = VoxAugDataset(
                 path=[f"C://cs256_sr44100_hl1024_nf2048_of0_VALIDATION"],
                 vocal_path=None,
-                is_validation=True,
-                clip_validation=True
+                is_validation=True
             )
 
             val_dataloader = torch.utils.data.DataLoader(
