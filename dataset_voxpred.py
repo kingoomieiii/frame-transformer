@@ -7,7 +7,7 @@ import torch
 import torch.utils.data
 
 class VoxAugDataset(torch.utils.data.Dataset):
-    def __init__(self, path=[], vocal_path=[], pair_path=[], is_validation=False, mul=1, pair_mul=1, downsamples=0, epoch_size=None, cropsize=256, vocal_mix_rate=0, mixup_rate=0, mixup_alpha=1, include_phase=False, force_voxaug=False, use_noise=True, noise_rate=1.0, gamma=0.5, sigma=0.4, alpha=-0.9, clip_validation=False):
+    def __init__(self, path=[], vocal_path=[], pair_path=[], is_validation=False, mul=1, pair_mul=1, downsamples=0, epoch_size=None, cropsize=256, vocal_mix_rate=0, mixup_rate=0, mixup_alpha=1, include_phase=False, force_voxaug=False, use_noise=True, noise_rate=1.0, gamma=0.95, sigma=0.4, alpha=-0.9, clip_validation=False):
         self.epoch_size = epoch_size
         self.mul = mul
         self.cropsize = cropsize
@@ -111,10 +111,9 @@ class VoxAugDataset(torch.utils.data.Dataset):
     def __getitem__(self, idx):
         path = self.curr_list[idx % len(self.curr_list)]
         data = np.load(str(path))
-        aug = 'Y' not in data.files
 
         X, c = data['X'], data['c']
-        Y = X if aug else data['Y']
+        Y = X if not self.is_validation else data['Y']
 
         if X.shape[2] > self.cropsize:
             start = np.random.randint(0, X.shape[2] - self.cropsize + 1)
@@ -122,31 +121,33 @@ class VoxAugDataset(torch.utils.data.Dataset):
             X = X[:,:,start:stop]
             Y = Y[:,:,start:stop]
 
+        X = (np.abs(X) / c) * 2 - 1
+        Y = (np.abs(Y) / c) * 2 - 1
+
         if not self.is_validation:
-            if self.force_voxaug:
-                X, aug = Y, True
-
-            if aug and np.random.uniform() > 0.02:
-                V = self._get_vocals()
-                X = Y + V
-
-            if np.random.uniform() < 0.025:
-                X = Y
+            V = self._get_vocals()
+            V = (np.abs(V) / c) * 2 - 1
 
             if np.random.uniform() < 0.5:
                 X = X[::-1]
                 Y = Y[::-1]
+
+            X = Y + V
+
+            if np.random.uniform() < 0.025:
+                X = Y
+                V = np.full_like(X, -1.0)
         else:
             if len(self.vocal_list) > 0:                              
                 vpath = self.vocal_list[idx % len(self.vocal_list)]
                 vdata = np.load(str(vpath))
                 V = vdata['X']
+                V = (np.abs(V) / c) * 2 - 1
                 X = Y + V
-            
-        X = np.clip(np.abs(X) / c, 0, 1)
-        Y = np.clip(np.abs(Y) / c, 0, 1)
+            else:
+                V = np.full_like(X, -1.0)
 
         if self.clip_validation or not self.is_validation:
             Y = np.where(Y <= X, Y, X)
 
-        return X, Y
+        return X.astype(np.float32), V.astype(np.float32) if not self.is_validation else Y.astype(np.float32)
