@@ -85,7 +85,6 @@ class VoxAugDataset(torch.utils.data.Dataset):
             stop = start + self.cropsize
             V = V[:,:,start:stop]
 
-        gamma1 = np.random.uniform(0, 0.1)
         gamma2 = np.random.uniform(0.05, 0.1)
         sigma = np.random.uniform(self.sigma, 1)
         alpha = np.random.uniform(self.alpha, 0)
@@ -93,8 +92,9 @@ class VoxAugDataset(torch.utils.data.Dataset):
         vp = np.angle(V)
         vm = (np.abs(V) / c) * 2 - 1
         vm1 = uniform_filter(np.where(vm > alpha, np.sqrt(gamma2) * np.random.normal(scale=sigma, size=vm.shape), 0), size=3)
-        vm2 = np.where(vm > alpha, np.sqrt(gamma2) * np.random.normal(scale=sigma, size=vm.shape), 0)
-        vm = vm1 + vm2
+        vm2 = uniform_filter(np.where(vm > alpha, np.sqrt(gamma2) * np.random.normal(scale=sigma, size=vm.shape), 0), size=5)
+        vm3 = np.where(vm > alpha, np.sqrt(gamma2) * np.random.normal(scale=sigma, size=vm.shape), 0)
+        vm = vm1 + vm2 + vm3
         vm = np.clip((vm + 1) * 0.5, 0, 1)
         V = vm * np.exp(1.j * vp)
         
