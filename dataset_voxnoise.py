@@ -84,19 +84,6 @@ class VoxAugDataset(torch.utils.data.Dataset):
             start = np.random.randint(0, V.shape[2] - self.cropsize + 1)
             stop = start + self.cropsize
             V = V[:,:,start:stop]
-
-        gamma2 = np.random.uniform(0.05, 0.1)
-        sigma = np.random.uniform(self.sigma, 1)
-        alpha = np.random.uniform(self.alpha, 0)
-
-        vp = np.angle(V)
-        vm = (np.abs(V) / c) * 2 - 1
-        vm1 = uniform_filter(np.where(vm > alpha, np.sqrt(gamma2) * np.random.normal(scale=sigma, size=vm.shape), 0), size=3)
-        vm2 = uniform_filter(np.where(vm > alpha, np.sqrt(gamma2) * np.random.normal(scale=sigma, size=vm.shape), 0), size=5)
-        vm3 = np.where(vm > alpha, np.sqrt(gamma2) * np.random.normal(scale=sigma, size=vm.shape), 0)
-        vm = vm1 + vm2 + vm3
-        vm = np.clip((vm + 1) * 0.5, 0, 1)
-        V = vm * np.exp(1.j * vp)
         
         if np.random.uniform() < 0.5:
             V = V[::-1]
@@ -123,20 +110,29 @@ class VoxAugDataset(torch.utils.data.Dataset):
             X = X[:,:,start:stop]
             Y = Y[:,:,start:stop]
 
-        X = Y
-
-        if np.random.uniform() > 0.02:
-            V = self._get_vocals()
-            X = Y + V
-
-        if np.random.uniform() < 0.025:
-            X = Y
+        Y = np.abs(Y) / c
 
         if np.random.uniform() < 0.5:
-            X = X[::-1]
             Y = Y[::-1]
-            
-        X = np.clip(np.abs(X) / c, 0, 1)
-        Y = np.clip(np.abs(Y) / c, 0, 1)
 
+        if np.random.uniform() > 0.025:
+            V = self._get_vocals()
+
+            gamma1 = np.random.uniform(0.01, 0.2)
+            gamma2 = np.random.uniform(0.01, 0.2)
+            gamma3 = np.random.uniform(0.01, 0.2)
+            
+            v0 = np.abs(V) / c
+            vm = v0 * 2 - 1
+            xm = Y * 2 - 1
+            v1 = uniform_filter(np.where(vm > self.alpha, v0 * np.sqrt(gamma1) * np.random.normal(size=vm.shape), 0), size=3)
+            v2 = uniform_filter(np.where(vm > self.alpha, v0 * np.sqrt(gamma2) * np.random.normal(size=vm.shape), 0), size=7)
+            v3 = np.where(vm > self.alpha, v0 * np.sqrt(gamma3) * np.random.normal(scale=1, size=vm.shape), 0)
+            xm = xm + v1 + v2 + v3
+            xm = np.clip((xm + 1) * 0.5, 0, 1)
+
+            X = xm
+        else:
+            X = Y
+            
         return X.astype(np.float32), Y.astype(np.float32)
