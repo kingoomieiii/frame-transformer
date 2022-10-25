@@ -8,7 +8,7 @@ from lib import layers
 
 class BaseNet(nn.Module):
 
-    def __init__(self, nin, nout, nin_lstm, nout_lstm, dilations=((4, 2), (8, 4), (12, 6)), attn_maps=1, num_layers=8):
+    def __init__(self, nin, nout, nin_lstm, nout_lstm, dilations=((4, 2), (8, 4), (12, 6)), attn_maps=1, num_layers=12):
         super(BaseNet, self).__init__()
         self.enc1 = layers.Conv2DBNActiv(nin, nout, 3, 1, 1)
         self.enc2 = layers.Encoder(nout, nout * 2, 3, 2, 1)
