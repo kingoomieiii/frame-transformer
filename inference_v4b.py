@@ -10,7 +10,7 @@ import json
 from tqdm import tqdm
 from frame_transformer_v4 import FrameTransformer
 
-from lib import dataset, nets
+from lib import dataset, nets as nets
 from lib import spec_utils
 from lib import utils
 
@@ -41,7 +41,7 @@ class Separator(object):
             # To reduce the overhead, dataloader is not used.
             for i in tqdm(range(0, patches, self.batchsize)):
                 X_batch = X_dataset[i: i + self.batchsize]
-                X_batch = torch.from_numpy(np.asarray(X_batch)).to(self.device)
+                X_batch = torch.from_numpy(np.asarray(X_batch)).to(self.device)[:, :, :-1]
 
                 pred = self.model(X_batch)
                 
@@ -53,6 +53,8 @@ class Separator(object):
                 mask.append(pred)
 
             mask = np.concatenate(mask, axis=2)
+
+        mask = np.pad(mask, ((0,0), (0,1), (0, 0)))
 
         return mask
 
@@ -207,7 +209,6 @@ def main():
             sf.write('{}/{}_Instruments.wav'.format(output_folder, basename), wave.T, sr)
 
             print('inverse stft of vocals...', end=' ')
-
             wave = spec_utils.spectrogram_to_wave(v_spec, hop_length=args.hop_length)
             print('done')
             sf.write('{}/{}_Vocals.wav'.format(output_folder, basename), wave.T, sr)
@@ -253,9 +254,6 @@ def main():
         sf.write('{}_Instruments.wav'.format(basename), wave.T, sr)
 
         print('inverse stft of vocals...', end=' ')
-        c = np.abs(y_spec).max()
-        v_spec = c.copy()
-        v_spec.real = (v_spec.real / c + np.random.normal(size=v_spec.shape)) * c
         wave = spec_utils.spectrogram_to_wave(v_spec, hop_length=args.hop_length)
         print('done')
         sf.write('{}_Vocals.wav'.format(basename), wave.T, sr)
