@@ -7,7 +7,7 @@ import torch
 import torch.utils.data
 from scipy.ndimage.filters import gaussian_filter, uniform_filter
 
-class VoxAugDataset(torch.utils.data.Dataset):
+class VoxNoiseDataset(torch.utils.data.Dataset):
     def __init__(self, path=[], vocal_path=[], pair_path=[], is_validation=False, mul=1, pair_mul=1, downsamples=0, epoch_size=None, cropsize=256, vocal_mix_rate=0, mixup_rate=0, mixup_alpha=1, include_phase=False, force_voxaug=False, use_noise=True, noise_rate=1.0, gamma=0.5, sigma=0.4, alpha=-0.8, clip_validation=False):
         self.epoch_size = epoch_size
         self.mul = mul

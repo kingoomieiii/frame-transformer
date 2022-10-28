@@ -74,8 +74,6 @@ class CascadedNet(nn.Module):
         self.aux_out = nn.Conv2d(3 * nout // 4, 2, 1, bias=False)
 
     def forward(self, x):
-        x = x[:, :, :self.max_bin]
-
         bandw = x.size()[2] // 2
         l1_in = x[:, :, :bandw]
         h1_in = x[:, :, bandw:]
@@ -93,20 +91,10 @@ class CascadedNet(nn.Module):
         f3 = self.stg3_full_band_net(f3_in)
 
         mask = torch.sigmoid(self.out(f3))
-        mask = F.pad(
-            input=mask,
-            pad=(0, 0, 0, self.output_bin - mask.size()[2]),
-            mode='replicate'
-        )
 
         if self.training:
             aux = torch.cat([aux1, aux2], dim=1)
             aux = torch.sigmoid(self.aux_out(aux))
-            aux = F.pad(
-                input=aux,
-                pad=(0, 0, 0, self.output_bin - aux.size()[2]),
-                mode='replicate'
-            )
             return mask, aux
         else:
             return mask
