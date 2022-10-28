@@ -110,29 +110,21 @@ class VoxAugDataset(torch.utils.data.Dataset):
             X = X[:,:,start:stop]
             Y = Y[:,:,start:stop]
 
-        Y = np.abs(Y) / c
-
         if np.random.uniform() < 0.5:
             Y = Y[::-1]
 
         if np.random.uniform() > 0.025:
             V = self._get_vocals()
 
-            gamma1 = np.random.uniform(0.01, 0.2)
-            gamma2 = np.random.uniform(0.01, 0.2)
-            gamma3 = np.random.uniform(0.01, 0.2)
-            
-            v0 = np.abs(V) / c
-            vm = v0 * 2 - 1
-            xm = Y * 2 - 1
-            v1 = uniform_filter(np.where(vm > self.alpha, v0 * np.sqrt(gamma1) * np.random.normal(size=vm.shape), 0), size=3)
-            v2 = uniform_filter(np.where(vm > self.alpha, v0 * np.sqrt(gamma2) * np.random.normal(size=vm.shape), 0), size=7)
-            v3 = np.where(vm > self.alpha, v0 * np.sqrt(gamma3) * np.random.normal(scale=1, size=vm.shape), 0)
-            xm = xm + v1 + v2 + v3
-            xm = np.clip((xm + 1) * 0.5, 0, 1)
+            b = np.random.uniform(0, 0.25)
+            Y = np.abs(Y) / c
+            V = np.abs(V) / c
 
-            X = xm
+            V = np.clip(uniform_filter(V, size=16), 0, 1)
+            N = np.sqrt(V * b) * np.random.normal() * b if np.random.uniform() < 0.5 else np.sqrt(V) * b * np.random.uniform(0,b)
+            X = np.clip(Y + N, 0, 1)
         else:
+            Y = np.abs(Y) / c
             X = Y
             
         return X.astype(np.float32), Y.astype(np.float32)
