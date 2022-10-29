@@ -13,10 +13,12 @@ from frame_transformer_v4 import FrameTransformer
 from lib import dataset
 from lib import spec_utils
 from lib import utils
+from lib import nets
 
 class Separator(object):
 
-    def __init__(self, model, device, batchsize, cropsize, postprocess=False):
+    def __init__(self, corrector, model, device, batchsize, cropsize, postprocess=False):
+        self.corrector = corrector
         self.model = model
         self.offset = 0
         self.device = device
@@ -36,6 +38,7 @@ class Separator(object):
             X_dataset.append(X_mag_crop)
 
         self.model.eval()
+        self.corrector.eval()
         with torch.no_grad():
             mask = []
             # To reduce the overhead, dataloader is not used.
@@ -43,11 +46,12 @@ class Separator(object):
                 X_batch = X_dataset[i: i + self.batchsize]
                 X_batch = torch.from_numpy(np.asarray(X_batch)).to(self.device)[:, :, :1024]
 
-                with torch.cuda.amp.autocast_mode.autocast():
-                    pred = torch.sigmoid(self.model(X_batch))
+                pred = X_batch * torch.sigmoid(self.model(X_batch))
                 
                 if padding > 0:
                     pred = pred[:, :, :, (padding):-(padding)]
+
+                pred = self.corrector(pred)
 
                 pred = pred.detach().cpu().numpy()
                 pred = np.concatenate(pred, axis=2)
@@ -65,11 +69,11 @@ class Separator(object):
 
         return X_mag, X_phase
 
-    def _postprocess(self, mask, X_mag, X_phase):
+    def _postprocess(self, mask, X_mag, X_phase, c):
         if self.postprocess:
             mask = spec_utils.merge_artifacts(mask)
 
-        y_spec = mask * X_mag * np.exp(1.j * X_phase)
+        y_spec = mask * c * np.exp(1.j * X_phase)
         v_spec = (1 - mask) * X_mag * np.exp(1.j * X_phase)
         m_spec = mask * 255
 
@@ -81,12 +85,13 @@ class Separator(object):
         n_frame = X_mag.shape[2]
         pad_l, pad_r, _ = dataset.make_padding(n_frame, self.cropsize, 0)
         X_mag_pad = np.pad(X_mag, ((0, 0), (0, 0), (pad_l, pad_r)), mode='constant')
-        X_mag_pad /= X_mag_pad.max()
+        c = X_mag_pad.max()
+        X_mag_pad /= c
 
         mask = self._separate(X_mag_pad, self.cropsize, padding)
 
         mask = mask[:, :, :n_frame]
-        y_spec, v_spec, m_spec = self._postprocess(mask, X_mag, X_phase)
+        y_spec, v_spec, m_spec = self._postprocess(mask, X_mag, X_phase, c)
 
         return y_spec, v_spec, m_spec
 
@@ -112,7 +117,8 @@ class Separator(object):
 def main():
     p = argparse.ArgumentParser()
     p.add_argument('--gpu', '-g', type=int, default=-1)
-    p.add_argument('--pretrained_model', '-P', type=str, default='J://models/local.13.remover.pth')
+    p.add_argument('--pretrained_model', '-P', type=str, default='J://models/local.49.remover.pth')
+    p.add_argument('--pretrained_corrector', type=str, default="J://models/local.5.corrector.pth")
     p.add_argument('--input', '-i', required=True)
     p.add_argument('--output', '-o', type=str, default="")
     p.add_argument('--num_res_encoders', type=int, default=4)
@@ -149,11 +155,14 @@ def main():
     
     #model = FrameTransformer(channels=args.channels, n_fft=args.n_fft, dropout=args.dropout, expansion=4)
     model = FrameTransformer(channels=args.channels, n_fft=args.n_fft, dropout=args.dropout, expansion=args.feedforward_expansion, num_heads=args.num_heads)
+    corrector = nets.CascadedNet(args.n_fft, 32, 256)
     model.load_state_dict(torch.load(args.pretrained_model, map_location=device))
+    corrector.load_state_dict(torch.load(args.pretrained_corrector, map_location=device))
 
     if torch.cuda.is_available() and args.gpu >= 0:
         device = torch.device('cuda:{}'.format(args.gpu))
         model.to(device)
+        corrector.to(device)
     print('done')
 
     if str.endswith(args.input, '.json'):
@@ -195,7 +204,7 @@ def main():
             X_spec = spec_utils.wave_to_spectrogram(X, args.hop_length, args.n_fft)
             print('done')
 
-            sp = Separator(model, device, args.batchsize, args.cropsize, args.postprocess)
+            sp = Separator(corrector, model, device, args.batchsize, args.cropsize, args.postprocess)
 
             if args.tta:
                 y_spec, v_spec, m_spec = sp.separate_tta(X_spec, cropsize=args.cropsize)
@@ -208,6 +217,7 @@ def main():
             sf.write('{}/{}_Instruments.wav'.format(output_folder, basename), wave.T, sr)
 
             print('inverse stft of vocals...', end=' ')
+
             wave = spec_utils.spectrogram_to_wave(v_spec, hop_length=args.hop_length)
             print('done')
             sf.write('{}/{}_Vocals.wav'.format(output_folder, basename), wave.T, sr)
@@ -253,6 +263,9 @@ def main():
         sf.write('{}_Instruments.wav'.format(basename), wave.T, sr)
 
         print('inverse stft of vocals...', end=' ')
+        c = np.abs(y_spec).max()
+        v_spec = c.copy()
+        v_spec.real = (v_spec.real / c + np.random.normal(size=v_spec.shape)) * c
         wave = spec_utils.spectrogram_to_wave(v_spec, hop_length=args.hop_length)
         print('done')
         sf.write('{}_Vocals.wav'.format(basename), wave.T, sr)
