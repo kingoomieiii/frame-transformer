@@ -5,7 +5,7 @@ import torch.nn.functional as F
 from rotary_embedding_torch import RotaryEmbedding
 
 class FrameTransformer(nn.Module):
-    def __init__(self, in_channels=2, channels=2, dropout=0.1, n_fft=2048, num_heads=4, expansion=2, num_attention_maps=[4,6,8,12,14,16]):
+    def __init__(self, in_channels=2, channels=2, dropout=0.1, n_fft=2048, num_heads=4, expansion=2, num_attention_maps=[12,12,12,12,12,12], out=True):
         super(FrameTransformer, self).__init__()
         
         self.max_bin = n_fft // 2
@@ -44,44 +44,61 @@ class FrameTransformer(nn.Module):
         self.dec1 = FrameDecoder(channels * (2 + 1) + num_attention_maps[1] + num_attention_maps[0], channels * 1, self.max_bin)
         self.dec1_transformer = FrameTransformerDecoder(channels * 1, channels * 1 + num_attention_maps[0], num_attention_maps[0], self.max_bin // 1, dropout=dropout, expansion=expansion, num_heads=num_heads)
 
-        self.out = nn.Parameter(torch.empty(in_channels, channels + num_attention_maps[0]))
-        nn.init.uniform_(self.out, a=-1/math.sqrt(in_channels), b=1/math.sqrt(in_channels))
+        self.out = nn.Parameter(torch.empty(in_channels, channels + num_attention_maps[0])) if out else None
+
+        if self.out is not None:
+            nn.init.uniform_(self.out, a=-1/math.sqrt(channels + num_attention_maps[0]), b=1/math.sqrt(channels + num_attention_maps[0]))
 
     def __call__(self, x):
+        prev_qk = None
+
         e1 = self.enc1(x)
-        e1 = torch.cat((e1, self.enc1_transformer(e1)), dim=1)
+        t, prev_qk = self.enc1_transformer(e1, prev_qk=prev_qk)
+        e1 = torch.cat((e1, t), dim=1)
 
         e2 = self.enc2(e1)
-        e2 = torch.cat((e2, self.enc2_transformer(e2)), dim=1)
+        t, prev_qk = self.enc2_transformer(e2, prev_qk=prev_qk)
+        e2 = torch.cat((e2, t), dim=1)
 
         e3 = self.enc3(e2)
-        e3 = torch.cat((e3, self.enc3_transformer(e3)), dim=1)
+        t, prev_qk = self.enc3_transformer(e3, prev_qk=prev_qk)
+        e3 = torch.cat((e3, t), dim=1)
 
         e4 = self.enc4(e3)
-        e4 = torch.cat((e4, self.enc4_transformer(e4)), dim=1)
+        t, prev_qk = self.enc4_transformer(e4, prev_qk=prev_qk)
+        e4 = torch.cat((e4, t), dim=1)
 
         e5 = self.enc5(e4)
-        e5 = torch.cat((e5, self.enc5_transformer(e5)), dim=1)
+        t, prev_qk = self.enc5_transformer(e5, prev_qk=prev_qk)
+        e5 = torch.cat((e5, t), dim=1)
 
         e6 = self.enc6(e5)
-        e6 = torch.cat((e6, self.enc6_transformer(e6)), dim=1)
+        t, prev_qk = self.enc6_transformer(e6, prev_qk=prev_qk)
+        e6 = torch.cat((e6, t), dim=1)
 
         d5 = self.dec5(e6, e5)
-        d5 = torch.cat((d5, self.dec5_transformer(d5, skip=e5)), dim=1)
+        prev_qk1, prev_qk2 = prev_qk, None
+        t, prev_qk1, prev_qk2 = self.dec5_transformer(d5, e5, prev_qk1=prev_qk1, prev_qk2=prev_qk2)
+        d5 = torch.cat((d5, t), dim=1)
 
         d4 = self.dec4(d5, e4)
-        d4 = torch.cat((d4, self.dec4_transformer(d4, skip=e4)), dim=1)
+        t, prev_qk1, prev_qk2 = self.dec4_transformer(d4, e4, prev_qk1=prev_qk1, prev_qk2=prev_qk2)
+        d4 = torch.cat((d4, t), dim=1)
 
         d3 = self.dec3(d4, e3)
-        d3 = torch.cat((d3, self.dec3_transformer(d3, skip=e3)), dim=1)
+        t, prev_qk1, prev_qk2 = self.dec3_transformer(d3, e3, prev_qk1=prev_qk1, prev_qk2=prev_qk2)
+        d3 = torch.cat((d3, t), dim=1)
 
         d2 = self.dec2(d3, e2)
-        d2 = torch.cat((d2, self.dec2_transformer(d2, skip=e2)), dim=1)
+        t, prev_qk1, prev_qk2 = self.dec2_transformer(d2, e2, prev_qk1=prev_qk1, prev_qk2=prev_qk2)
+        d2 = torch.cat((d2, t), dim=1)
 
         d1 = self.dec1(d2, e1)
-        d1 = torch.cat((d1, self.dec1_transformer(d1, skip=e1)), dim=1)
+        t, prev_qk1, prev_qk2 = self.dec1_transformer(d1, e1, prev_qk1=prev_qk1, prev_qk2=prev_qk2)
+        out = torch.cat((d1, t), dim=1)
 
-        out = torch.matmul(d1.transpose(1,3), self.out.t()).transpose(1,3)    
+        if self.out is not None:
+            out = torch.matmul(out.transpose(1,3), self.out.t()).transpose(1,3)
 
         return out
 
@@ -187,7 +204,7 @@ class FrameDecoder(nn.Module):
         return x
 
 class FrameTransformerEncoder(nn.Module):
-    def __init__(self, in_channels, out_channels, features, expansion=4, num_heads=8, dropout=0.1):
+    def __init__(self, in_channels, out_channels, features, expansion=4, num_heads=8, dropout=0.1, depthwise=True):
         super().__init__()
 
         self.dropout = nn.Dropout(dropout)
@@ -198,24 +215,24 @@ class FrameTransformerEncoder(nn.Module):
         self.attn = MultichannelMultiheadAttention(out_channels, num_heads, features)
 
         self.norm2 = FrameNorm(out_channels, features)
-        self.linear1 = MultichannelLinear(out_channels, out_channels, features, features * expansion, depthwise=True)
+        self.linear1 = MultichannelLinear(out_channels, out_channels, features, features * expansion, depthwise=depthwise)
         self.linear2 = MultichannelLinear(out_channels, out_channels, features * expansion, features)
 
         self.activate = SquaredReLU()
 
-    def __call__(self, x):
+    def __call__(self, x, prev_qk=None):
         x = self.embed(x)
 
-        h = self.attn(self.norm1(x))
+        h, prev_qk = self.attn(self.norm1(x), prev_qk=prev_qk)
         x = x + self.dropout(h)
 
         h = self.linear2(self.activate(self.linear1(self.norm2(x))))
         x = x + self.dropout(h)
 
-        return x
+        return x, prev_qk
 
 class FrameTransformerDecoder(nn.Module):
-    def __init__(self, in_channels, skip_channels, out_channels, features, expansion=4, num_heads=8, dropout=0.1):
+    def __init__(self, in_channels, skip_channels, out_channels, features, expansion=4, num_heads=8, dropout=0.1, depthwise=True):
         super().__init__()
 
         self.dropout = nn.Dropout(dropout)
@@ -230,25 +247,25 @@ class FrameTransformerDecoder(nn.Module):
         self.skip_attn = MultichannelMultiheadAttention(out_channels, num_heads, features)
 
         self.norm3 = FrameNorm(out_channels, features)
-        self.linear1 = MultichannelLinear(out_channels, out_channels, features, features * expansion, depthwise=True)
+        self.linear1 = MultichannelLinear(out_channels, out_channels, features, features * expansion, depthwise=depthwise)
         self.linear2 = MultichannelLinear(out_channels, out_channels, features * expansion, features)
 
         self.activate = SquaredReLU()
 
-    def __call__(self, x, skip):
+    def __call__(self, x, skip, prev_qk1=None, prev_qk2=None):
         x = self.embed_self(x)
         skip = self.embed_skip(skip)
 
-        h = self.self_attn(self.norm1(x))
+        h, prev_qk1 = self.self_attn(self.norm1(x), prev_qk=prev_qk1)
         x = x + self.dropout(h)
 
-        h = self.skip_attn(self.norm2(x), mem=skip)
+        h, prev_qk2 = self.skip_attn(self.norm2(x), mem=skip, prev_qk=prev_qk2)
         x = x + self.dropout(h)
 
         h = self.linear2(self.activate(self.linear1(self.norm3(x))))
         x = x + self.dropout(h)
 
-        return x
+        return x, prev_qk1, prev_qk2
 
 class MultichannelMultiheadAttention(nn.Module):
     def __init__(self, channels, num_heads, features, kernel_size=3, padding=1, separable=True):
@@ -271,7 +288,7 @@ class MultichannelMultiheadAttention(nn.Module):
 
         self.out_proj = MultichannelLinear(channels, channels, features, features)
 
-    def __call__(self, x, mem=None):
+    def __call__(self, x, mem=None, prev_qk=None):
         b,c,h,w = x.shape
 
         q = self.rotary_embedding.rotate_queries_or_keys(self.q_proj(x).transpose(2,3).reshape(b,c,w,self.num_heads,-1).permute(0,1,3,2,4))
@@ -280,8 +297,12 @@ class MultichannelMultiheadAttention(nn.Module):
 
         with torch.cuda.amp.autocast_mode.autocast(enabled=False):
             qk = torch.matmul(q.float(), k.float()) / math.sqrt(h)
+
+            if prev_qk is not None:
+                qk = qk + prev_qk
+
             a = torch.matmul(F.softmax(qk, dim=-1),v.float()).transpose(2,3).reshape(b,c,w,-1).transpose(2,3)
 
         x = self.out_proj(a)
 
-        return x
+        return x, qk
