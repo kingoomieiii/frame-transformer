@@ -41,7 +41,7 @@ class FrameTransformer(nn.Module):
         return d1
 
 class FrameTransformerEncoder(nn.Module):
-    def __init__(self, in_channels, out_channels, features, dropout=0.1, expansion=4, num_heads=8, downsample=False):
+    def __init__(self, in_channels, out_channels, features, dropout=0.1, expansion=4, num_heads=8):
         super(FrameTransformerEncoder, self).__init__()
 
         self.activate = SquaredReLU()
@@ -56,18 +56,16 @@ class FrameTransformerEncoder(nn.Module):
         self.identity = nn.Conv2d(in_channels, out_channels, kernel_size=1, padding=0, bias=False, stride=(2,1))
 
     def __call__(self, x):
-        h = self.norm1(x)
-        h = self.attn(h)
+        h = self.attn(self.norm1(x))
         x = x + self.dropout(h)
 
-        h = self.norm2(x)
-        h = self.conv2(self.activate(self.conv1(h)))
+        h = self.conv2(self.activate(self.conv1(self.norm2(x))))
         x = self.identity(x) + self.dropout(h)
 
         return x
 
 class FrameTransformerDecoder(nn.Module):
-    def __init__(self, in_channels, skip_channels, out_channels, features, dropout=0.1, expansion=4, num_heads=8, upsample=False):
+    def __init__(self, in_channels, skip_channels, out_channels, features, dropout=0.1, expansion=4, num_heads=8):
         super(FrameTransformerDecoder, self).__init__()
         
         self.activate = SquaredReLU()
@@ -90,22 +88,19 @@ class FrameTransformerDecoder(nn.Module):
     def __call__(self, x, skip):
         x = self.upsample(x)
 
-        h = self.norm1(x)
-        h = self.attn1(h)
+        h = self.attn1(self.norm1(x))
         x = x + self.dropout(h)
 
-        h = self.norm2(x)
-        h = self.attn2(h, mem=self.skip_bottleneck(skip))
+        h = self.attn2(self.norm2(x), mem=self.skip_bottleneck(skip))
         x = x + self.dropout(h)
 
-        h = self.norm3(x)
-        h = self.conv2(self.activate(self.conv1(h)))
+        h = self.conv2(self.activate(self.conv1(self.norm3(x))))
         x = self.identity(x) + self.dropout(h)
 
         return x
 
 class MultichannelMultiheadAttention(nn.Module):
-    def __init__(self, channels, num_heads, features, kernel_size=3, padding=1):
+    def __init__(self, channels, num_heads, features):
         super().__init__()
 
         self.num_heads = num_heads
@@ -117,7 +112,6 @@ class MultichannelMultiheadAttention(nn.Module):
 
     def __call__(self, x, mem=None):
         b,c,h,w = x.shape
-
         q = self.rotary_embedding.rotate_queries_or_keys(self.q_proj(x).transpose(2,3).reshape(b,c,w,self.num_heads,-1).permute(0,1,3,2,4))
         k = self.rotary_embedding.rotate_queries_or_keys(self.k_proj(x if mem is None else mem).transpose(2,3).reshape(b,c,w,self.num_heads,-1).permute(0,1,3,2,4)).transpose(3,4)
         v = self.v_proj(x if mem is None else mem).transpose(2,3).reshape(b,c,w,self.num_heads,-1).permute(0,1,3,2,4)
