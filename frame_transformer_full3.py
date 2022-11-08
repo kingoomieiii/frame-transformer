@@ -80,9 +80,9 @@ class FrameTransformerDecoder(nn.Module):
         self.skip_bottleneck = nn.Conv2d(skip_channels, in_channels, 1) if skip_channels != in_channels else nn.Identity()
         self.attn2 = MultichannelMultiheadAttention(in_channels, num_heads, features)
 
-        self.norm3 = FrameNorm(in_channels, features)
-        self.conv1 = nn.Conv2d(in_channels, out_channels * expansion, kernel_size=3, padding=1, bias=False)
-        self.conv2 = nn.Conv2d(out_channels * expansion, out_channels, kernel_size=3, padding=1, bias=False)
+        self.norm3 = FrameNorm(in_channels + skip_channels, features)
+        self.conv1 = nn.Conv2d(in_channels + skip_channels, (in_channels + skip_channels) * expansion, kernel_size=3, padding=1, bias=False)
+        self.conv2 = nn.Conv2d((in_channels + skip_channels) * expansion, out_channels, kernel_size=3, padding=1, bias=False)
         self.identity = nn.Conv2d(in_channels, out_channels, kernel_size=1, padding=0, bias=False)
         
     def __call__(self, x, skip):
@@ -94,7 +94,7 @@ class FrameTransformerDecoder(nn.Module):
         h = self.attn2(self.norm2(x), mem=self.skip_bottleneck(skip))
         x = x + self.dropout(h)
 
-        h = self.conv2(self.activate(self.conv1(self.norm3(x))))
+        h = self.conv2(self.activate(self.conv1(self.norm3(torch.cat((x, skip), dim=1)))))
         x = self.identity(x) + self.dropout(h)
 
         return x
@@ -105,9 +105,9 @@ class MultichannelMultiheadAttention(nn.Module):
 
         self.num_heads = num_heads
         self.rotary_embedding = RotaryEmbedding(dim = features // num_heads)
-        self.q_proj = MultichannelLinear(channels, channels, features, features)
-        self.k_proj = MultichannelLinear(channels, channels, features, features)            
-        self.v_proj = MultichannelLinear(channels, channels, features, features)
+        self.q_proj = MultichannelLinear(channels, channels, features, features, depthwise=True)
+        self.k_proj = MultichannelLinear(channels, channels, features, features, depthwise=True)
+        self.v_proj = MultichannelLinear(channels, channels, features, features, depthwise=True)
         self.out_proj = MultichannelLinear(channels, channels, features, features)
 
     def __call__(self, x, mem=None):
