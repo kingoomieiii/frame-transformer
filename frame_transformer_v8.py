@@ -190,10 +190,10 @@ class FrameEncoder(nn.Module):
         return x
 
 class FrameDecoder(nn.Module):
-    def __init__(self, in_channels, out_channels, features, upsample=True, dropout=0.1, has_skip=True, num_blocks=True):
+    def __init__(self, in_channels, out_channels, features, upsample=True, dropout=0.1, num_blocks=1):
         super(FrameDecoder, self).__init__()
 
-        self.upsample = nn.Upsample(scale_factor=(2,1), mode='bilinear', align_corners=True)
+        self.upsample = nn.Upsample(scale_factor=(2,1), mode='bilinear', align_corners=True) if upsample else nn.Identity()
         self.activate = SquaredReLU()
         self.dropout = nn.Dropout2d(dropout)
 
@@ -233,59 +233,23 @@ class FrameTransformerEncoder(nn.Module):
 
         return x, prev_qk
 
-class FrameTransformerDecoder(nn.Module):
-    def __init__(self, in_channels, skip_channels, out_channels, features, expansion=4, num_heads=8, dropout=0.1, depthwise=False):
-        super().__init__()
-
-        self.dropout = nn.Dropout(dropout)
-
-        self.embed_self = nn.Conv2d(in_channels, out_channels, 1)
-        self.embed_skip = nn.Conv2d(skip_channels, out_channels, 1)
-
-        self.norm1 = FrameNorm(out_channels, features)
-        self.self_attn = MultichannelMultiheadAttention(out_channels, num_heads, features)
-
-        self.norm2 = FrameNorm(out_channels, features)
-        self.skip_attn = MultichannelMultiheadAttention(out_channels, num_heads, features)
-
-        self.norm3 = FrameNorm(out_channels, features)
-        self.linear1 = MultichannelLinear(out_channels, out_channels, features, features * expansion, depthwise=depthwise)
-        self.linear2 = MultichannelLinear(out_channels, out_channels, features * expansion, features)
-
-        self.activate = SquaredReLU()
-
-    def __call__(self, x, skip, prev_qk1=None, prev_qk2=None):
-        x = self.embed_self(x)
-        skip = self.embed_skip(skip)
-
-        h, prev_qk1 = self.self_attn(self.norm1(x), prev_qk=prev_qk1)
-        x = x + self.dropout(h)
-
-        h, prev_qk2 = self.skip_attn(self.norm2(x), mem=skip, prev_qk=prev_qk2)
-        x = x + self.dropout(h)
-
-        h = self.linear2(self.activate(self.linear1(self.norm3(x))))
-        x = x + self.dropout(h)
-
-        return x, prev_qk1, prev_qk2
-
 class MultichannelMultiheadAttention(nn.Module):
-    def __init__(self, channels, num_heads, features, kernel_size=3, padding=1, separable=True):
+    def __init__(self, channels, num_heads, features, kernel_size=3, padding=1):
         super().__init__()
 
         self.num_heads = num_heads
         self.rotary_embedding = RotaryEmbedding(dim = features // num_heads)
         
         self.q_proj = nn.Sequential(
-            nn.Conv2d(channels, channels, kernel_size=3, padding=1, bias=False),
+            nn.Conv2d(channels, channels, kernel_size=kernel_size, padding=padding, bias=False),
             MultichannelLinear(channels, channels, features, features))
 
         self.k_proj = nn.Sequential(
-            nn.Conv2d(channels, channels, kernel_size=3, padding=1, bias=False),
+            nn.Conv2d(channels, channels, kernel_size=kernel_size, padding=padding, bias=False),
             MultichannelLinear(channels, channels, features, features))
             
         self.v_proj =  nn.Sequential(
-            nn.Conv2d(channels, channels, kernel_size=3, padding=1, bias=False),
+            nn.Conv2d(channels, channels, kernel_size=kernel_size, padding=padding, bias=False),
             MultichannelLinear(channels, channels, features, features))
 
         self.out_proj = MultichannelLinear(channels, channels, features, features)
