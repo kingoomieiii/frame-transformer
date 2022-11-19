@@ -22,12 +22,12 @@ class PolynomialDecayScheduler(_LRScheduler):
                 self.current_lr = self.optimizer.param_groups            
             
             for i, param_group in enumerate(self.optimizer.param_groups):
-                self.current_lr[i]['lr'] =  (self.base_lrs[i] - self.target) * (1 - (self.current_step / self.num_decay_steps) ** self.power) + self.target
+                self.current_lr[i]['lr'] =  (self.base_lrs[i] - self.target) * (1 - ((self.current_step - self.start_step) / (self.num_decay_steps - self.start_step)) ** self.power) + self.target
                 
                 param_group['lr'] = self.current_lr[i]['lr']
                 if self.current_step % self.verbose_skip_steps == 0:
                     print(' Step {:5d} of {:5d}: decreased learning rate'
-                            ' of group {} to {:.4e}.'.format(self.current_step, self.num_decay_steps, i, self.current_lr[i]['lr']))
+                            ' of group {} to {:.4e}.'.format(self.current_step, self.start_step + self.num_decay_steps, i, self.current_lr[i]['lr']))
 
         if self.current_step < self.start_step + self.num_decay_steps + 1:
             self.current_step = self.current_step + 1
