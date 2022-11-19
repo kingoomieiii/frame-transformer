@@ -85,18 +85,8 @@ class VoxAugDataset(torch.utils.data.Dataset):
             V = V[:,:,start:stop]
 
         if np.random.uniform() < 0.5:
-            V = V * (np.random.uniform() + 0.5)
+            V = V * (np.random.uniform(0.75, 1.25))
 
-        gamma = np.random.uniform(self.gamma, 1.0)
-        sigma = np.random.uniform(self.sigma, 1)
-        alpha = np.random.uniform(self.alpha, 0)
-        
-        vp = np.angle(V)
-        vm = (np.abs(V) / c) * 2 - 1
-        vm = np.where(vm > alpha, vm * gamma + np.sqrt(1 - gamma) * np.random.normal(scale=sigma, size=vm.shape), vm)
-        vm = (vm + 1) * 0.5
-        V = vm * np.exp(1.j * vp)
-        
         if np.random.uniform() < 0.5:
             V = V[::-1]
 
@@ -149,4 +139,4 @@ class VoxAugDataset(torch.utils.data.Dataset):
         if self.clip_validation or not self.is_validation:
             Y = np.where(Y <= X, Y, X)
 
-        return X, Y
+        return X.astype(np.float32), Y.astype(np.float32)

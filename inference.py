@@ -8,7 +8,7 @@ import torch
 import json
 
 from tqdm import tqdm
-from frame_transformer_full5 import FrameTransformer
+from frame_transformer import FrameTransformer
 
 from lib import dataset
 from lib import spec_utils
@@ -46,7 +46,7 @@ class Separator(object):
                 X_batch = torch.from_numpy(np.asarray(X_batch)).to(self.device)[:, :, :1024]
 
                 with torch.cuda.amp.autocast_mode.autocast():
-                    pred = X_batch * torch.sigmoid(self.model(X_batch))
+                    pred = torch.sigmoid(self.model(X_batch))
                 
                 if padding > 0:
                     pred = pred[:, :, :, (padding):-(padding)]
@@ -67,11 +67,11 @@ class Separator(object):
 
         return X_mag, X_phase
 
-    def _postprocess(self, mask, X_mag, X_phase, c):
+    def _postprocess(self, mask, X_mag, X_phase):
         if self.postprocess:
             mask = spec_utils.merge_artifacts(mask)
 
-        y_spec = mask * c * np.exp(1.j * X_phase)
+        y_spec = mask * X_mag * np.exp(1.j * X_phase)
         v_spec = (1 - mask) * X_mag * np.exp(1.j * X_phase)
         m_spec = mask * 255
 
@@ -83,13 +83,12 @@ class Separator(object):
         n_frame = X_mag.shape[2]
         pad_l, pad_r, _ = dataset.make_padding(n_frame, self.cropsize, 0)
         X_mag_pad = np.pad(X_mag, ((0, 0), (0, 0), (pad_l, pad_r)), mode='constant')
-        c = X_mag_pad.max()
-        X_mag_pad /= c
+        X_mag_pad /= X_mag_pad.max()
 
         mask = self._separate(X_mag_pad, self.cropsize, padding)
 
         mask = mask[:, :, :n_frame]
-        y_spec, v_spec, m_spec = self._postprocess(mask, X_mag, X_phase, c)
+        y_spec, v_spec, m_spec = self._postprocess(mask, X_mag, X_phase)
 
         return y_spec, v_spec, m_spec
 
@@ -99,16 +98,14 @@ class Separator(object):
         n_frame = X_mag.shape[2]
         pad_l, pad_r, _ = dataset.make_padding(n_frame, cropsize, 0)
         X_mag_pad = np.pad(X_mag, ((0, 0), (0, 0), (pad_l, pad_r)), mode='constant')
-        c = X_mag_pad.max()
-
-        X_mag_pad /= c
+        X_mag_pad /= X_mag_pad.max()
 
         mask = np.zeros_like(X_mag)
 
         for idx in range(len(paddings)):
             mask += self._separate(X_mag_pad, cropsize, paddings[idx])[:, :, :n_frame] * weight[idx]
 
-        y_spec, v_spec, m_spec = self._postprocess(mask, X_mag, X_phase, c)
+        y_spec, v_spec, m_spec = self._postprocess(mask, X_mag, X_phase)
 
         return y_spec, v_spec, m_spec
 
@@ -148,19 +145,14 @@ def main():
     args.cropsizes = [int(cropsize) for cropsize in args.cropsizes.split(',')]
 
     print('loading model...', end=' ')
-    device = torch.device('cpu')  
-    #model = FramePrimer2(channels=args.channels, feedforward_dim=args.feedforward_dim, n_fft=args.n_fft, dropout=0, num_res_blocks=args.num_res_blocks)
-    
-    #model = FrameTransformer(channels=args.channels, n_fft=args.n_fft, dropout=args.dropout, expansion=4)
+    device = torch.device('cpu')
+
     model = FrameTransformer(channels=args.channels, n_fft=args.n_fft, dropout=args.dropout, expansion=args.feedforward_expansion, num_heads=args.num_heads)
-    #corrector = nets.CascadedNet(args.n_fft, 32, 256)
     model.load_state_dict(torch.load(args.pretrained_model, map_location=device))
-    #corrector.load_state_dict(torch.load(args.pretrained_corrector, map_location=device))
 
     if torch.cuda.is_available() and args.gpu >= 0:
         device = torch.device('cuda:{}'.format(args.gpu))
         model.to(device)
-        #corrector.to(device)
     print('done')
 
     if str.endswith(args.input, '.json'):

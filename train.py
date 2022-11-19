@@ -49,7 +49,7 @@ def init_epoch(dataloader, model, device):
 
         break
 
-def train_epoch(dataloader, model, device, optimizer, accumulation_steps, progress_bar, mixup_rate, mixup_alpha, lr_warmup=None, grad_scaler=None, use_wandb=True, step=0):
+def train_epoch(dataloader, model, device, optimizer, accumulation_steps, progress_bar, lr_warmup=None, grad_scaler=None, use_wandb=True, step=0):
     model.train()
     sum_loss = 0
     crit = nn.L1Loss()
@@ -59,14 +59,14 @@ def train_epoch(dataloader, model, device, optimizer, accumulation_steps, progre
     model.zero_grad()
 
     pbar = tqdm(dataloader) if progress_bar else dataloader
-    for itr, (X_batch, y_batch) in enumerate(pbar):
-        X_batch = X_batch.to(device)[:, :, :model.max_bin]
-        y_batch = y_batch.to(device)[:, :, :model.max_bin]
+    for itr, (X, Y) in enumerate(pbar):
+        X = X.to(device)[:, :, :model.max_bin]
+        Y = Y.to(device)[:, :, :model.max_bin]
 
         with torch.cuda.amp.autocast_mode.autocast(enabled=grad_scaler is not None):
-            pred = torch.sigmoid(model(X_batch))
+            pred = torch.sigmoid(model(X))
 
-        l1_loss = crit(X_batch * pred, y_batch) / accumulation_steps
+        l1_loss = crit(X * pred, Y) / accumulation_steps
 
         batch_loss = batch_loss + l1_loss
         accum_loss = l1_loss
@@ -98,7 +98,7 @@ def train_epoch(dataloader, model, device, optimizer, accumulation_steps, progre
                 optimizer.step()
 
             step = step + 1
-
+            
             if lr_warmup is not None:
                 lr_warmup.step()
 
@@ -106,15 +106,6 @@ def train_epoch(dataloader, model, device, optimizer, accumulation_steps, progre
             batches = batches + 1
             sum_loss = sum_loss + batch_loss.item()
             batch_loss = 0
-
-        #sum_loss += accum_loss.item() * len(X_batch) * accumulation_steps
-
-    # # the rest batch
-    # if (itr + 1) % accumulation_steps != 0:
-    #     # grad_scaler.unscale_(optimizer)
-    #     # clip_grad_norm_(model.parameters(), 0.5)
-    #     optimizer.step()
-    #     model.zero_grad()
 
     return sum_loss / batches, step
 
@@ -124,19 +115,19 @@ def validate_epoch(dataloader, model, device):
     sum_loss = 0
 
     with torch.no_grad():
-        for X_batch, y_batch in dataloader:
-            X_batch = X_batch.to(device)[:, :, :model.max_bin]
-            y_batch = y_batch.to(device)[:, :, :model.max_bin]
+        for X, Y in dataloader:
+            X = X.to(device)[:, :, :model.max_bin]
+            Y = Y.to(device)[:, :, :model.max_bin]
 
-            pred = torch.sigmoid(model(X_batch))
+            pred = torch.sigmoid(model(X))
 
-            mag_loss = crit(X_batch * pred, y_batch)
+            mag_loss = crit(X * pred, Y)
 
             if torch.logical_or(mag_loss.isnan(), mag_loss.isinf()):
                 print('nan validation loss; aborting')
                 quit()
             else:
-                sum_loss += mag_loss.item() * len(X_batch)
+                sum_loss += mag_loss.item() * len(X)
 
     return sum_loss / len(dataloader.dataset)
 
@@ -148,39 +139,36 @@ def main():
     p.add_argument('--hop_length', '-H', type=int, default=1024)
     p.add_argument('--n_fft', '-f', type=int, default=2048)
     p.add_argument('--pretrained_model', '-P', type=str, default=None)
-    p.add_argument('--mixup_rate', '-M', type=float, default=0)
-    p.add_argument('--mixup_alpha', '-a', type=float, default=0.4)
-    p.add_argument('--vocal_mix_rate', type=float, default=0)
-    p.add_argument('--mixed_precision', type=str, default='false')
+    p.add_argument('--mixed_precision', type=str, default='true') # seems to encounter NaN loss after a few hours when using mixed precision.
 
     p.add_argument('--curr_epoch', type=int, default=0)
-    p.add_argument('--curr_step', type=int, default=0)
     p.add_argument('--warmup_steps', type=int, default=2)
-    p.add_argument('--curr_warmup_step', type=int, default=0)
+    p.add_argument('--decay_steps', type=int, default=500000)
+    p.add_argument('--curr_step', type=int, default=0)
+    p.add_argument('--lr_scheduler_decay_target', type=int, default=1e-12)
+    p.add_argument('--lr_scheduler_decay_power', type=float, default=0.1)
     p.add_argument('--lr_verbosity', type=int, default=1000)
-
-    p.add_argument('--channels', type=int, default=16)
-    p.add_argument('--num_heads', type=int, default=1)
-    p.add_argument('--feedforward_expansion', type=int, default=3)
+    
+    p.add_argument('--channels', type=int, default=8)
+    p.add_argument('--feedforward_expansion', type=int, default=5)
+    p.add_argument('--num_heads', type=int, default=8)
     p.add_argument('--dropout', type=float, default=0.1)
 
     p.add_argument('--cropsizes', type=str, default='256,512')
     p.add_argument('--steps', type=str, default='400000,500000')
-    p.add_argument('--epochs', type=str, default='30,40')
-    p.add_argument('--batch_sizes', type=str, default='2,1')
-    p.add_argument('--accumulation_steps', '-A', type=str, default='8,16')
-    p.add_argument('--force_voxaug', type=str, default='false')
+    p.add_argument('--epochs', type=str, default='58,60')
+    p.add_argument('--batch_sizes', type=str, default='3,1')
+    p.add_argument('--accumulation_steps', '-A', type=str, default='3,8')
+    p.add_argument('--force_voxaug', type=str, default='true')
 
     p.add_argument('--gpu', '-g', type=int, default=-1)
     p.add_argument('--optimizer', type=str.lower, choices=['adam', 'adamw', 'sgd', 'radam', 'rmsprop'], default='adam')
     p.add_argument('--amsgrad', type=str, default='false')
     p.add_argument('--weight_decay', type=float, default=0)
     p.add_argument('--num_workers', '-w', type=int, default=4)
-    p.add_argument('--epoch', '-E', type=int, default=1000)
+    p.add_argument('--epoch', '-E', type=int, default=40)
     p.add_argument('--epoch_size', type=int, default=None)
     p.add_argument('--learning_rate', '-l', type=float, default=1e-4)
-    p.add_argument('--lr_scheduler_decay_target', type=int, default=1e-12)
-    p.add_argument('--lr_scheduler_decay_power', type=float, default=1.0)
     p.add_argument('--progress_bar', '-pb', type=str, default='true')
     p.add_argument('--save_all', type=str, default='true')
     p.add_argument('--model_dir', type=str, default='J://')
@@ -225,25 +213,18 @@ def main():
             "D://cs2048_sr44100_hl1024_nf2048_of0",
             "F://cs2048_sr44100_hl1024_nf2048_of0",
             "H://cs2048_sr44100_hl1024_nf2048_of0",
-            "J://cs2048_sr44100_hl1024_nf2048_of0",
-            "K://cs2048_sr44100_hl1024_nf2048_of0",
         ],
         pair_path=[
             "F://cs2048_sr44100_hl1024_nf2048_of0_PAIRS",
-            "K://cs2048_sr44100_hl1024_nf2048_of0_PAIRS",
-            "J://cs2048_sr44100_hl1024_nf2048_of0_PAIRS",
+            "H://cs2048_sr44100_hl1024_nf2048_of0_PAIRS"
         ],
         vocal_path=[
-            "D://cs2048_sr44100_hl1024_nf2048_of0_VOCALS",
-            "F://cs2048_sr44100_hl1024_nf2048_of0_VOCALS",
-            "K://cs2048_sr44100_hl1024_nf2048_of0_VOCALS",
+            "D://cs2048_sr44100_hl1024_nf2048_of0_VOCALS"
         ],
         is_validation=False,
         epoch_size=args.epoch_size,
-        mixup_rate=args.mixup_rate,
-        mixup_alpha=args.mixup_alpha,
         force_voxaug=args.force_voxaug,
-        pair_mul=2
+        pair_mul=1
     )
     
     random.seed(args.seed)
@@ -251,7 +232,7 @@ def main():
     torch.manual_seed(args.seed)
 
     device = torch.device('cpu')
-    model = FrameTransformer(channels=args.channels, n_fft=args.n_fft, dropout=args.dropout, expansion=args.feedforward_expansion, num_heads=args.num_heads)
+    model = FrameTransformer(in_channels=2, channels=args.channels, expansion=args.feedforward_expansion, n_fft=args.n_fft, dropout=args.dropout, num_heads=args.num_heads)
 
     if args.pretrained_model is not None:
         model.load_state_dict(torch.load(args.pretrained_model, map_location=device))
@@ -295,12 +276,12 @@ def main():
         optimizer = torch.optim.RMSprop(groups, lr=args.learning_rate)
     
     steps = len(train_dataset) // (args.batch_sizes[0] * args.accumulation_steps[0])
-    warmup_steps = steps * args.warmup_steps
-    decay_steps = steps * args.epoch - warmup_steps
+    warmup_steps = args.warmup_steps
+    num_epochs = args.decay_steps // steps
 
     scheduler = torch.optim.lr_scheduler.ChainedScheduler([
-        LinearWarmupScheduler(optimizer, target_lr=args.learning_rate, num_steps=warmup_steps, current_step=args.curr_warmup_step, verbose_skip_steps=args.lr_verbosity),
-        PolynomialDecayScheduler(optimizer, target=args.lr_scheduler_decay_target, power=args.lr_scheduler_decay_power, num_decay_steps=decay_steps, start_step=warmup_steps, current_step=args.curr_warmup_step, verbose_skip_steps=args.lr_verbosity)
+        LinearWarmupScheduler(optimizer, target_lr=args.learning_rate, num_steps=warmup_steps, current_step=args.curr_step, verbose_skip_steps=args.lr_verbosity),
+        PolynomialDecayScheduler(optimizer, target=args.lr_scheduler_decay_target, power=args.lr_scheduler_decay_power, num_decay_steps=args.decay_steps, start_step=warmup_steps, current_step=args.curr_step, verbose_skip_steps=args.lr_verbosity)
     ])
 
     grad_scaler = torch.cuda.amp.grad_scaler.GradScaler() if args.mixed_precision else None
@@ -313,10 +294,10 @@ def main():
     curr_idx = 0
     step = args.curr_step
 
-    print(f'{args.epochs[-1]} epochs')
+    print(f'{num_epochs} epochs')
 
     best_loss = np.inf
-    for epoch in range(args.curr_epoch, args.epoch):
+    for epoch in range(args.curr_epoch, num_epochs):
         train_dataset.rebuild()
 
         if epoch > args.epochs[curr_idx] or val_dataset is None:
@@ -352,10 +333,25 @@ def main():
                 num_workers=args.num_workers
             )
 
+            val_dataset2 = VoxAugDataset(
+                path=[f"C://cs{cropsize}_sr44100_hl1024_nf2048_of0_VALIDATION"],
+                vocal_path=None,
+                is_validation=True,
+                clip_validation=True
+            )
+
+            val_dataloader2 = torch.utils.data.DataLoader(
+                dataset=val_dataset2,
+                batch_size=1,
+                shuffle=False,
+                num_workers=args.num_workers
+            )
+
         print('# epoch {}'.format(epoch))
 
-        train_loss, step = train_epoch(train_dataloader, model, device, optimizer, accum_steps, args.progress_bar, args.mixup_rate, args.mixup_alpha, lr_warmup=scheduler, grad_scaler=grad_scaler, use_wandb=args.wandb, step=step)
+        train_loss, step = train_epoch(train_dataloader, model, device, optimizer, accum_steps, args.progress_bar, lr_warmup=scheduler, grad_scaler=grad_scaler, use_wandb=args.wandb, step=step)
         val_loss = validate_epoch(val_dataloader, model, device)
+        val_loss2 = validate_epoch(val_dataloader2, model, device)
 
         if args.wandb:
             wandb.log({
@@ -364,12 +360,12 @@ def main():
             })
 
         print(
-            '  * training loss = {:.6f}, validation loss = {:.6f}'
-            .format(train_loss, val_loss)
+            '  * training loss = {:.6f}, validation loss = {:.6f}, validation loss (clipped) = {:.6f}'
+            .format(train_loss, val_loss, val_loss2)
         )
 
-        if (val_loss) < best_loss:
-            best_loss = val_loss
+        if (val_loss2) < best_loss:
+            best_loss = val_loss2
             print('  * best validation loss')
 
         model_path = f'{args.model_dir}models/{wandb.run.name if args.wandb else "local"}.{epoch}.remover.pth'
