@@ -5,7 +5,7 @@ import torch.nn.functional as F
 from rotary_embedding_torch import RotaryEmbedding
 
 class FrameTransformer(nn.Module):
-    def __init__(self, in_channels=2, channels=2, dropout=0.1, n_fft=2048, num_heads=4, expansion=4, num_layers=5):
+    def __init__(self, in_channels=2, out_channels=2, channels=2, dropout=0.1, n_fft=2048, num_heads=4, expansion=4, num_layers=5):
         super(FrameTransformer, self).__init__()
         
         self.max_bin = n_fft // 2
@@ -45,9 +45,9 @@ class FrameTransformer(nn.Module):
         self.dec1 = FrameDecoder(channels * 5, channels * 1, self.max_bin)
 
         self.dec1_transformer = FrameTransformerEncoder(channels * 1, self.max_bin, dropout=dropout, expansion=expansion, num_heads=num_heads)
-        self.out = nn.Parameter(torch.empty(in_channels, channels*2))
+        self.out = nn.Parameter(torch.empty(out_channels, channels*2))
 
-        nn.init.uniform_(self.out, a=-1/math.sqrt(in_channels), b=1/math.sqrt(in_channels))
+        nn.init.uniform_(self.out, a=-1/math.sqrt(channels*2), b=1/math.sqrt(channels*2))
 
     def __call__(self, x):
         e0 = self.enc0_transformer(x)
@@ -123,7 +123,7 @@ class FrameDecoder(nn.Module):
         x = self.body(x)
 
         return x
-        
+
 class MultichannelLinear(nn.Module):
     def __init__(self, in_channels, out_channels, in_features, out_features, positionwise=True, depthwise=False, bias=False):
         super(MultichannelLinear, self).__init__()
@@ -170,20 +170,10 @@ class MultichannelMultiheadAttention(nn.Module):
         super().__init__()
 
         self.num_heads = num_heads
-        self.rotary_embedding = RotaryEmbedding(dim = features // num_heads)
-        
-        self.q_proj = nn.Sequential(
-            nn.Conv2d(channels, channels, kernel_size=(1,kernel_size), padding=(0,padding), groups=channels),
-            MultichannelLinear(channels, channels, features, features))
-
-        self.k_proj = nn.Sequential(
-            nn.Conv2d(channels, channels, kernel_size=(1,kernel_size), padding=(0,padding), groups=channels),
-            MultichannelLinear(channels, channels, features, features))
-            
-        self.v_proj =  nn.Sequential(
-            nn.Conv2d(channels, channels, kernel_size=(1,kernel_size), padding=(0,padding), groups=channels),
-            MultichannelLinear(channels, channels, features, features))
-
+        self.rotary_embedding = RotaryEmbedding(dim = features // num_heads)        
+        self.q_proj = MultichannelLinear(channels, channels, features, features)
+        self.k_proj = MultichannelLinear(channels, channels, features, features)            
+        self.v_proj =  MultichannelLinear(channels, channels, features, features)
         self.out_proj = MultichannelLinear(channels, channels, features, features)
 
     def __call__(self, x, mem=None):
