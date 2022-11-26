@@ -170,7 +170,7 @@ def main():
     p.add_argument('--curr_step', type=int, default=None)
     p.add_argument('--curr_epoch', type=int, default=None)
     p.add_argument('--warmup_steps', type=int, default=2)
-    p.add_argument('--decay_steps', type=int, default=750000)
+    p.add_argument('--decay_steps', type=int, default=1000000)
     p.add_argument('--lr_scheduler_decay_target', type=int, default=1e-12)
     p.add_argument('--lr_scheduler_decay_power', type=float, default=0.1)
     p.add_argument('--lr_verbosity', type=int, default=1000)
@@ -254,7 +254,7 @@ def main():
 
     device = torch.device('cpu')
     model = FrameTransformer(in_channels=4 if args.include_phase else 2, out_channels=4 if args.include_phase else 2, channels=args.channels, expansion=args.feedforward_expansion, n_fft=args.n_fft // 2, dropout=args.dropout, num_heads=args.num_heads)
-
+    
     groups = [
         { "params": filter(lambda p: p.requires_grad, model.parameters()), "lr": args.learning_rate }
     ]
@@ -298,23 +298,17 @@ def main():
     curr_idx = 0
     step = 0
     curr_epoch = 0
-
-    checkpoint = None
-    if args.checkpoint is not None:
-        checkpoint = torch.load(args.checkpoint)
-
-    if checkpoint is not None:
-        model.load_state_dict(checkpoint['model'])
-        optimizer.load_state_dict(checkpoint['optimizer'])
-        curr_epoch = checkpoint['epoch'] + 1 if args.curr_epoch is None else args.curr_epoch
-        step = checkpoint['step'] if args.curr_step is None else args.curr_step
-
-        if args.mixed_precision:
-            grad_scaler.load_state_dict(checkpoint['grad_scaler'])
-    
     if torch.cuda.is_available() and args.gpu >= 0:
         device = torch.device('cuda:{}'.format(args.gpu))
         model.to(device)
+
+    checkpoint = None
+    if args.checkpoint is not None:
+        model.load_state_dict(torch.load(f'{args.checkpoint}.model.pth', map_location=device))
+        # optimizer.load_state_dict(torch.load(f'{args.checkpoint}.opt.pth')) # unfortunately PyTorch has a bug that causes memory to increase drastically if you try to load optimizer from checkpoint. Pretty shocked they'd leave such a glaring bug for so long...
+
+        if grad_scaler is not None:
+            grad_scaler.load_state_dict(torch.load(f'{args.checkpoint}.scaler.pth', map_location=device))
     
     steps = len(train_dataset) // (args.batch_sizes[0] * args.accumulation_steps[0])
     warmup_steps = args.warmup_steps
@@ -398,17 +392,13 @@ def main():
             best_loss = val_loss_mag2
             print('  * best validation loss')
 
-        model_path = f'{args.model_dir}models/{wandb.run.name if args.wandb else "local"}.{epoch}.remover.pth'
+        model_path = f'{args.model_dir}models/{wandb.run.name if args.wandb else "local"}.{epoch}'
 
-        torch.save({
-            "model": model.state_dict(),
-            "optimizer": optimizer.state_dict(),
-            "grad_scaler": grad_scaler.state_dict() if grad_scaler is not None else grad_scaler,
-            "epoch": epoch,
-            "step": step
-        }, model_path)
+        torch.save(model.state_dict(), f'{model_path}.model.pth')
+        
+        if grad_scaler is not None:
+            torch.save(grad_scaler.state_dict(), f'{model_path}.scaler.pth')
 
-        quit()
 
 if __name__ == '__main__':
     main()
