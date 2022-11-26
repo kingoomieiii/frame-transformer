@@ -167,8 +167,8 @@ def main():
     p.add_argument('--checkpoint', type=str, default=None)
     p.add_argument('--mixed_precision', type=str, default='true') # seems to encounter NaN loss after a few hours when using mixed precision.
 
-    p.add_argument('--curr_step', type=int, default=None)
-    p.add_argument('--curr_epoch', type=int, default=None)
+    p.add_argument('--curr_step', type=int, default=0)
+    p.add_argument('--curr_epoch', type=int, default=0)
     p.add_argument('--warmup_steps', type=int, default=2)
     p.add_argument('--decay_steps', type=int, default=1000000)
     p.add_argument('--lr_scheduler_decay_target', type=int, default=1e-12)
@@ -296,8 +296,8 @@ def main():
     val_dataset = None
     grad_scaler = torch.cuda.amp.grad_scaler.GradScaler() if args.mixed_precision else None
     curr_idx = 0
-    step = 0
-    curr_epoch = 0
+    step = args.curr_step
+    curr_epoch = args.curr_epoch
     if torch.cuda.is_available() and args.gpu >= 0:
         device = torch.device('cuda:{}'.format(args.gpu))
         model.to(device)
