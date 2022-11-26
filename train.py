@@ -70,14 +70,12 @@ def train_epoch(dataloader, model, device, optimizer, accumulation_steps, progre
     for itr, (X, Y) in enumerate(pbar):
         X = X.to(device)[:, :, :model.max_bin*2]
         Y = Y.to(device)[:, :, :model.max_bin*2]
-        
-        X2 = F.interpolate(X, scale_factor=(0.5,1), mode='nearest')
 
         with torch.cuda.amp.autocast_mode.autocast(enabled=grad_scaler is not None):
+            X2 = F.interpolate(X, scale_factor=(0.5,1), mode='nearest')
             pred = torch.sigmoid(model(X2))
+            pred = F.interpolate(pred, scale_factor=(2,1), mode='bicubic', align_corners=True)
             
-        pred = F.interpolate(pred, scale_factor=(2,1), mode='bicubic', align_corners=True)
-
         l1_mag = crit(X[:, :2] * pred[:, :2], Y[:, :2]) / accumulation_steps
         l1_phase = crit(pred[:, 2:], Y[:, 2:]) / accumulation_steps if include_phase else torch.zeros_like(l1_mag)
 
@@ -139,10 +137,10 @@ def validate_epoch(dataloader, model, device, include_phase=False):
 
     with torch.no_grad():
         for X, Y in dataloader:
-            X = X.to(device)[:, :, :model.max_bin]
-            Y = Y.to(device)[:, :, :model.max_bin]
+            X = X.to(device)[:, :, :model.max_bin*2]
+            Y = Y.to(device)[:, :, :model.max_bin*2]
 
-            X2 = F.interpolate(X, scale_factor=(0.5,1), mode='nearest', align_corners=True)
+            X2 = F.interpolate(X, scale_factor=(0.5,1), mode='nearest')
             pred = torch.sigmoid(model(X2))
             pred = F.interpolate(pred, scale_factor=(2,1), mode='bicubic', align_corners=True)
 
@@ -166,13 +164,13 @@ def main():
     p.add_argument('--sr', '-r', type=int, default=44100)
     p.add_argument('--hop_length', '-H', type=int, default=1024)
     p.add_argument('--n_fft', '-f', type=int, default=2048)
-    p.add_argument('--pretrained_model', '-P', type=str, default=None)
+    p.add_argument('--checkpoint', type=str, default=None)
     p.add_argument('--mixed_precision', type=str, default='true') # seems to encounter NaN loss after a few hours when using mixed precision.
 
-    p.add_argument('--curr_epoch', type=int, default=0)
+    p.add_argument('--curr_step', type=int, default=None)
+    p.add_argument('--curr_epoch', type=int, default=None)
     p.add_argument('--warmup_steps', type=int, default=2)
     p.add_argument('--decay_steps', type=int, default=750000)
-    p.add_argument('--curr_step', type=int, default=0)
     p.add_argument('--lr_scheduler_decay_target', type=int, default=1e-12)
     p.add_argument('--lr_scheduler_decay_power', type=float, default=0.1)
     p.add_argument('--lr_verbosity', type=int, default=1000)
@@ -184,7 +182,7 @@ def main():
     p.add_argument('--dropout', type=float, default=0.1)
 
     p.add_argument('--cropsizes', type=str, default='256')
-    p.add_argument('--steps', type=str, default='400000')
+    p.add_argument('--steps', type=str, default='1000000')
     p.add_argument('--epochs', type=str, default='58')
     p.add_argument('--batch_sizes', type=str, default='4')
     p.add_argument('--accumulation_steps', '-A', type=str, default='2')
@@ -257,9 +255,6 @@ def main():
     device = torch.device('cpu')
     model = FrameTransformer(in_channels=4 if args.include_phase else 2, out_channels=4 if args.include_phase else 2, channels=args.channels, expansion=args.feedforward_expansion, n_fft=args.n_fft // 2, dropout=args.dropout, num_heads=args.num_heads)
 
-    if args.pretrained_model is not None:
-        model.load_state_dict(torch.load(args.pretrained_model, map_location=device))
-
     groups = [
         { "params": filter(lambda p: p.requires_grad, model.parameters()), "lr": args.learning_rate }
     ]
@@ -297,30 +292,42 @@ def main():
         )
     elif args.optimizer == 'rmsprop':
         optimizer = torch.optim.RMSprop(groups, lr=args.learning_rate)
+
+    val_dataset = None
+    grad_scaler = torch.cuda.amp.grad_scaler.GradScaler() if args.mixed_precision else None
+    curr_idx = 0
+    step = 0
+    curr_epoch = 0
+
+    checkpoint = None
+    if args.checkpoint is not None:
+        checkpoint = torch.load(args.checkpoint)
+
+    if checkpoint is not None:
+        model.load_state_dict(checkpoint['model'])
+        optimizer.load_state_dict(checkpoint['optimizer'])
+        curr_epoch = checkpoint['epoch'] + 1 if args.curr_epoch is None else args.curr_epoch
+        step = checkpoint['step'] if args.curr_step is None else args.curr_step
+
+        if args.mixed_precision:
+            grad_scaler.load_state_dict(checkpoint['grad_scaler'])
+    
+    if torch.cuda.is_available() and args.gpu >= 0:
+        device = torch.device('cuda:{}'.format(args.gpu))
+        model.to(device)
     
     steps = len(train_dataset) // (args.batch_sizes[0] * args.accumulation_steps[0])
     warmup_steps = args.warmup_steps
     num_epochs = args.decay_steps // steps
 
     scheduler = torch.optim.lr_scheduler.ChainedScheduler([
-        LinearWarmupScheduler(optimizer, target_lr=args.learning_rate, num_steps=warmup_steps, current_step=args.curr_step, verbose_skip_steps=args.lr_verbosity),
-        PolynomialDecayScheduler(optimizer, target=args.lr_scheduler_decay_target, power=args.lr_scheduler_decay_power, num_decay_steps=args.decay_steps, start_step=warmup_steps, current_step=args.curr_step, verbose_skip_steps=args.lr_verbosity)
+        LinearWarmupScheduler(optimizer, target_lr=args.learning_rate, num_steps=warmup_steps, current_step=step, verbose_skip_steps=args.lr_verbosity),
+        PolynomialDecayScheduler(optimizer, target=args.lr_scheduler_decay_target, power=args.lr_scheduler_decay_power, num_decay_steps=args.decay_steps, start_step=warmup_steps, current_step=step, verbose_skip_steps=args.lr_verbosity)
     ])
 
-    grad_scaler = torch.cuda.amp.grad_scaler.GradScaler() if args.mixed_precision else None
-    
-    if torch.cuda.is_available() and args.gpu >= 0:
-        device = torch.device('cuda:{}'.format(args.gpu))
-        model.to(device)
-
-    val_dataset = None
-    curr_idx = 0
-    step = args.curr_step
-
-    print(f'{num_epochs} epochs')
-
+    print(f'# {num_epochs} epochs')
     best_loss = np.inf
-    for epoch in range(args.curr_epoch, num_epochs):
+    for epoch in range(curr_epoch, num_epochs):
         if epoch > args.epochs[curr_idx] or val_dataset is None:
             for i,e in enumerate(args.epochs):
                 if epoch > e:
@@ -392,7 +399,16 @@ def main():
             print('  * best validation loss')
 
         model_path = f'{args.model_dir}models/{wandb.run.name if args.wandb else "local"}.{epoch}.remover.pth'
-        torch.save(model.state_dict(), model_path)
+
+        torch.save({
+            "model": model.state_dict(),
+            "optimizer": optimizer.state_dict(),
+            "grad_scaler": grad_scaler.state_dict() if grad_scaler is not None else grad_scaler,
+            "epoch": epoch,
+            "step": step
+        }, model_path)
+
+        quit()
 
 if __name__ == '__main__':
     main()
