@@ -29,16 +29,26 @@ class MultichannelLinear(nn.Module):
                 nn.init.uniform_(self.bias_pw, -bound, bound)
 
     def __call__(self, x):
+        h = x
+
+        if len(x.shape) == 2:
+            h = x.unsqueeze(-1).unsqueeze(1)
+        elif len(x.shape) == 3:
+            h = x.unsqueeze(-1)
+
         if self.weight_pw is not None:
-            x = torch.matmul(x.transpose(2,3), self.weight_pw.transpose(1,2)).transpose(2,3)
+            h = torch.matmul(h.transpose(2,3), self.weight_pw.transpose(1,2)).transpose(2,3)
 
             if self.bias_pw is not None:
-                x = x + self.bias_pw
+                h = h + self.bias_pw
 
         if self.weight_dw is not None:
-            x = torch.matmul(x.transpose(1,3), self.weight_dw.t()).transpose(1,3)
+            h = torch.matmul(h.transpose(1,3), self.weight_dw.t()).transpose(1,3)
 
             if self.bias_dw is not None:
-                x = x + self.bias_dw
+                h = h + self.bias_dw
+
+        if len(x.shape) == 3:
+            h = h.squeeze(-1)
         
-        return x
+        return h
