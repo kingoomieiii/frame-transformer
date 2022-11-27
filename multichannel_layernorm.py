@@ -8,16 +8,17 @@ class FrameNorm(nn.Module):
         self.norm = nn.LayerNorm(features)
 
     def __call__(self, x):
+        d = len(x.shape)
         h = x
 
-        if len(x.shape) == 2:
+        if d == 2:
             h = h.unsqueeze(-1).unsqueeze(1)
-        elif len(x.shape) == 3:
+        elif d == 3:
             h = h.unsqueeze(-1)
 
         h = self.norm(h.transpose(2,3)).transpose(2,3)
 
-        if len(x.shape) == 3:
+        if d == 2 or d == 3:
             h = h.squeeze(-1)
 
         return h
@@ -33,14 +34,15 @@ class MultichannelLayerNorm(nn.Module):
         nn.init.zeros_(self.bias)
 
     def __call__(self, x):
+        d = len(x.shape)
         h = x
 
-        if len(x.shape) == 3:
+        if d == 3:
             h = h.unsqueeze(-1)
 
         h = (torch.layer_norm(h.transpose(2,3), (self.weight.shape[-1],), eps=self.eps) * self.weight + self.bias).transpose(2,3)
 
-        if len(x.shape) == 3:
+        if d == 2 or d == 3:
             h = h.squeeze(-1)
 
         return h

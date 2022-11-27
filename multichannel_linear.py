@@ -29,11 +29,12 @@ class MultichannelLinear(nn.Module):
                 nn.init.uniform_(self.bias_pw, -bound, bound)
 
     def __call__(self, x):
+        d = len(x.shape)
         h = x
 
-        if len(x.shape) == 2:
+        if d == 2:
             h = x.unsqueeze(-1).unsqueeze(1)
-        elif len(x.shape) == 3:
+        elif d == 3:
             h = x.unsqueeze(-1)
 
         if self.weight_pw is not None:
@@ -48,7 +49,7 @@ class MultichannelLinear(nn.Module):
             if self.bias_dw is not None:
                 h = h + self.bias_dw
 
-        if len(x.shape) == 3:
+        if d == 2 or d == 3:
             h = h.squeeze(-1)
         
         return h
