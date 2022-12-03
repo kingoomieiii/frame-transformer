@@ -191,9 +191,11 @@ class FrameTransformerDecoder(nn.Module):
         z = self.attn1(self.norm1(h))
         h = h + self.dropout(z)
 
+        # TODO: update norm1 to norm2 and retrain
         z = self.attn2(self.norm1(h), mem=skip)
         h = h + self.dropout(z)
 
+        # TODO: update norm2 to norm3 and retrain
         z = self.conv2(self.activate(self.conv1(self.norm2(h))))
         h = h + self.dropout(z)
 
