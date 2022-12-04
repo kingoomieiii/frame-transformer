@@ -7,7 +7,7 @@ import torch
 import torch.utils.data
 
 class VoxAugDataset(torch.utils.data.Dataset):
-    def __init__(self, path=[], vocal_path=[], is_validation=False, cropsize=256, seed=0, chunks=1):
+    def __init__(self, path=[], vocal_path=[], is_validation=False, cropsize=256, seed=0, chunks=2):
         self.is_validation = is_validation
         self.cropsize = cropsize
         self.vocal_list = []
@@ -38,7 +38,7 @@ class VoxAugDataset(torch.utils.data.Dataset):
     def __len__(self):
         return len(self.curr_list)
 
-    def _get_vocals(self, idx, chunks=1):
+    def _get_vocals(self, idx, chunks):
         path = str(self.vocal_list[(self.epoch + idx) % len(self.vocal_list)])
         vdata = np.load(path)
         V = vdata['X']
@@ -51,19 +51,17 @@ class VoxAugDataset(torch.utils.data.Dataset):
         i, j = 1, 1
         curr_chunks = 1
         while curr_chunks < chunks:
-            ci = chunk + i
-            cj = chunk - j
-            ir = f'{root}_p{ci}.npz'
-            jr = f'{root}_p{cj}.npz'
-            ie = os.path.exists(ir)
-            je = os.path.exists(jr)
+            ci, cj = chunk + i, chunk - j
+            ir, jr = f'{root}_p{ci}.npz', f'{root}_p{cj}.npz'
+            ie, je = os.path.exists(ir), os.path.exists(jr)
 
             if not ie and not je:
                 Vj = np.zeros_like(V)
                 V = np.concatenate((V, Vj), 2)
                 curr_chunks += 1
+                print('zero')
 
-            if ie:
+            if ie and np.random.uniform() < 0.5:
                 i += 1
                 curr_chunks += 1
                 di = np.load(str(ir))
@@ -77,8 +75,13 @@ class VoxAugDataset(torch.utils.data.Dataset):
                 Vj = dj['Y'] if 'Y' in dj.files else dj['X']
                 V = np.concatenate((Vj, V), 2)
 
+        if V.shape[2] > self.cropsize:
+            start = np.random.randint(0, V.shape[2] - self.cropsize + 1)
+            stop = start + self.cropsize
+            V = V[:,:,start:stop]
+
         if np.random.uniform() < 0.5:
-            V = V * (np.random.uniform(0.75, 1.25))
+            V = V * (np.random.uniform(0.5, 1.5))
 
         if np.random.uniform() < 0.5:
             V = V[::-1]
@@ -98,42 +101,45 @@ class VoxAugDataset(torch.utils.data.Dataset):
 
         X, c = data['X'], data['c']
         Y = X if aug else data['Y']
-
-        p2 = path[::-1]
-        idx = p2.index('p_')
-        chunk = int(path[-idx:-4])
-        root = path[:-(idx+1)-1]
-
-        i, j = 1, 1
-        curr_chunks = 1
-        while curr_chunks < self.chunks:
-            ci = chunk + i
-            cj = chunk - j
-            ir = f'{root}_p{ci}.npz'
-            jr = f'{root}_p{cj}.npz'
-            ie = os.path.exists(ir)
-            je = os.path.exists(jr)
-
-            if not ie and not je:
-                Yj = np.zeros_like(Y)
-                Y = np.concatenate((Y, Yj), 2)
-                curr_chunks += 1
-
-            if ie:
-                i += 1
-                curr_chunks += 1
-                di = np.load(str(ir))
-                Yi = di['Y'] if 'Y' in di.files else di['X']
-                Y = np.concatenate((Y, Yi), 2)
-
-            if je and curr_chunks < self.chunks:
-                j += 1
-                curr_chunks += 1
-                dj = np.load(str(jr))
-                Yj = dj['Y'] if 'Y' in dj.files else dj['X']
-                Y = np.concatenate((Yj, Y), 2)
-
+        
         if not self.is_validation:
+            p2 = path[::-1]
+            idx = p2.index('p_')
+            chunk = int(path[-idx:-4])
+            root = path[:-(idx+1)-1]
+
+            i, j = 1, 1
+            curr_chunks = 1
+            while curr_chunks < self.chunks:
+                ci, cj = chunk + i, chunk - j
+                ir, jr = f'{root}_p{ci}.npz', f'{root}_p{cj}.npz'
+                ie, je = os.path.exists(ir), os.path.exists(jr)
+
+                if not ie and not je:
+                    Yj = np.zeros_like(Y)
+                    Y = np.concatenate((Y, Yj), 2)
+                    curr_chunks += 1
+                    print('zero')
+
+                if ie and np.random.uniform() < 0.5:
+                    i += 1
+                    curr_chunks += 1
+                    di = np.load(str(ir))
+                    Yi = di['Y'] if 'Y' in di.files else di['X']
+                    Y = np.concatenate((Y, Yi), 2)
+
+                if je and curr_chunks < self.chunks:
+                    j += 1
+                    curr_chunks += 1
+                    dj = np.load(str(jr))
+                    Yj = dj['Y'] if 'Y' in dj.files else dj['X']
+                    Y = np.concatenate((Yj, Y), 2)
+
+            if Y.shape[2] > self.cropsize:
+                start = np.random.randint(0, Y.shape[2] - self.cropsize + 1)
+                stop = start + self.cropsize
+                Y = Y[:,:,start:stop]
+
             V = self._get_vocals(idx, curr_chunks)
             X = Y + V
 
