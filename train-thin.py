@@ -12,7 +12,7 @@ import wandb
 from tqdm import tqdm
 
 from dataset_voxaug2 import VoxAugDataset
-from frame_transformer import FrameTransformer
+from frame_transformer_thin import FrameTransformer
 from torch.nn import functional as F
 
 from lib.lr_scheduler_linear_warmup import LinearWarmupScheduler
