@@ -14,7 +14,7 @@ import os
 from tqdm import tqdm
 
 from dataset_voxaug2 import VoxAugDataset
-from frame_transformer import FrameTransformer
+from frame_transformer_v2 import FrameTransformer
 from torch.nn import functional as F
 
 from lib.lr_scheduler_linear_warmup import LinearWarmupScheduler
@@ -99,7 +99,7 @@ def train_epoch(dataloader, model, device, optimizer, accumulation_steps, progre
 
             if use_wandb:
                 wandb.log({
-                    'loss': batch_loss.item()
+                    'loss': batch_mag_loss.item()
                 })
 
             if grad_scaler is not None:
@@ -165,15 +165,15 @@ def main():
     p.add_argument('--checkpoint', type=str, default=None)
     p.add_argument('--mixed_precision', type=str, default='true')
 
-    p.add_argument('--model_dir', type=str, default='/media/ben/internal-nvme-b')
-    p.add_argument('--instrumental_lib', type=str, default="/home/ben/cs2048_sr44100_hl1024_nf2048_of0|/media/ben/internal-nvme-b/cs2048_sr44100_hl1024_nf2048_of0")
-    p.add_argument('--vocal_lib', type=str, default="/home/ben/cs2048_sr44100_hl1024_nf2048_of0_VOCALS|/media/ben/internal-nvme-b/cs2048_sr44100_hl1024_nf2048_of0_VOCALS")
-    p.add_argument('--validation_lib', type=str, default="/media/ben/internal-nvme-b/cs2048_sr44100_hl1024_nf2048_of0_VALIDATION")
+    # p.add_argument('--model_dir', type=str, default='/media/ben/internal-nvme-b')
+    # p.add_argument('--instrumental_lib', type=str, default="/home/ben/cs2048_sr44100_hl1024_nf2048_of0|/media/ben/internal-nvme-b/cs2048_sr44100_hl1024_nf2048_of0")
+    # p.add_argument('--vocal_lib', type=str, default="/home/ben/cs2048_sr44100_hl1024_nf2048_of0_VOCALS|/media/ben/internal-nvme-b/cs2048_sr44100_hl1024_nf2048_of0_VOCALS")
+    # p.add_argument('--validation_lib', type=str, default="/media/ben/internal-nvme-b/cs2048_sr44100_hl1024_nf2048_of0_VALIDATION")
     
-    # p.add_argument('--model_dir', type=str, default='H://')
-    # p.add_argument('--instrumental_lib', type=str, default="C://cs2048_sr44100_hl1024_nf2048_of0|D://cs2048_sr44100_hl1024_nf2048_of0|F://cs2048_sr44100_hl1024_nf2048_of0|H://cs2048_sr44100_hl1024_nf2048_of0")
-    # p.add_argument('--vocal_lib', type=str, default="C://cs2048_sr44100_hl1024_nf2048_of0_VOCALS|D://cs2048_sr44100_hl1024_nf2048_of0_VOCALS")
-    # p.add_argument('--validation_lib', type=str, default="C://cs2048_sr44100_hl1024_nf2048_of0_VALIDATION")
+    p.add_argument('--model_dir', type=str, default='H://')
+    p.add_argument('--instrumental_lib', type=str, default="C://cs2048_sr44100_hl1024_nf2048_of0|D://cs2048_sr44100_hl1024_nf2048_of0|F://cs2048_sr44100_hl1024_nf2048_of0|H://cs2048_sr44100_hl1024_nf2048_of0")
+    p.add_argument('--vocal_lib', type=str, default="C://cs2048_sr44100_hl1024_nf2048_of0_VOCALS|D://cs2048_sr44100_hl1024_nf2048_of0_VOCALS")
+    p.add_argument('--validation_lib', type=str, default="C://cs2048_sr44100_hl1024_nf2048_of0_VALIDATION")
 
     p.add_argument('--curr_step', type=int, default=0)
     p.add_argument('--curr_epoch', type=int, default=0)
@@ -184,10 +184,10 @@ def main():
     p.add_argument('--lr_verbosity', type=int, default=1000)
     
     p.add_argument('--include_phase', type=str, default='false')
-    p.add_argument('--num_bridge_layers', type=int, default=39)
+    p.add_argument('--num_bridge_layers', type=int, default=8)
     p.add_argument('--channels', type=int, default=8)
-    p.add_argument('--feedforward_expansion', type=int, default=24)
-    p.add_argument('--num_heads', type=int, default=8)
+    p.add_argument('--feedforward_expansion', type=int, default=8)
+    p.add_argument('--num_heads', type=int, default=16)
     p.add_argument('--dropout', type=float, default=0.1)
     
     p.add_argument('--stages', type=str, default='500000,800000,1008000')
@@ -329,10 +329,8 @@ def main():
 
         if args.wandb:
             wandb.log({
-                'train_loss_mag': train_loss_mag,
-                'train_loss_phase': train_loss_phase,
-                'val_loss_mag': val_loss_mag,
-                'val_loss_phase': val_loss_phase
+                'train_loss': train_loss_mag,
+                'val_loss': val_loss_mag,
             })
 
         print(
