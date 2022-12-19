@@ -4,7 +4,7 @@ from torch import nn
 import torch.nn.functional as F
 
 from rotary_embedding_torch import RotaryEmbedding
-from multichannel_layernorm import MultichannelLayerNorm, FrameNorm
+from multichannel_layernorm import MultichannelLayerNorm
 from multichannel_linear import MultichannelLinear
 
 class FrameTransformer(nn.Module):
@@ -13,19 +13,15 @@ class FrameTransformer(nn.Module):
         
         self.max_bin = n_fft // 2
         self.output_bin = n_fft // 2 + 1
-
         self.enc1 = FrameEncoder(in_channels, channels, self.max_bin, downsample=False)
-        self.transformer_encoder = nn.ModuleList([FrameTransformerEncoder(channels, self.max_bin, dropout=dropout, expansion=expansion, num_heads=num_heads) for _ in range(num_layers)])
+        self.transformer = nn.Sequential(*[FrameTransformerEncoder(channels, self.max_bin, dropout=dropout, expansion=expansion, num_heads=num_heads) for _ in range(num_layers)])
         self.out = nn.Parameter(torch.empty(out_channels, channels))
         nn.init.uniform_(self.out, a=-1/math.sqrt(channels), b=1/math.sqrt(channels))
 
     def __call__(self, x):
         e1 = self.enc1(x)
-
-        for encoder in self.transformer_encoder:
-            e1 = encoder(e1)
-
-        out = torch.matmul(e1.transpose(1,3), self.out.t()).transpose(1,3)
+        h = self.transformer(e1)
+        out = torch.matmul(h.transpose(1,3), self.out.t()).transpose(1,3)
 
         return out
 
@@ -107,8 +103,8 @@ class FrameTransformerEncoder(nn.Module):
         self.attn = MultichannelMultiheadAttention(channels, num_heads, features)
 
         self.norm2 = MultichannelLayerNorm(channels, features)
-        self.conv1 = nn.Conv2d(channels, channels * expansion, kernel_size=3, padding=1, bias=False) # MultichannelLinear(channels, channels, features, features * expansion, depthwise=True)
-        self.conv2 = nn.Conv2d(channels * expansion, channels, kernel_size=3, padding=1, bias=False) # MultichannelLinear(channels, channels, features * expansion, features, depthwise=True)
+        self.conv1 = nn.Conv2d(channels, channels * expansion, kernel_size=3, padding=1, bias=False)
+        self.conv2 = nn.Conv2d(channels * expansion, channels, kernel_size=3, padding=1, bias=False)
         
     def __call__(self, x):       
         z = self.attn(self.norm1(x))
