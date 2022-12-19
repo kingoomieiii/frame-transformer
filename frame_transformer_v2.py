@@ -107,8 +107,8 @@ class FrameTransformerEncoder(nn.Module):
         self.attn = MultichannelMultiheadAttention(channels, num_heads, features)
 
         self.norm2 = MultichannelLayerNorm(channels, features)
-        self.conv1 = MultichannelLinear(channels, channels, features, features * expansion, depthwise=True)
-        self.conv2 = MultichannelLinear(channels, channels, features * expansion, features, depthwise=True)
+        self.conv1 = nn.Conv2d(channels, channels * expansion, kernel_size=3, padding=1, bias=False) # MultichannelLinear(channels, channels, features, features * expansion, depthwise=True)
+        self.conv2 = nn.Conv2d(channels * expansion, channels, kernel_size=3, padding=1, bias=False) # MultichannelLinear(channels, channels, features * expansion, features, depthwise=True)
         
     def __call__(self, x):       
         z = self.attn(self.norm1(x))
