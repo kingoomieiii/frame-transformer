@@ -100,7 +100,22 @@ class Separator(object):
 
         return y_spec, v_spec, m_spec
 
-    def separate_tta(self, X_spec, cropsize=128, paddings=[64, 256, 512, 1024], weight=[0.25, 0.25, 0.25, 0.25]):
+    def process(self, X_spec, Y_mag, padding=None, include_phase=False):
+        X_mag, X_phase = self._preprocess(X_spec)
+
+        n_frame = X_mag.shape[2]
+        pad_l, pad_r, _ = dataset.make_padding(n_frame, self.cropsize, 0)
+        X_mag_pad = np.pad(X_mag, ((0, 0), (0, 0), (pad_l, pad_r)), mode='constant')
+        c = X_mag_pad.max()
+        
+        mask = self._separate(X_mag_pad, self.cropsize, padding)
+
+        mask = mask[:, :, :n_frame]
+        y_spec, v_spec, m_spec = self._postprocess(mask, Y_mag * c, X_phase, include_phase)
+
+        return y_spec, v_spec, m_spec
+
+    def separate_tta(self, X_spec, cropsize=256, paddings=[0, 128, 256, 512, 768, 1024]):
         X_mag, X_phase = self._preprocess(X_spec)
 
         n_frame = X_mag.shape[2]
@@ -111,7 +126,9 @@ class Separator(object):
         mask = np.zeros_like(X_mag)
 
         for idx in range(len(paddings)):
-            mask += self._separate(X_mag_pad, cropsize, paddings[idx])[:, :, :n_frame] * weight[idx]
+            mask += self._separate(X_mag_pad, cropsize, paddings[idx])[:, :, :n_frame]
+
+        mask = mask / len(paddings)
 
         y_spec, v_spec, m_spec = self._postprocess(mask, X_mag, X_phase)
 
@@ -120,8 +137,8 @@ class Separator(object):
 def main():
     p = argparse.ArgumentParser()
     p.add_argument('--gpu', '-g', type=int, default=-1)
-    p.add_argument('--pretrained_corrector', type=str, default="J://models/remover.20000.tmp.pth")
-    p.add_argument('--pretrained_model', '-P', type=str, default='J://models/local.36.model.pth')
+    p.add_argument('--pretrained_corrector', type=str, default="J://models/local.9.model.pth")
+    p.add_argument('--pretrained_model', '-P', type=str, default='H://models/local.45.model.pth')
     p.add_argument('--input', '-i', required=True)
     p.add_argument('--output', '-o', type=str, default="")
     p.add_argument('--num_res_encoders', type=int, default=4)
@@ -157,7 +174,7 @@ def main():
     print('loading model...', end=' ')
     device = torch.device('cpu')
 
-    model = FrameTransformer(in_channels=4 if args.include_phase else 2,channels=args.channels, n_fft=args.n_fft, dropout=args.dropout, expansion=args.feedforward_expansion, num_heads=args.num_heads)
+    model = FrameTransformer(in_channels=2, channels=args.channels, n_fft=args.n_fft, dropout=args.dropout, expansion=args.feedforward_expansion, num_heads=args.num_heads)
     model.load_state_dict(torch.load(args.pretrained_model, map_location=device))
 
     if torch.cuda.is_available() and args.gpu >= 0:
@@ -214,7 +231,11 @@ def main():
             print('inverse stft of instruments...', end=' ')
             wave = spec_utils.spectrogram_to_wave(y_spec, hop_length=args.hop_length)
             print('done')
-            sf.write('{}/{}_Instruments.wav'.format(output_folder, basename), wave.T, sr)
+            inst_file = '{}/{}_Instruments.wav'.format(output_folder, basename)
+            sf.write(inst_file, wave.T, sr)
+
+            vid_file = '{}/{}.webm'.format(output_folder, basename)
+            os.system(f'ffmpeg -framerate 1 -loop 1 -i "{"cover"}" -i "{inst_file}" -shortest "{vid_file}"')
 
             print('inverse stft of vocals...', end=' ')
 
