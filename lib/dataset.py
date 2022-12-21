@@ -779,6 +779,28 @@ def make_dataset(filelist, cropsize, sr, hop_length, n_fft, offset=0, is_validat
                         Y=Y_pad[:, :, start:start + cropsize],
                         c=coef.item())
 
+def make_overfit_dataset(file, dir, cropsize, sr, hop_length, n_fft, offset=0):
+    X_set = []
+    Y_set = []
+
+    X_path = os.path.join(dir, "mixtures", file)
+    Y_path = os.path.join(dir, "instruments", file)
+
+    X, Y = spec_utils.load(X_path, Y_path, sr, hop_length, n_fft)
+    coef = np.abs(X).max()
+
+    l, r, roi_size = make_padding(X.shape[2], cropsize, offset)
+    X_pad = np.pad(X, ((0, 0), (0, 0), (l, r)), mode='constant')
+    Y_pad = np.pad(Y, ((0, 0), (0, 0), (l, r)), mode='constant')
+
+    len_dataset = int(np.ceil(X.shape[2] / roi_size))
+    for j in range(len_dataset):
+        start = j * roi_size
+        X_set.append(X_pad[:, :, start:start + cropsize])
+        Y_set.append(Y_pad[:, :, start:start + cropsize])
+
+    return X_set, Y_set, X_path, Y_path, coef
+
 def make_mix_dataset(filelist, cropsize, sr, hop_length, n_fft, offset=0, is_validation=False, root='', max_samples=220000000):
     patch_list = []    
     patch_dir = f'{root}cs{cropsize}_sr{sr}_hl{hop_length}_nf{n_fft}_of{offset}_MIXES'
