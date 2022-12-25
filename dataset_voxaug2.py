@@ -37,7 +37,7 @@ class VoxAugDataset(torch.utils.data.Dataset):
     def __len__(self):
         return len(self.curr_list)
 
-    def _get_vocals(self, idx):
+    def _get_vocals(self, idx, root=True):
         path = str(self.vocal_list[(self.epoch + idx) % len(self.vocal_list)])
         vdata = np.load(path)
         V = vdata['X']
@@ -48,9 +48,6 @@ class VoxAugDataset(torch.utils.data.Dataset):
             V = V[:,:,start:stop]
 
         if np.random.uniform() < 0.5:
-            V = V * (np.random.uniform(0.5, 1.5))
-
-        if np.random.uniform() < 0.5:
             V = V[::-1]
 
         if np.random.uniform() < 0.025:
@@ -58,6 +55,10 @@ class VoxAugDataset(torch.utils.data.Dataset):
                 V[0] = 0
             else:
                 V[1] = 0
+
+        if np.random.uniform() < 0.1:
+            V2 = self._get_vocals(np.random.randint(len(self.vocal_list)))
+            V = V + V2
 
         return V
 
@@ -76,7 +77,15 @@ class VoxAugDataset(torch.utils.data.Dataset):
                 Y = Y[:,:,start:stop]
 
             V = self._get_vocals(idx)
+
+            Vm = np.abs(V).max()
+            if Vm > c:
+                a = Vm / c
+                V = V / a
+
             X = Y + V
+
+            c = np.max([c, np.abs(X).max()])
 
             if np.random.uniform() < 0.025:
                 X = Y
@@ -85,12 +94,12 @@ class VoxAugDataset(torch.utils.data.Dataset):
                 X = X[::-1]
                 Y = Y[::-1]
         else:
-            if len(self.vocal_list) > 0:                              
+            if len(self.vocal_list) > 0:
                 vpath = self.vocal_list[idx % len(self.vocal_list)]
                 vdata = np.load(str(vpath))
                 V = vdata['X']
                 X = Y + V
-            
+
         X = np.clip(np.abs(X) / c, 0, 1)
         Y = np.clip(np.abs(Y) / c, 0, 1)
         

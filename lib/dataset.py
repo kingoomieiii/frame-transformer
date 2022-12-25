@@ -722,7 +722,7 @@ def make_vocal_stems(dataset, cropsize=1024, sr=44100, hop_length=512, n_fft=102
         os.makedirs(patch_dir, exist_ok=True)
 
         X, _ = spec_utils.to_spec(xw, xw, hop_length=hop_length, n_fft=n_fft)
-        coef = np.abs(xw).max()
+        coef = np.abs(X).max()
 
         l, r, roi_size = make_padding(X.shape[2], cropsize, offset)
         X_pad = np.pad(X, ((0, 0), (0, 0), (l, r)), mode='constant')
@@ -783,11 +783,23 @@ def make_overfit_dataset(file, dir, cropsize, sr, hop_length, n_fft, offset=0):
     X_set = []
     Y_set = []
 
-    X_path = os.path.join(dir, "mixtures", file)
-    Y_path = os.path.join(dir, "instruments", file)
+    train_filelist, _ = train_val_split(
+    dataset_dir=dir,
+    val_filelist=[],
+    val_size=-1,
+    train_size=-1)
+
+    for (xp, yp) in train_filelist:
+        if os.path.basename(xp) == os.path.basename(file) or os.path.basename(yp) == os.path.basename(file):
+            print(xp)
+            print(yp)
+            X_path = xp
+            Y_path = yp
+            break
 
     X, Y = spec_utils.load(X_path, Y_path, sr, hop_length, n_fft)
-    coef = np.abs(X).max()
+    cx = np.abs(X).max()
+    cy = np.abs(Y).max()
 
     l, r, roi_size = make_padding(X.shape[2], cropsize, offset)
     X_pad = np.pad(X, ((0, 0), (0, 0), (l, r)), mode='constant')
@@ -799,7 +811,7 @@ def make_overfit_dataset(file, dir, cropsize, sr, hop_length, n_fft, offset=0):
         X_set.append(X_pad[:, :, start:start + cropsize])
         Y_set.append(Y_pad[:, :, start:start + cropsize])
 
-    return X_set, Y_set, X_path, Y_path, coef
+    return X_set, Y_set, X_path, Y_path, cx, cy
 
 def make_mix_dataset(filelist, cropsize, sr, hop_length, n_fft, offset=0, is_validation=False, root='', max_samples=220000000):
     patch_list = []    
