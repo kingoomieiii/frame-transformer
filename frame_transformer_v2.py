@@ -35,9 +35,9 @@ class ResBlock(nn.Module):
 
         self.activate = SquaredReLU()
         self.norm = MultichannelLayerNorm(in_channels, features)
-        self.conv1 = MultichannelLinear(in_channels, out_channels, features, features, depthwise=True)
-        self.conv2 = MultichannelLinear(out_channels, out_channels, features, features // 2 if downsample else features, depthwise=True)
-        self.identity = nn.Conv2d(in_channels, out_channels, kernel_size=1, padding=0, stride=2 if downsample else 1, bias=False) if in_channels != out_channels or downsample else nn.Identity()
+        self.conv1 = nn.Conv2d(in_channels, out_channels, kernel_size=3, padding=1, bias=False) # MultichannelLinear(in_channels, out_channels, features, features, depthwise=True)
+        self.conv2 = nn.Conv2d(out_channels, out_channels, kernel_size=3, padding=1, bias=False) # MultichannelLinear(out_channels, out_channels, features, features // 2 if downsample else features, depthwise=True)
+        self.identity = nn.Conv2d(in_channels, out_channels, kernel_size=1, padding=0, bias=False) if in_channels != out_channels or downsample else nn.Identity()
 
     def __call__(self, x):
         h = self.conv2(self.activate(self.conv1(self.norm(x))))
@@ -62,9 +62,19 @@ class MultichannelMultiheadAttention(nn.Module):
 
         self.num_heads = num_heads
         self.rotary_embedding = RotaryEmbedding(dim = features // num_heads)
-        self.q_proj = MultichannelLinear(channels, channels, features, features, depthwise=True)
-        self.k_proj = MultichannelLinear(channels, channels, features, features, depthwise=True) 
-        self.v_proj = MultichannelLinear(channels, channels, features, features, depthwise=True)
+
+        self.q_proj = nn.Sequential(
+            MultichannelLinear(channels, channels, features, features),
+            nn.Conv2d(channels, channels, kernel_size=(1,3), padding=(0,1), bias=False))
+
+        self.k_proj = nn.Sequential(
+            MultichannelLinear(channels, channels, features, features),
+            nn.Conv2d(channels, channels, kernel_size=(1,3), padding=(0,1), bias=False))
+
+        self.v_proj = nn.Sequential(
+            MultichannelLinear(channels, channels, features, features),
+            nn.Conv2d(channels, channels, kernel_size=(1,3), padding=(0,1), bias=False))
+
         self.out_proj = MultichannelLinear(channels, channels, features, features, depthwise=True)
 
     def __call__(self, x, mem=None):
@@ -92,8 +102,8 @@ class FrameTransformerEncoder(nn.Module):
         self.attn = MultichannelMultiheadAttention(channels, num_heads, features)
 
         self.norm2 = MultichannelLayerNorm(channels, features)
-        self.conv1 = MultichannelLinear(channels, channels, features, features * expansion)
-        self.conv2 = MultichannelLinear(channels, channels, features * expansion, features)
+        self.conv1 = nn.Conv2d(channels, channels * expansion, kernel_size=3, padding=1, bias=False)
+        self.conv2 = nn.Conv2d(channels * expansion, channels, kernel_size=3, padding=1, bias=False)
         
     def __call__(self, x):       
         z = self.attn(self.norm1(x))
