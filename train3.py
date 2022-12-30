@@ -163,7 +163,7 @@ def main():
     p.add_argument('--sr', '-r', type=int, default=44100)
     p.add_argument('--hop_length', '-H', type=int, default=1024)
     p.add_argument('--n_fft', '-f', type=int, default=2048)
-    p.add_argument('--checkpoint', type=str, default="H://models/bert-large-cased-c.8-l.24-ff.4-nh.16.model.pth")
+    p.add_argument('--checkpoint', type=str, default="H://models/bert-large-cased-c.4-l.24-ff.4-nh.16.model.pth")
     p.add_argument('--mixed_precision', type=str, default='false')
 
     p.add_argument('--unlock_n_first_layers', type=int, default=1)
@@ -178,6 +178,9 @@ def main():
     p.add_argument('--instrumental_lib', type=str, default="C://cs2048_sr44100_hl1024_nf2048_of0|D://cs2048_sr44100_hl1024_nf2048_of0|F://cs2048_sr44100_hl1024_nf2048_of0|H://cs2048_sr44100_hl1024_nf2048_of0")
     p.add_argument('--vocal_lib', type=str, default="C://cs2048_sr44100_hl1024_nf2048_of0_VOCALS|D://cs2048_sr44100_hl1024_nf2048_of0_VOCALS")
     p.add_argument('--validation_lib', type=str, default="C://cs2048_sr44100_hl1024_nf2048_of0_VALIDATION")
+
+    p.add_argument('--learning_rate', '-l', type=float, default=1e-4)
+    p.add_argument('--learning_rate_bert', type=float, default=3.5e-6)
 
     p.add_argument('--curr_step', type=int, default=0)
     p.add_argument('--curr_epoch', type=int, default=0)
@@ -204,7 +207,6 @@ def main():
     p.add_argument('--weight_decay', type=float, default=0)
     p.add_argument('--num_workers', '-w', type=int, default=4)
     p.add_argument('--epoch', '-E', type=int, default=40)
-    p.add_argument('--learning_rate', '-l', type=float, default=1e-4)
     p.add_argument('--progress_bar', '-pb', type=str, default='true')
     p.add_argument('--save_all', type=str, default='true')
     p.add_argument('--llrd', type=str, default='false')
@@ -274,7 +276,10 @@ def main():
 
     model.lock()
     groups = [
-        { "params": filter(lambda p: p.requires_grad, model.parameters()), "lr": args.learning_rate }
+        { "params": filter(lambda p: p.requires_grad, model.enc1.parameters()), "lr": args.learning_rate },
+        { "params": filter(lambda p: p.requires_grad, model.resnet.parameters()), "lr": args.learning_rate },
+        { "params": filter(lambda p: p.requires_grad, model.out.parameters()), "lr": args.learning_rate },
+        { "params": filter(lambda p: p.requires_grad, model.transformer.parameters()), "lr": args.learning_rate_bert},
     ]
 
     model_parameters = filter(lambda p: p.requires_grad, model.parameters())

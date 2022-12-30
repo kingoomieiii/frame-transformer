@@ -44,7 +44,7 @@ def expand_normal_bias(x, channels):
 
 def main():
     p = argparse.ArgumentParser()
-    p.add_argument('--name', type=str, default='bert-large-uncased')
+    p.add_argument('--name', type=str, default='bert-large-cased')
     p.add_argument('-n_fft', type=int, default=2048)
     p.add_argument('--num_layers', type=int, default=24)
     p.add_argument('--channels', type=int, default=2)
@@ -57,10 +57,8 @@ def main():
     model_path = os.path.join(outdir, f'{args.name}-c.{args.channels}-l.{args.num_layers}-ff.{args.expansion}-nh.{args.num_heads}.model.pth')
 
     model = FrameTransformer(channels=args.channels, n_fft=args.n_fft, num_heads=args.num_heads, expansion=args.expansion, num_layers=args.num_layers)
-    print(model.transformer[0].conv1.weight_pw)
-    model.transformer = load_from_huggingface(model.transformer)
+    model.transformer = load_from_huggingface(model.transformer, name=args.name)
     torch.save(model.state_dict(), model_path)
-    print(model.transformer[0].conv1.weight_pw)
 
 if __name__ == '__main__':
     main()
