@@ -16,7 +16,7 @@ class FrameTransformer(nn.Module):
         self.enc1 = FrameEncoder(in_channels, channels, self.max_bin, downsample=False)
 
         self.channels = channels
-        self.transformer = nn.Sequential(*[FrameTransformerEncoder(channels, self.max_bin, dropout=dropout, expansion=expansion, num_heads=num_heads) for _ in range(num_layers)])
+        self.transformer = nn.Sequential(*[FrameTransformerEncoder(channels, self.max_bin, dropout=dropout, expansion=expansion, num_heads=num_heads) for i in range(num_layers)])
         
         self.out = nn.Parameter(torch.empty(out_channels, channels))
         nn.init.uniform_(self.out, a=-1/math.sqrt(channels), b=1/math.sqrt(channels))
@@ -29,20 +29,21 @@ class FrameTransformer(nn.Module):
         return out
 
     def lock(self):
-        for module in self.transformer:
-            module.lock()
+        for idx in range(len(self.transformer)):
+            if idx > 11:
+                self.transformer[idx].lock()
 
 class SquaredReLU(nn.Module):
     def __call__(self, x):
         return torch.relu(x) ** 2
 
 class ResBlock(nn.Module):
-    def __init__(self, in_channels, out_channels, features, downsample=False):
+    def __init__(self, in_channels, out_channels, features, downsample=False, expansion=1):
         super(ResBlock, self).__init__()
 
         self.activate = nn.GELU()
-        self.conv1 = nn.Conv2d(in_channels, out_channels, kernel_size=(9,1), padding=(4,0), bias=True)
-        self.conv2 = nn.Conv2d(out_channels, out_channels, kernel_size=(9,1), padding=(4,0), bias=True)
+        self.conv1 = nn.Conv2d(in_channels, out_channels * expansion, kernel_size=3, padding=1, bias=True)
+        self.conv2 = nn.Conv2d(out_channels * expansion, out_channels, kernel_size=3, padding=1, bias=True)
         self.identity = nn.Conv2d(in_channels, out_channels, kernel_size=1, padding=0, bias=True) if in_channels != out_channels or downsample else nn.Identity()
         self.norm = MultichannelLayerNorm(out_channels, features)
 
@@ -68,23 +69,27 @@ class MultichannelMultiheadAttention(nn.Module):
         super().__init__()
 
         self.num_heads = num_heads
-        self.rotary_embedding = RotaryEmbedding(dim = features // num_heads, learned_freq=True)
+        self.rotary_embedding = RotaryEmbedding(dim = features // num_heads)
         self.q_proj = MultichannelLinear(channels, channels, features, features, bias=True)
+        self.q_conv = nn.Conv2d(channels, channels, kernel_size=(1,7), padding=(0,3))
         self.k_proj = MultichannelLinear(channels, channels, features, features, bias=True)
+        self.k_conv = nn.Conv2d(channels, channels, kernel_size=(1,7), padding=(0,3))
         self.v_proj = MultichannelLinear(channels, channels, features, features, bias=True)
+        self.v_conv = nn.Conv2d(channels, channels, kernel_size=(1,7), padding=(0,3))
         self.out_proj = MultichannelLinear(channels, channels, features, features, bias=True)
+        self.out_conv = nn.Conv2d(channels, channels, kernel_size=1, padding=0)
 
     def __call__(self, x, mem=None):
         b,c,h,w = x.shape
-        q = self.rotary_embedding.rotate_queries_or_keys(self.q_proj(x).transpose(2,3).reshape(b,c,w,self.num_heads,-1).permute(0,1,3,2,4))
-        k = self.rotary_embedding.rotate_queries_or_keys(self.k_proj(x if mem is None else mem).transpose(2,3).reshape(b,c,w,self.num_heads,-1).permute(0,1,3,2,4)).transpose(3,4)
-        v = self.v_proj(x if mem is None else mem).transpose(2,3).reshape(b,c,w,self.num_heads,-1).permute(0,1,3,2,4)
+        q = self.rotary_embedding.rotate_queries_or_keys(self.q_conv(self.q_proj(x)).transpose(2,3).reshape(b,c,w,self.num_heads,-1).permute(0,1,3,2,4))
+        k = self.rotary_embedding.rotate_queries_or_keys(self.k_conv(self.k_proj(x if mem is None else mem)).transpose(2,3).reshape(b,c,w,self.num_heads,-1).permute(0,1,3,2,4)).transpose(3,4)
+        v = self.v_conv(self.v_proj(x if mem is None else mem)).transpose(2,3).reshape(b,c,w,self.num_heads,-1).permute(0,1,3,2,4)
 
         with torch.cuda.amp.autocast_mode.autocast(enabled=False):
             qk = torch.matmul(q.float(), k.float()) / math.sqrt(h)
             a = torch.matmul(F.softmax(qk, dim=-1),v.float()).transpose(2,3).reshape(b,c,w,-1).transpose(2,3)
 
-        x = self.out_proj(a)
+        x = self.out_conv(self.out_proj(a))
 
         return x
 
@@ -108,19 +113,12 @@ class FrameTransformerEncoder(nn.Module):
         self.conv2 = MultichannelLinear(channels, channels, features * expansion, features, bias=True)
         self.norm2 = MultichannelLayerNorm(channels, features)
 
-        self.conv3 = nn.Conv2d(channels, channels * expansion, kernel_size=3, padding=1)
-        self.conv4 = nn.Conv2d(channels * expansion, channels, kernel_size=3, padding=1)
-        self.norm3 = MultichannelLayerNorm(channels, features)
-        
     def __call__(self, x):
         z = self.attn(x)
         h = self.norm1(x + self.dropout(z))
 
         z = self.conv2(self.activate(self.conv1(h)))
         h = self.norm2(h + self.dropout(z))
-
-        z = self.conv4(self.activate(self.conv3(h)))
-        h = self.norm3(h + self.dropout(z))
 
         return h
 
