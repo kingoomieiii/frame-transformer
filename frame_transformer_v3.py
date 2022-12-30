@@ -15,25 +15,27 @@ class FrameTransformer(nn.Module):
         self.output_bin = n_fft // 2 + 1
         self.lock_first = unlock_first
         self.lock_last = unlock_last
-        self.enc1 = FrameEncoder(in_channels, channels, self.max_bin, downsample=False)
-
         self.channels = channels
-        self.transformer = nn.Sequential(*[FrameTransformerEncoder(channels, self.max_bin, dropout=dropout, expansion=expansion, num_heads=num_heads) for i in range(num_layers)])
-        
-        self.out = nn.Parameter(torch.empty(out_channels, channels))
-        nn.init.uniform_(self.out, a=-1/math.sqrt(channels), b=1/math.sqrt(channels))
 
+        self.enc1 = FrameEncoder(in_channels, channels, self.max_bin)
+        self.transformer = nn.Sequential(*[FrameTransformerEncoder(channels, self.max_bin, dropout=dropout, expansion=expansion, num_heads=num_heads) for _ in range(num_layers)])
+        self.resnet = nn.Sequential(*[ResBlock(channels, channels, self.max_bin, expansion=2) for _ in range(num_layers)])
+        self.out = nn.Conv2d(channels, out_channels, kernel_size=1, padding=0)
+        
     def __call__(self, x):
         h = self.enc1(x)
-        h = self.transformer(h)
-        out = torch.matmul(h.transpose(1,3), self.out.t()).transpose(1,3)
+
+        for i in range(len(self.transformer)):
+            h = self.transformer[i](h)
+            h = self.resnet[i](h)
+
+        out = self.out(h)
 
         return out
 
     def lock(self):
         for idx in range(len(self.transformer)):
-            if idx >= self.lock_first and idx < len(self.transformer) - self.lock_last - 1:
-                self.transformer[idx].lock()
+            self.transformer[idx].lock()
 
 class SquaredReLU(nn.Module):
     def __call__(self, x):
@@ -56,10 +58,10 @@ class ResBlock(nn.Module):
         return x
 
 class FrameEncoder(nn.Module):
-    def __init__(self, in_channels, out_channels, features, downsample=True, num_blocks=3):
+    def __init__(self, in_channels, out_channels, features, num_blocks=6):
         super(FrameEncoder, self).__init__()
 
-        self.body = nn.Sequential(*[ResBlock(in_channels if i == 0 else out_channels, out_channels, features, downsample=True if i == num_blocks - 1 and downsample else False) for i in range(num_blocks)])
+        self.body = nn.Sequential(*[ResBlock(in_channels if i == 0 else out_channels, out_channels, features, expansion=2) for i in range(num_blocks)])
 
     def __call__(self, x):
         x = self.body(x)
@@ -71,35 +73,25 @@ class MultichannelMultiheadAttention(nn.Module):
         super().__init__()
 
         self.num_heads = num_heads
-        self.rotary_embedding = RotaryEmbedding(dim = features // num_heads)
+        self.rotary_embedding = RotaryEmbedding(dim = features // num_heads, learned_freq=True)
         self.q_proj = MultichannelLinear(channels, channels, features, features, bias=True)
-        self.q_conv = nn.Conv2d(channels, channels, kernel_size=3, padding=1)
         self.k_proj = MultichannelLinear(channels, channels, features, features, bias=True)
-        self.k_conv = nn.Conv2d(channels, channels, kernel_size=3, padding=1)
         self.v_proj = MultichannelLinear(channels, channels, features, features, bias=True)
-        self.v_conv = nn.Conv2d(channels, channels, kernel_size=3, padding=1)
         self.out_proj = MultichannelLinear(channels, channels, features, features, bias=True)
-        self.out_conv = nn.Conv2d(channels, channels, kernel_size=1, padding=0)
 
     def __call__(self, x, mem=None):
         b,c,h,w = x.shape
-        q = self.rotary_embedding.rotate_queries_or_keys(self.q_proj(self.q_conv(x)).transpose(2,3).reshape(b,c,w,self.num_heads,-1).permute(0,1,3,2,4))
-        k = self.rotary_embedding.rotate_queries_or_keys(self.k_proj(self.k_conv(x if mem is None else mem)).transpose(2,3).reshape(b,c,w,self.num_heads,-1).permute(0,1,3,2,4)).transpose(3,4)
-        v = self.v_proj(self.v_conv(x if mem is None else mem)).transpose(2,3).reshape(b,c,w,self.num_heads,-1).permute(0,1,3,2,4)
+        q = self.rotary_embedding.rotate_queries_or_keys(self.q_proj(x).transpose(2,3).reshape(b,c,w,self.num_heads,-1).permute(0,1,3,2,4))
+        k = self.rotary_embedding.rotate_queries_or_keys(self.k_proj(x if mem is None else mem).transpose(2,3).reshape(b,c,w,self.num_heads,-1).permute(0,1,3,2,4)).transpose(3,4)
+        v = self.v_proj(x if mem is None else mem).transpose(2,3).reshape(b,c,w,self.num_heads,-1).permute(0,1,3,2,4)
 
         with torch.cuda.amp.autocast_mode.autocast(enabled=False):
             qk = torch.matmul(q.float(), k.float()) / math.sqrt(h)
             a = torch.matmul(F.softmax(qk, dim=-1),v.float()).transpose(2,3).reshape(b,c,w,-1).transpose(2,3)
 
-        x = self.out_conv(self.out_proj(a))
+        x = self.out_proj(a)
 
         return x
-
-    def lock(self):
-        self.q_proj.requires_grad_(False)
-        self.k_proj.requires_grad_(False)
-        self.v_proj.requires_grad_(False)
-        self.out_proj.requires_grad_(False)
         
 class FrameTransformerEncoder(nn.Module):
     def __init__(self, channels, features, dropout=0.1, expansion=4, num_heads=8):
@@ -125,7 +117,6 @@ class FrameTransformerEncoder(nn.Module):
         return h
 
     def lock(self):
-        self.attn.lock()
         self.norm1.requires_grad_(False)
         self.conv1.requires_grad_(False)
         self.conv2.requires_grad_(False)
