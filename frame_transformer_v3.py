@@ -8,11 +8,13 @@ from multichannel_layernorm import MultichannelLayerNorm, FrameNorm
 from multichannel_linear import MultichannelLinear
 
 class FrameTransformer(nn.Module):
-    def __init__(self, in_channels=2, out_channels=2, channels=2, dropout=0.1, n_fft=2048, num_heads=4, expansion=4, num_layers=15):
+    def __init__(self, in_channels=2, out_channels=2, channels=2, dropout=0.1, n_fft=2048, num_heads=4, expansion=4, num_layers=15, unlock_first=4, unlock_last=4):
         super(FrameTransformer, self).__init__()
         
         self.max_bin = n_fft // 2
         self.output_bin = n_fft // 2 + 1
+        self.lock_first = unlock_first
+        self.lock_last = unlock_last
         self.enc1 = FrameEncoder(in_channels, channels, self.max_bin, downsample=False)
 
         self.channels = channels
@@ -30,7 +32,7 @@ class FrameTransformer(nn.Module):
 
     def lock(self):
         for idx in range(len(self.transformer)):
-            if idx > 11:
+            if idx >= self.lock_first and idx < len(self.transformer) - self.lock_last - 1:
                 self.transformer[idx].lock()
 
 class SquaredReLU(nn.Module):
@@ -71,19 +73,19 @@ class MultichannelMultiheadAttention(nn.Module):
         self.num_heads = num_heads
         self.rotary_embedding = RotaryEmbedding(dim = features // num_heads)
         self.q_proj = MultichannelLinear(channels, channels, features, features, bias=True)
-        self.q_conv = nn.Conv2d(channels, channels, kernel_size=(1,7), padding=(0,3))
+        self.q_conv = nn.Conv2d(channels, channels, kernel_size=3, padding=1)
         self.k_proj = MultichannelLinear(channels, channels, features, features, bias=True)
-        self.k_conv = nn.Conv2d(channels, channels, kernel_size=(1,7), padding=(0,3))
+        self.k_conv = nn.Conv2d(channels, channels, kernel_size=3, padding=1)
         self.v_proj = MultichannelLinear(channels, channels, features, features, bias=True)
-        self.v_conv = nn.Conv2d(channels, channels, kernel_size=(1,7), padding=(0,3))
+        self.v_conv = nn.Conv2d(channels, channels, kernel_size=3, padding=1)
         self.out_proj = MultichannelLinear(channels, channels, features, features, bias=True)
         self.out_conv = nn.Conv2d(channels, channels, kernel_size=1, padding=0)
 
     def __call__(self, x, mem=None):
         b,c,h,w = x.shape
-        q = self.rotary_embedding.rotate_queries_or_keys(self.q_conv(self.q_proj(x)).transpose(2,3).reshape(b,c,w,self.num_heads,-1).permute(0,1,3,2,4))
-        k = self.rotary_embedding.rotate_queries_or_keys(self.k_conv(self.k_proj(x if mem is None else mem)).transpose(2,3).reshape(b,c,w,self.num_heads,-1).permute(0,1,3,2,4)).transpose(3,4)
-        v = self.v_conv(self.v_proj(x if mem is None else mem)).transpose(2,3).reshape(b,c,w,self.num_heads,-1).permute(0,1,3,2,4)
+        q = self.rotary_embedding.rotate_queries_or_keys(self.q_proj(self.q_conv(x)).transpose(2,3).reshape(b,c,w,self.num_heads,-1).permute(0,1,3,2,4))
+        k = self.rotary_embedding.rotate_queries_or_keys(self.k_proj(self.k_conv(x if mem is None else mem)).transpose(2,3).reshape(b,c,w,self.num_heads,-1).permute(0,1,3,2,4)).transpose(3,4)
+        v = self.v_proj(self.v_conv(x if mem is None else mem)).transpose(2,3).reshape(b,c,w,self.num_heads,-1).permute(0,1,3,2,4)
 
         with torch.cuda.amp.autocast_mode.autocast(enabled=False):
             qk = torch.matmul(q.float(), k.float()) / math.sqrt(h)
