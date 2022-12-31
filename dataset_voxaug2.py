@@ -56,7 +56,7 @@ class VoxAugDataset(torch.utils.data.Dataset):
             else:
                 V[1] = 0
 
-        if np.random.uniform() < 0.1:
+        if np.random.uniform() < 0.075:
             V2 = self._get_vocals(np.random.randint(len(self.vocal_list)))
             V = V + V2
 
@@ -77,14 +77,7 @@ class VoxAugDataset(torch.utils.data.Dataset):
                 Y = Y[:,:,start:stop]
 
             V = self._get_vocals(idx)
-
-            Vm = np.abs(V).max()
-            if Vm > c:
-                a = Vm / c
-                V = V / a
-
             X = Y + V
-
             c = np.max([c, np.abs(X).max()])
 
             if np.random.uniform() < 0.025:
