@@ -4,7 +4,7 @@ from torch import nn
 import torch.nn.functional as F
 
 from rotary_embedding_torch import RotaryEmbedding
-from multichannel_layernorm import MultichannelLayerNorm, FrameNorm
+from multichannel_layernorm import MultichannelLayerNorm
 from multichannel_linear import MultichannelLinear
 
 class FrameTransformer(nn.Module):
@@ -24,33 +24,6 @@ class FrameTransformer(nn.Module):
 class SquaredReLU(nn.Module):
     def __call__(self, x):
         return torch.relu(x) ** 2
-
-class ResBlock(nn.Module):
-    def __init__(self, in_channels, out_channels, features, downsample=False):
-        super(ResBlock, self).__init__()
-
-        self.activate = SquaredReLU()
-        self.norm = MultichannelLayerNorm(in_channels, features)
-        self.conv1 = nn.Conv2d(in_channels, out_channels, kernel_size=3, padding=1)
-        self.conv2 = nn.Conv2d(out_channels, out_channels, kernel_size=3, padding=1)
-        self.identity = nn.Conv2d(in_channels, out_channels, kernel_size=1, padding=0) if in_channels != out_channels or downsample else nn.Identity()
-
-    def __call__(self, x):
-        h = self.conv2(self.activate(self.conv1(self.norm(x))))
-        x = self.identity(x) + h
-
-        return x
-
-class FrameEncoder(nn.Module):
-    def __init__(self, in_channels, out_channels, features, downsample=True, num_blocks=3):
-        super(FrameEncoder, self).__init__()
-
-        self.body = nn.Sequential(*[ResBlock(in_channels if i == 0 else out_channels, out_channels, features, downsample=True if i == num_blocks - 1 and downsample else False) for i in range(num_blocks)])
-
-    def __call__(self, x):
-        x = self.body(x)
-
-        return x
 
 class MultichannelMultiheadAttention(nn.Module):
     def __init__(self, channels, num_heads, features):
