@@ -53,15 +53,12 @@ def init_epoch(dataloader, model, device):
 
         break
 
-def train_epoch(dataloader, model, device, optimizer, accumulation_steps, progress_bar, lr_warmup=None, grad_scaler=None, use_wandb=True, step=0, include_phase=False, model_dir="", save_every=20000):
+def train_epoch(dataloader, model, device, optimizer, accumulation_steps, progress_bar, lr_warmup=None, grad_scaler=None, use_wandb=True, step=0, model_dir="", save_every=20000):
     model.train()
 
     mag_loss = 0
     batch_mag_loss = 0
     
-    phase_loss = 0
-    batch_phase_loss = 0
-
     sum_loss = 0
     crit = nn.L1Loss()
     batch_loss = 0
@@ -76,14 +73,12 @@ def train_epoch(dataloader, model, device, optimizer, accumulation_steps, progre
         Y = Y.to(device)[:, :, :model.max_bin]
 
         with torch.cuda.amp.autocast_mode.autocast(enabled=grad_scaler is not None):
-            pred = torch.sigmoid(model(X * 2 - 1))
+            pred = model(X)
             
-        l1_mag = crit(X[:, :2] * pred[:, :2], Y[:, :2]) / accumulation_steps
-        l1_phase = crit(pred[:, 2:], Y[:, 2:]) / accumulation_steps if include_phase else torch.zeros_like(l1_mag)
+        l1_mag = crit(pred[:, :2], Y[:, :2]) / accumulation_steps
 
         batch_mag_loss = batch_mag_loss + l1_mag
-        batch_phase_loss = batch_phase_loss + l1_phase
-        accum_loss = l1_mag + l1_phase
+        accum_loss = l1_mag
 
         if torch.logical_or(accum_loss.isnan(), accum_loss.isinf()):
             print('nan training loss; aborting')
@@ -96,7 +91,7 @@ def train_epoch(dataloader, model, device, optimizer, accumulation_steps, progre
 
         if (itr + 1) % accumulation_steps == 0:
             if progress_bar:
-                pbar.set_description(f'{step}: {str(batch_mag_loss.item())}|{str(batch_phase_loss.item())}')
+                pbar.set_description(f'{step}: {str(batch_mag_loss.item())}')
 
             if use_wandb:
                 wandb.log({
@@ -119,42 +114,39 @@ def train_epoch(dataloader, model, device, optimizer, accumulation_steps, progre
             model.zero_grad()
             batches = batches + 1
             mag_loss = mag_loss + batch_mag_loss.item()
-            phase_loss = phase_loss + batch_phase_loss.item()
             batch_mag_loss = 0
-            batch_phase_loss = 0
 
             if batches % save_every == 0:
                 model_path = f'{model_dir}models/remover.{step}.tmp.pth'
                 torch.save(model.state_dict(), model_path)
 
-    return mag_loss / batches, phase_loss / batches, step
+    return mag_loss / batches, step
 
-def validate_epoch(dataloader, model, device, include_phase=False):
+def validate_epoch(dataloader, model, device):
     model.eval()
     crit = nn.L1Loss()
 
     mag_loss = 0
-    phase_loss = 0
+    torch.cuda.empty_cache()
 
     with torch.no_grad():
         for X, Y in dataloader:
             X = X.to(device)[:, :, :model.max_bin]
             Y = Y.to(device)[:, :, :model.max_bin]
 
-            pred = torch.sigmoid(model(X * 2 - 1))
+            with torch.cuda.amp.autocast_mode.autocast():
+                pred = model(X)
 
-            l1_mag = crit(X[:, :2] * pred[:, :2], Y[:, :2])
-            l1_phase = crit(pred[:, 2:], Y[:, 2:]) if include_phase else torch.zeros_like(l1_mag)
-            loss = l1_mag + l1_phase
+            l1_mag = crit(pred, Y)
+            loss = l1_mag
 
             if torch.logical_or(loss.isnan(), loss.isinf()):
                 print('nan validation loss; aborting')
                 quit()
             else:
                 mag_loss += l1_mag.item() * len(X)
-                phase_loss += l1_phase.item() * len(X)
 
-    return mag_loss / len(dataloader.dataset), phase_loss / len(dataloader.dataset)
+    return mag_loss / len(dataloader.dataset)
 
 def main():
     p = argparse.ArgumentParser()
@@ -163,11 +155,12 @@ def main():
     p.add_argument('--sr', '-r', type=int, default=44100)
     p.add_argument('--hop_length', '-H', type=int, default=1024)
     p.add_argument('--n_fft', '-f', type=int, default=2048)
-    p.add_argument('--checkpoint', type=str, default="H://models/bert-large-cased-c.4-l.24-ff.4-nh.16.model.pth")
-    p.add_argument('--mixed_precision', type=str, default='false')
+    p.add_argument('--checkpoint', type=str, default=None)
+    p.add_argument('--codebook', type=str, default=None)
+    p.add_argument('--mixed_precision', type=str, default='true')
 
     p.add_argument('--unlock_n_first_layers', type=int, default=1)
-    p.add_argument('--unlock_n_last_layers', type=int, default=1)
+    p.add_argument('--unlock_n_last_layers', type=int, default=8)
 
     # p.add_argument('--model_dir', type=str, default='/media/ben/internal-nvme-b')
     # p.add_argument('--instrumental_lib', type=str, default="/home/ben/cs2048_sr44100_hl1024_nf2048_of0|/media/ben/internal-nvme-b/cs2048_sr44100_hl1024_nf2048_of0")
@@ -185,23 +178,24 @@ def main():
     p.add_argument('--curr_step', type=int, default=0)
     p.add_argument('--curr_epoch', type=int, default=0)
     p.add_argument('--warmup_steps', type=int, default=8000)
-    p.add_argument('--decay_steps', type=int, default=1000000)
+    p.add_argument('--decay_steps', type=int, default=208000)
     p.add_argument('--lr_scheduler_decay_target', type=int, default=1e-12)
-    p.add_argument('--lr_scheduler_decay_power', type=float, default=0.1)
+    p.add_argument('--lr_scheduler_decay_power', type=float, default=1)
     p.add_argument('--lr_verbosity', type=int, default=1000)
     
-    p.add_argument('--include_phase', type=str, default='false')
-    p.add_argument('--num_layers', type=int, default=12)
+    p.add_argument('--num_quantizers', type=int, default=4)
+    p.add_argument('--num_embeddings', type=int, default=1024)
     p.add_argument('--channels', type=int, default=8)
-    p.add_argument('--feedforward_expansion', type=int, default=4)
+    p.add_argument('--num_layers', type=int, default=8)
+    p.add_argument('--expansion', type=int, default=4)
     p.add_argument('--num_heads', type=int, default=16)
     p.add_argument('--dropout', type=float, default=0.1)
     
-    p.add_argument('--stages', type=str, default='500000,800000,1008000')
-    p.add_argument('--cropsizes', type=str, default='256,512,1280')
-    p.add_argument('--batch_sizes', type=str, default='1,2,1')
-    p.add_argument('--accumulation_steps', '-A', type=str, default='4,4,8')
-    p.add_argument('--gpu', '-g', type=int, default=-1)
+    p.add_argument('--stages', type=str, default='500000')
+    p.add_argument('--cropsizes', type=str, default='256')
+    p.add_argument('--batch_sizes', type=str, default='3')
+    p.add_argument('--accumulation_steps', '-A', type=str, default='2')
+    p.add_argument('--gpu', '-g', type=int, default=0)
     p.add_argument('--optimizer', type=str.lower, choices=['adam', 'adamw', 'sgd', 'radam', 'rmsprop'], default='adam')
     p.add_argument('--amsgrad', type=str, default='false')
     p.add_argument('--weight_decay', type=float, default=0)
@@ -220,7 +214,6 @@ def main():
     p.add_argument('--cropsize', type=int, default=0)
     args = p.parse_args()
 
-    args.include_phase = str.lower(args.include_phase) == 'true'
     args.amsgrad = str.lower(args.amsgrad) == 'true'
     args.progress_bar = str.lower(args.progress_bar) == 'true'
     args.mixed_precision = str.lower(args.mixed_precision) == 'true'
@@ -257,13 +250,8 @@ def main():
     torch.manual_seed(args.seed)
 
     device = torch.device('cpu')
-    model = FrameTransformer(in_channels=4 if args.include_phase else 2, out_channels=4 if args.include_phase else 2, channels=args.channels, expansion=args.feedforward_expansion, n_fft=args.n_fft, dropout=args.dropout, num_heads=args.num_heads, num_layers=args.num_layers, unlock_first=args.unlock_n_first_layers, unlock_last=args.unlock_n_last_layers)
+    model = FrameTransformer(channels=args.channels, dropout=args.dropout, n_fft=args.n_fft, num_heads=args.num_heads, expansion=args.expansion, num_layers=args.num_layers)
 
-    # print(model.transformer[0].conv1a.weight_pw)
-    # #model.load_from_huggingface()    
-    # print(model.transformer[0].conv1a.weight_pw)
-    
-        
     val_dataset = None
     grad_scaler = torch.cuda.amp.grad_scaler.GradScaler() if args.mixed_precision else None
 
@@ -274,12 +262,11 @@ def main():
     if args.checkpoint is not None:
         model.load_state_dict(torch.load(f'{args.checkpoint}', map_location=device))
 
-    model.lock()
+    if args.codebook is not None:
+        model.embedding.load_state_dict(torch.load(f'{args.codebook}', map_location=device))
+
     groups = [
-        { "params": filter(lambda p: p.requires_grad, model.enc1.parameters()), "lr": args.learning_rate },
-        { "params": filter(lambda p: p.requires_grad, model.resnet.parameters()), "lr": args.learning_rate },
-        { "params": filter(lambda p: p.requires_grad, model.out.parameters()), "lr": args.learning_rate },
-        { "params": filter(lambda p: p.requires_grad, model.transformer.parameters()), "lr": args.learning_rate_bert},
+        { "params": filter(lambda p: p.requires_grad, model.parameters()), "lr": args.learning_rate },
     ]
 
     model_parameters = filter(lambda p: p.requires_grad, model.parameters())
@@ -292,7 +279,6 @@ def main():
         amsgrad=args.amsgrad,
         weight_decay=args.weight_decay
     )
-    print(model.transformer[0].conv1.weight_pw)
     
     stage = 0
     step = args.curr_step
@@ -340,8 +326,8 @@ def main():
 
         print('# epoch {}'.format(epoch))
         train_dataloader.dataset.set_epoch(epoch)
-        train_loss_mag, train_loss_phase, step = train_epoch(train_dataloader, model, device, optimizer, accum_steps, args.progress_bar, lr_warmup=scheduler, grad_scaler=grad_scaler, use_wandb=args.wandb, step=step, include_phase=args.include_phase, model_dir=args.model_dir)
-        val_loss_mag, val_loss_phase = validate_epoch(val_dataloader, model, device, include_phase=args.include_phase)
+        train_loss_mag, step = train_epoch(train_dataloader, model, device, optimizer, accum_steps, args.progress_bar, lr_warmup=scheduler, grad_scaler=grad_scaler, use_wandb=args.wandb, step=step, model_dir=args.model_dir)
+        val_loss_mag = validate_epoch(val_dataloader, model, device)
 
         if args.wandb:
             wandb.log({
@@ -350,8 +336,8 @@ def main():
             })
 
         print(
-            '  * training loss = {:.6f}, validation loss = {:.6f}, phase = {:.6f}'
-            .format(train_loss_mag, val_loss_mag, val_loss_phase)
+            '  * training loss = {:.6f}, validation loss = {:.6f}'
+            .format(train_loss_mag, val_loss_mag)
         )
 
         if val_loss_mag < best_loss:
