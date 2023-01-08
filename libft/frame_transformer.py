@@ -3,6 +3,7 @@ import torch
 from torch import nn
 import torch.nn.functional as F
 
+from libft.res_block import ResBlock
 from libft.positional_embedding import PositionalEmbedding
 from libft.multichannel_layernorm import MultichannelLayerNorm
 from libft.multichannel_linear import MultichannelLinear
@@ -26,26 +27,6 @@ class FrameTransformer(nn.Module):
         h = torch.cat((self.positional_embedding(h), h), dim=1)
         h = self.transformer(h)
         return h[:, -self.out_channels:]
-
-class SquaredReLU(nn.Module):
-    def __call__(self, x):
-        return torch.relu(x) ** 2
-
-class ResBlock(nn.Module):
-    def __init__(self, in_channels, out_channels, features, downsample=False, expansion=1):
-        super(ResBlock, self).__init__()
-
-        self.activate = SquaredReLU()
-        self.norm = MultichannelLayerNorm(in_channels, features)
-        self.conv1 = nn.Conv2d(in_channels, out_channels * expansion, kernel_size=3, padding=1, bias=False)
-        self.conv2 = nn.Conv2d(out_channels * expansion, out_channels, kernel_size=3, padding=1, bias=False)
-        self.identity = nn.Conv2d(in_channels, out_channels, kernel_size=1, padding=0, bias=False) if in_channels != out_channels or downsample else nn.Identity()
-
-    def __call__(self, x):
-        h = self.conv2(self.activate(self.conv1(self.norm(x))))
-        x = self.identity(x) + h
-
-        return x
 
 class FrameEncoder(nn.Module):
     def __init__(self, in_channels, out_channels, features, downsample=True, num_blocks=3):
@@ -93,7 +74,6 @@ class FrameTransformerEncoder(nn.Module):
     def __init__(self, channels, features, dropout=0.1, expansion=4, num_heads=8, out_channels=2):
         super(FrameTransformerEncoder, self).__init__()
 
-        self.activate = SquaredReLU()
         self.dropout = nn.Dropout(dropout)
 
         self.norm1 = MultichannelLayerNorm(channels, features)
@@ -111,7 +91,7 @@ class FrameTransformerEncoder(nn.Module):
         z = self.attn(self.norm1(x))
         h = x + self.dropout(z) * self.alpha1
 
-        z = self.conv2(self.activate(self.conv1(self.norm2(h))))
+        z = self.conv2(torch.relu(self.conv1(self.norm2(h))) ** 2)
         h = h + self.dropout(z) * self.alpha2
 
         return h
