@@ -23,10 +23,8 @@ class FrameTransformer(nn.Module):
         self.transformer = nn.Sequential(*[FrameTransformerEncoder(in_channels * repeats + 1, self.max_bin, dropout=dropout, expansion=expansion, num_heads=num_heads, out_channels=out_channels) for _ in range(num_layers)])
 
     def __call__(self, x):
-        h = torch.cat((self.embed(x), *[x for _ in range(self.repeats)]), dim=1)
-        h = torch.cat((self.positional_embedding(h), h), dim=1)
-        h = self.transformer(h)
-        return h[:, -self.out_channels:]
+        h = torch.cat([x for _ in range(self.repeats)], dim=1)
+        return self.transformer(torch.cat((self.positional_embedding(h), h), dim=1))[:, -self.out_channels:]
 
 class FrameEncoder(nn.Module):
     def __init__(self, in_channels, out_channels, features, downsample=True, num_blocks=3):
