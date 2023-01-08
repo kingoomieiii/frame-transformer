@@ -18,24 +18,12 @@ class FrameTransformer(nn.Module):
         self.out_channels = out_channels
         self.repeats = repeats
 
-        self.embed = ResBlock(in_channels, channels - in_channels * repeats, self.max_bin) if in_channels != channels else nn.Identity()
         self.positional_embedding = PositionalEmbedding(channels, self.max_bin)
         self.transformer = nn.Sequential(*[FrameTransformerEncoder(in_channels * repeats + 1, self.max_bin, dropout=dropout, expansion=expansion, num_heads=num_heads, out_channels=out_channels) for _ in range(num_layers)])
 
     def __call__(self, x):
         h = torch.cat([x for _ in range(self.repeats)], dim=1)
         return self.transformer(torch.cat((self.positional_embedding(h), h), dim=1))[:, -self.out_channels:]
-
-class FrameEncoder(nn.Module):
-    def __init__(self, in_channels, out_channels, features, downsample=True, num_blocks=3):
-        super(FrameEncoder, self).__init__()
-
-        self.body = nn.Sequential(*[ResBlock(in_channels if i == 0 else out_channels, out_channels, features, downsample=True if i == num_blocks - 1 and downsample else False) for i in range(num_blocks)])
-
-    def __call__(self, x):
-        x = self.body(x)
-
-        return x
 
 class MultichannelMultiheadAttention(nn.Module):
     def __init__(self, channels, num_heads, features):
