@@ -14,7 +14,7 @@ import os
 from tqdm import tqdm
 
 from dataset_voxaug2 import VoxAugDataset
-from frame_transformer_v3 import FrameTransformer
+from libft.frame_transformer import FrameTransformer
 from torch.nn import functional as F
 
 from lib.lr_scheduler_linear_warmup import LinearWarmupScheduler
