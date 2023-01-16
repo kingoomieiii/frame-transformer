@@ -18,11 +18,13 @@ class FrameTransformer(nn.Module):
         self.out_channels = out_channels
         self.repeats = repeats
 
+        self.conv_embed = nn.Conv2d(in_channels, channels - in_channels, kernel_size=3, padding=1)
         self.positional_embedding = PositionalEmbedding(channels, self.max_bin)
         self.transformer = nn.Sequential(*[FrameTransformerEncoder(channels + 1, self.max_bin, dropout=dropout, expansion=expansion, num_heads=num_heads, out_channels=out_channels) for _ in range(num_layers)])
 
     def __call__(self, x):
-        h = torch.cat((self.positional_embedding(x), x), dim=1)
+        h = torch.cat((self.conv_embed(x), x), dim=1)
+        h = torch.cat((self.positional_embedding(h), h), dim=1)
         return self.transformer(h)[:, -self.out_channels:]
 
 class MultichannelMultiheadAttention(nn.Module):
@@ -54,7 +56,7 @@ class MultichannelMultiheadAttention(nn.Module):
         with torch.cuda.amp.autocast_mode.autocast(enabled=False):
             qk = torch.matmul(q.float(), k.float()) / math.sqrt(h)
             a = torch.matmul(F.softmax(qk, dim=-1),v.float()).transpose(2,3).reshape(b,c,w,-1).transpose(2,3)
-
+            
         x = self.o_proj(a)
 
         return x
@@ -67,12 +69,14 @@ class FrameTransformerEncoder(nn.Module):
 
         self.norm1 = MultichannelLayerNorm(channels, features)
         self.attn = MultichannelMultiheadAttention(channels, num_heads, features)
-        self.alpha1 = nn.Parameter(torch.zeros(channels, features, 1))
+        self.alpha1 = nn.Parameter(torch.ones(channels, features, 1))
+        self.alpha1.data[-out_channels:] = 0
 
         self.norm2 = MultichannelLayerNorm(channels, features)
         self.conv1 = nn.Conv2d(channels, channels * expansion, kernel_size=3, padding=1)
         self.conv2 = nn.Conv2d(channels * expansion, channels, kernel_size=3, padding=1)
-        self.alpha2 = nn.Parameter(torch.zeros(channels, features, 1))
+        self.alpha2 = nn.Parameter(torch.ones(channels, features, 1))
+        self.alpha2.data[-out_channels:] = 0
         
     def __call__(self, x):       
         z = self.attn(self.norm1(x))
