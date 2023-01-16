@@ -22,25 +22,6 @@ from torch.nn import functional as F
 from lib.lr_scheduler_linear_warmup import LinearWarmupScheduler
 from lib.lr_scheduler_polynomial_decay import PolynomialDecayScheduler
 
-class CorrectNet(nn.Module):
-    def __init__(self, frame_transformer: FrameTransformerV1, corrector):
-        super().__init__()
-
-        self.frame_transformer = frame_transformer
-        self.corrector = corrector
-
-    def __call__(self, x):
-        y = x * torch.sigmoid(self.frame_transformer(x))
-        yh = self.corrector(torch.cat((x, y, x, y), dim=1))
-        
-        return yh, y
-
-    def correct(self, x, y):
-        yh = self.corrector(torch.cat((x, y, x, y), dim=1))
-        
-        return yh
-
-
 def setup_logger(name, logfile='LOGFILENAME.log', out_dir='logs'):
     logger = logging.getLogger(name)
     logger.setLevel(logging.DEBUG)
@@ -79,7 +60,6 @@ def train_epoch(dataloader, model, device, optimizer, accumulation_steps, progre
 
     mag_loss = 0
     batch_mag_loss = 0
-    batch_mag_loss2 = 0
     
     sum_loss = 0
     crit = nn.L1Loss()
@@ -91,17 +71,15 @@ def train_epoch(dataloader, model, device, optimizer, accumulation_steps, progre
 
     pbar = tqdm(dataloader) if progress_bar else dataloader
     for itr, (X, Y) in enumerate(pbar):
-        X = X.to(device)[:, :, :model.frame_transformer.max_bin]
-        Y = Y.to(device)[:, :, :model.frame_transformer.max_bin]
+        X = X.to(device)[:, :, :model.max_bin]
+        Y = Y.to(device)[:, :, :model.max_bin]
 
         with torch.cuda.amp.autocast_mode.autocast(enabled=grad_scaler is not None):
-            pred, pred0 = model(X)
+            pred = model(X)
             
         l1_mag = crit(pred, Y) / accumulation_steps
-        l1_mag2 = crit(pred0, Y) / accumulation_steps
 
         batch_mag_loss = batch_mag_loss + l1_mag
-        batch_mag_loss2 = batch_mag_loss2 + l1_mag2
         accum_loss = l1_mag
 
         if torch.logical_or(accum_loss.isnan(), accum_loss.isinf()):
@@ -115,7 +93,7 @@ def train_epoch(dataloader, model, device, optimizer, accumulation_steps, progre
 
         if (itr + 1) % accumulation_steps == 0:
             if progress_bar:
-                pbar.set_description(f'{step}: {str(batch_mag_loss.item())}|{str((batch_mag_loss - batch_mag_loss2).item())}')
+                pbar.set_description(f'{step}: {str(batch_mag_loss.item())}')
 
             if use_wandb:
                 wandb.log({
@@ -139,7 +117,6 @@ def train_epoch(dataloader, model, device, optimizer, accumulation_steps, progre
             batches = batches + 1
             mag_loss = mag_loss + batch_mag_loss.item()
             batch_mag_loss = 0
-            batch_mag_loss2 = 0
 
             if batches % save_every == 0 or step == stop - 1:
                 model_path = f'{model_dir}models/remover.{step}.tmp.pth'
@@ -160,23 +137,21 @@ def validate_epoch(dataloader, model, device):
 
     with torch.no_grad():
         for X, Y in dataloader:
-            X = X.to(device)[:, :, :model.frame_transformer.max_bin]
-            Y = Y.to(device)[:, :, :model.frame_transformer.max_bin]
+            X = X.to(device)[:, :, :model.max_bin]
+            Y = Y.to(device)[:, :, :model.max_bin]
 
             with torch.cuda.amp.autocast_mode.autocast():
-                pred, pred0 = model(X)
+                pred = model(X)
 
             loss = crit(pred, Y)
-            loss2 = crit(pred0, Y)
 
             if torch.logical_or(loss.isnan(), loss.isinf()):
                 print('nan validation loss; aborting')
                 quit()
             else:
                 mag_loss += loss.item() * len(X)
-                mag_loss2 += loss2.item() * len(X)
 
-    return mag_loss / len(dataloader.dataset), mag_loss2 / len(dataloader.dataset)
+    return mag_loss / len(dataloader.dataset)
 
 def main():
     p = argparse.ArgumentParser()
@@ -192,7 +167,6 @@ def main():
     p.add_argument('--unlock_n_first_layers', type=int, default=1)
     p.add_argument('--unlock_n_last_layers', type=int, default=8)
 
-    p.add_argument('--v1_checkpoint', type=str, default="H://models/local.111.model.pth")
     p.add_argument('--v1_num_heads', type=int, default=8)
     p.add_argument('--v1_channels', type=int, default=8)
     p.add_argument('--v1_expansion', type=int, default=24)
@@ -218,12 +192,12 @@ def main():
     p.add_argument('--lr_verbosity', type=int, default=1000)
     
     p.add_argument('--channels', type=int, default=8)
-    p.add_argument('--num_layers', type=int, default=11)
+    p.add_argument('--num_layers', type=int, default=12)
     p.add_argument('--expansion', type=int, default=4)
     p.add_argument('--num_heads', type=int, default=16)
     p.add_argument('--dropout', type=float, default=0.1)
     
-    p.add_argument('--stages', type=str, default='500000')
+    p.add_argument('--stages', type=str, default='1000000')
     p.add_argument('--cropsizes', type=str, default='256')
     p.add_argument('--batch_sizes', type=str, default='3')
     p.add_argument('--accumulation_steps', '-A', type=str, default='2')
@@ -280,15 +254,7 @@ def main():
     torch.manual_seed(args.seed)
 
     device = torch.device('cpu')
-    model = FrameTransformer(in_channels=6, channels=8, dropout=args.dropout, n_fft=args.n_fft, num_heads=args.num_heads, expansion=args.expansion, num_layers=args.num_layers)
-    v1 = FrameTransformerV1(channels=args.v1_channels, expansion=args.v1_expansion, n_fft=args.n_fft, dropout=0, num_heads=args.v1_num_heads)
-
-    model = CorrectNet(v1, model)
-    
-    # print(model.transformer[0].conv1a.weight_pw)
-    # #model.load_from_huggingface()    
-    # print(model.transformer[0].conv1a.weight_pw)
-    
+    model = FrameTransformer(in_channels=2, channels=args.channels, dropout=args.dropout, n_fft=args.n_fft, num_heads=args.num_heads, expansion=args.expansion, num_layers=args.num_layers)       
         
     val_dataset = None
     grad_scaler = torch.cuda.amp.grad_scaler.GradScaler() if args.mixed_precision else None
@@ -297,16 +263,11 @@ def main():
         device = torch.device('cuda:{}'.format(args.gpu))
         model.to(device)
 
-    if args.v1_checkpoint is not None and args.checkpoint is None:
-        model.frame_transformer.load_state_dict(torch.load(f'{args.v1_checkpoint}', map_location=device))
-
     if args.checkpoint is not None:
         model.load_state_dict(torch.load(f'{args.checkpoint}', map_location=device))
 
-    model.frame_transformer.requires_grad_(False)
-
     groups = [
-        { "params": filter(lambda p: p.requires_grad, model.corrector.parameters()), "lr": args.learning_rate },
+        { "params": filter(lambda p: p.requires_grad, model.parameters()), "lr": args.learning_rate },
     ]
 
     model_parameters = filter(lambda p: p.requires_grad, model.parameters())
@@ -365,7 +326,7 @@ def main():
 
         print('# epoch {}'.format(epoch))
         train_loss_mag, step = train_epoch(train_dataloader, model, device, optimizer, accum_steps, args.progress_bar, lr_warmup=scheduler, grad_scaler=grad_scaler, use_wandb=args.wandb, step=step, model_dir=args.model_dir, stop=args.decay_steps + args.warmup_steps)
-        val_loss_mag, loss2 = validate_epoch(val_dataloader, model, device)
+        val_loss_mag = validate_epoch(val_dataloader, model, device)
 
         if args.wandb:
             wandb.log({
@@ -374,16 +335,16 @@ def main():
             })
 
         print(
-            '  * training loss = {:.6f}, validation loss = {:.6f} ({:6f})'
-            .format(train_loss_mag, val_loss_mag, loss2)
+            '  * training loss = {:.6f}, validation loss = {:.6f}'
+            .format(train_loss_mag, val_loss_mag)
         )
 
         if val_loss_mag < best_loss:
             best_loss = val_loss_mag
             print('  * best validation loss')
 
-        model_path = f'{args.model_dir}models/{wandb.run.name if args.wandb else "local"}.{epoch}'
-        torch.save(model.corrector.state_dict(), f'{model_path}.v3corrector.pth')
+            model_path = f'{args.model_dir}models/{wandb.run.name if args.wandb else "local"}.{epoch}'
+            torch.save(model.state_dict(), f'{model_path}.v3model.pth')
 
         epoch += 1
 
