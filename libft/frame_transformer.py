@@ -22,26 +22,29 @@ class FrameTransformer(nn.Module):
         self.transformer = nn.Sequential(*[FrameTransformerEncoder(channels + 1, self.max_bin, dropout=dropout, expansion=expansion, num_heads=num_heads, out_channels=out_channels) for _ in range(num_layers)])
 
     def __call__(self, x):
+        if x.shape[1] != self.channels:
+            x = torch.cat([x for _ in range(self.channels // x.shape[1])], dim=1)
+
         h = torch.cat((self.positional_embedding(x), x), dim=1)
         return self.transformer(h)[:, -self.out_channels:]
 
 class MultichannelMultiheadAttention(nn.Module):
-    def __init__(self, channels, num_heads, features):
+    def __init__(self, channels, num_heads, features, kernel_size=3, padding=1):
         super().__init__()
 
         self.num_heads = num_heads
 
         self.q_proj = nn.Sequential(
             MultichannelLinear(channels, channels, features, features, bias=True),
-            nn.Conv2d(channels, channels, kernel_size=(1,3), padding=(0,1)))
+            nn.Conv2d(channels, channels, kernel_size=(1,kernel_size), padding=(0,padding)))
 
         self.k_proj = nn.Sequential(
             MultichannelLinear(channels, channels, features, features, bias=True),
-            nn.Conv2d(channels, channels, kernel_size=(1,3), padding=(0,1)))
+            nn.Conv2d(channels, channels, kernel_size=(1,kernel_size), padding=(0,padding)))
             
         self.v_proj = nn.Sequential(
             MultichannelLinear(channels, channels, features, features, bias=True),
-            nn.Conv2d(channels, channels, kernel_size=(1,3), padding=(0,1)))
+            nn.Conv2d(channels, channels, kernel_size=(1,kernel_size), padding=(0,padding)))
             
         self.o_proj = MultichannelLinear(channels, channels, features, features, depthwise=True)
 
