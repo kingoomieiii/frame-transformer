@@ -13,14 +13,15 @@ class MultichannelLayerNorm(nn.Module):
 
     def __call__(self, x):
         d = len(x.shape)
-        h = x
 
-        if d == 3:
-            h = h.unsqueeze(-1)
+        if d == 2:
+            x = x.unsqueeze(-1).unsqueeze(1)
+        elif d == 3:
+            x = x.unsqueeze(-1)
 
-        h = (torch.layer_norm(h.transpose(2,3), (self.weight.shape[-1],), eps=self.eps) * self.weight + self.bias).transpose(2,3)
+        x = (torch.layer_norm(x.transpose(2,3), (self.weight.shape[-1],), eps=self.eps) * self.weight + self.bias).transpose(2,3)
 
         if d == 2 or d == 3:
-            h = h.squeeze(-1)
+            x = x.squeeze(-1)
 
-        return h
+        return x

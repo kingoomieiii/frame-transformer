@@ -19,7 +19,7 @@ class FrameTransformer(nn.Module):
         self.repeats = repeats
 
         self.positional_embedding = PositionalEmbedding(channels, self.max_bin)
-        self.transformer = nn.Sequential(*[FrameTransformerEncoder(channels + 1, self.max_bin, dropout=dropout, expansion=expansion, num_heads=num_heads, out_channels=out_channels) for _ in range(num_layers)])
+        self.transformer = nn.Sequential(*[FrameTransformerEncoder(channels + 1, self.max_bin, dropout=dropout, expansion=expansion, num_heads=num_heads) for _ in range(num_layers)])
 
     def __call__(self, x):
         if x.shape[1] != self.channels:
@@ -28,25 +28,16 @@ class FrameTransformer(nn.Module):
         h = torch.cat((self.positional_embedding(x), x), dim=1)
         return self.transformer(h)[:, -self.out_channels:]
 
-class MultichannelMultiheadAttention(nn.Module):
+class MultibandFrameAttention(nn.Module):
     def __init__(self, channels, num_heads, features, kernel_size=3, padding=1):
         super().__init__()
 
         self.num_heads = num_heads
 
-        self.q_proj = nn.Sequential(
-            MultichannelLinear(channels, channels, features, features, bias=True),
-            nn.Conv2d(channels, channels, kernel_size=(1,kernel_size), padding=(0,padding)))
-
-        self.k_proj = nn.Sequential(
-            MultichannelLinear(channels, channels, features, features, bias=True),
-            nn.Conv2d(channels, channels, kernel_size=(1,kernel_size), padding=(0,padding)))
-            
-        self.v_proj = nn.Sequential(
-            MultichannelLinear(channels, channels, features, features, bias=True),
-            nn.Conv2d(channels, channels, kernel_size=(1,kernel_size), padding=(0,padding)))
-            
-        self.o_proj = MultichannelLinear(channels, channels, features, features, depthwise=True)
+        self.q_proj = nn.Conv2d(channels, channels, kernel_size=kernel_size, padding=padding)
+        self.k_proj = nn.Conv2d(channels, channels, kernel_size=kernel_size, padding=padding)
+        self.v_proj = nn.Conv2d(channels, channels, kernel_size=kernel_size, padding=padding)    
+        self.o_proj = nn.Conv2d(channels, channels, kernel_size=kernel_size, padding=padding)
 
     def __call__(self, x, mem=None):
         b,c,h,w = x.shape
@@ -63,13 +54,13 @@ class MultichannelMultiheadAttention(nn.Module):
         return x
         
 class FrameTransformerEncoder(nn.Module):
-    def __init__(self, channels, features, dropout=0.1, expansion=4, num_heads=8, out_channels=2):
+    def __init__(self, channels, features, dropout=0.1, expansion=4, num_heads=8):
         super(FrameTransformerEncoder, self).__init__()
 
         self.dropout = nn.Dropout(dropout)
 
         self.norm1 = MultichannelLayerNorm(channels, features)
-        self.attn = MultichannelMultiheadAttention(channels, num_heads, features)
+        self.attn = MultibandFrameAttention(channels, num_heads, features)
         self.alpha1 = nn.Parameter(torch.zeros(channels, features, 1))
 
         self.norm2 = MultichannelLayerNorm(channels, features)
