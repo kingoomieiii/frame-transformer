@@ -2,14 +2,19 @@ import torch
 import torch.nn as nn
 
 class MultichannelLayerNorm(nn.Module):
-    def __init__(self, channels, features, eps=0.00001):
+    def __init__(self, channels, features, eps=0.00001, trainable=True):
         super(MultichannelLayerNorm, self).__init__()
         
         self.eps = eps
-        self.weight = nn.Parameter(torch.empty(channels, 1, features))
-        self.bias = nn.Parameter(torch.empty(channels, 1, features))
-        nn.init.ones_(self.weight)
-        nn.init.zeros_(self.bias)
+
+        if trainable:
+            self.weight = nn.Parameter(torch.empty(channels, 1, features))
+            self.bias = nn.Parameter(torch.empty(channels, 1, features))
+            nn.init.ones_(self.weight)
+            nn.init.zeros_(self.bias)
+        else:
+            self.register_buffer('weight', torch.ones(channels, 1, features))
+            self.register_buffer('bias', torch.zeros(channels, 1, features))
 
     def __call__(self, x):
         d = len(x.shape)

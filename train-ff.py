@@ -6,6 +6,7 @@ import torch
 import torch.nn as nn
 import torch.utils.data
 import wandb
+import os
 
 from torch.optim.swa_utils import AveragedModel, SWALR
 
@@ -65,15 +66,17 @@ def train_epoch(dataloader, model, device, accumulation_steps, progress_bar, lr_
     torch.cuda.empty_cache()
     
     pbar = tqdm(dataloader) if progress_bar else dataloader
-    for itr, (X, Y, V) in enumerate(pbar):
+    for itr, (X, Y, VA, IA) in enumerate(pbar):
         X = X.to(device)[:, :, :model.features]
         Y = Y.to(device)[:, :, :model.features]
-        V = V.to(device)
+        VA = VA.to(device)
+        IA = IA.to(device)
 
         with torch.cuda.amp.autocast_mode.autocast(enabled=grad_scaler is not None):
-            out = model(X, y=Y, activity=V)
+            out = model(X, y=Y, va=VA, ia=IA)
             
         l1_mag = crit(out.detach(), Y[:, :2]) / accumulation_steps
+        batch_mag_loss = batch_mag_loss + l1_mag
 
         if torch.logical_or(l1_mag.isnan(), l1_mag.isinf()):
             print('nan training loss; aborting')
@@ -87,9 +90,10 @@ def train_epoch(dataloader, model, device, accumulation_steps, progress_bar, lr_
                 'loss': batch_loss.item()
             })
 
-            batches = batches + 1
-            mag_loss = mag_loss + batch_mag_loss.item()
-            batch_mag_loss = 0
+        batches = batches + 1
+        mag_loss = mag_loss + batch_mag_loss.item()
+        batch_mag_loss = 0
+        step = step + 1
 
     return mag_loss / batches, step
 
@@ -100,7 +104,7 @@ def validate_epoch(dataloader, model, swa_model, device):
     mag_loss = 0
 
     with torch.no_grad():
-        for X, Y, _ in dataloader:
+        for X, Y, _, _ in dataloader:
             X = X.to(device)[:, :, :model.features]
             Y = Y.to(device)[:, :, :model.features]
 
@@ -171,6 +175,8 @@ def main():
     p.add_argument('--cropsize', type=int, default=0)
     args = p.parse_args()
 
+    args.model_dir = os.path.join(args.model_dir, '')
+
     args.amsgrad = str.lower(args.amsgrad) == 'true'
     args.progress_bar = str.lower(args.progress_bar) == 'true'
     args.mixed_precision = str.lower(args.mixed_precision) == 'true'
@@ -206,7 +212,7 @@ def main():
     torch.manual_seed(args.seed)
 
     device = torch.device('cpu')
-    model = TestNet(channels=args.channels, num_heads=args.num_heads, n_fft=args.n_fft, num_layers=args.num_layers, lr=args.learning_rate)
+    model = TestNet(channels=args.channels, num_heads=args.num_heads, n_fft=args.n_fft, num_layers=args.num_layers, lr=args.learning_rate, warmup=args.warmup_steps, decay=args.decay_steps, curr_step=args.curr_step)
     
     if torch.cuda.is_available() and args.gpu >= 0:
         device = torch.device('cuda:{}'.format(args.gpu))
