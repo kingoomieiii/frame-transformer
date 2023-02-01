@@ -101,13 +101,14 @@ class TestNet(nn.Module):
 
     def __call__(self, x, y=None, activity=None):
         if self.training:
-            h = self.norm(self.in_layer(x, activity))
+            u = self.norm(self.in_layer(x, activity))
 
-            out = None
+            h, out = u, None
             for layer in self.positive_layers:
                 h = layer(h, activity)
                 out = h if out is None else torch.cat((out, h), dim=1)
 
+            h = u
             for layer in self.negative_layers:
                 h = layer(h, 1 - activity)
                 out = h if out is None else torch.cat((out, h), dim=1)
