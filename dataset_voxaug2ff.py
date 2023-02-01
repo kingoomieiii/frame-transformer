@@ -44,7 +44,7 @@ class VoxAugDataset(torch.utils.data.Dataset):
     def _get_vocals(self, idx, root=True):
         path = str(self.vocal_list[(self.epoch + idx) % len(self.vocal_list)])
         vdata = np.load(path)
-        V = vdata['X']
+        V, c = vdata['X'], vdata['c']
 
         if V.shape[2] > self.cropsize:
             start = np.random.randint(0, V.shape[2] - self.cropsize + 1)
@@ -64,20 +64,22 @@ class VoxAugDataset(torch.utils.data.Dataset):
                 V[1] = 0
 
         if np.random.uniform() < 0.025:
-            V2 = self._get_vocals(np.random.randint(len(self.vocal_list)))
+            V2, V2c = self._get_vocals(np.random.randint(len(self.vocal_list)))
             V = V + V2
+            c = np.max([c, V2c, np.abs(V).max()])
 
-        return V
+        return V, c
 
     def __getitem__(self, idx):
         path = str(self.curr_list[idx % len(self.curr_list)])
         data = np.load(path)
         aug = 'Y' not in data.files
 
-        X, c = data['X'], data['c']
+        X, c = data['X'], data['c'] if 'c' in data.files else data['Xc']
         Y = X if aug else data['Y']
 
         V = np.zeros_like(np.abs(X))
+        Vc = 1
         
         if not self.is_validation:
             if Y.shape[2] > self.cropsize:
@@ -85,11 +87,12 @@ class VoxAugDataset(torch.utils.data.Dataset):
                 stop = start + self.cropsize
                 Y = Y[:,:,start:stop]           
 
-            V = self._get_vocals(idx)
+            V, Vc = self._get_vocals(idx)
             X = Y + V
 
             if np.random.uniform() < self.inst_rate:
                 X = Y
+                Vc = 1
 
             if np.random.uniform() < 0.5:
                 X = X[::-1]
@@ -101,7 +104,7 @@ class VoxAugDataset(torch.utils.data.Dataset):
                 V = vdata['X']
                 X = Y + V
 
-        V = torch.tensor(np.abs(V))
+        V = torch.tensor(np.abs(V) / Vc)
         V = torch.tensor([V.min(), V.max(), V.mean(), V.median(), V.var()])
         X = np.clip(np.abs(X) / c, 0, 1)
         Y = np.clip(np.abs(Y) / c, 0, 1)

@@ -128,12 +128,11 @@ def main():
     p.add_argument('--mixed_precision', type=str, default='true')
     p.add_argument('--use_swa', type=str, default="false")
     p.add_argument('--learning_rate', '-l', type=float, default=1e-4)
-    p.add_argument('--learning_rate_swa', type=float, default=1e-4)
     
-    p.add_argument('--model_dir', type=str, default='H://')
-    p.add_argument('--instrumental_lib', type=str, default="C://cs2048_sr44100_hl1024_nf2048_of0|D://cs2048_sr44100_hl1024_nf2048_of0|F://cs2048_sr44100_hl1024_nf2048_of0|H://cs2048_sr44100_hl1024_nf2048_of0")
-    p.add_argument('--vocal_lib', type=str, default="C://cs2048_sr44100_hl1024_nf2048_of0_VOCALS|D://cs2048_sr44100_hl1024_nf2048_of0_VOCALS")
-    p.add_argument('--validation_lib', type=str, default="C://cs2048_sr44100_hl1024_nf2048_of0_VALIDATION")
+    p.add_argument('--model_dir', type=str, default='/media/ben/internal-nvme-b')
+    p.add_argument('--instrumental_lib', type=str, default="/home/ben/cs2048_sr44100_hl1024_nf2048_of0_PAIRS|/media/ben/internal-nvme-b/cs2048_sr44100_hl1024_nf2048_of0_PAIRS")
+    p.add_argument('--vocal_lib', type=str, default="/media/ben/internal-nvme-b/cs2048_sr44100_hl1024_nf2048_of0_VOCALS")
+    p.add_argument('--validation_lib', type=str, default="/media/ben/internal-nvme-b/cs2048_sr44100_hl1024_nf2048_of0_VALIDATION")
 
     p.add_argument('--curr_step', type=int, default=0)
     p.add_argument('--curr_epoch', type=int, default=0)
@@ -271,7 +270,7 @@ def main():
             )
 
         print('# epoch {}'.format(epoch))
-        #train_dataloader.dataset.set_epoch(epoch)
+        train_dataloader.dataset.set_epoch(epoch)
         train_loss_mag, step = train_epoch(train_dataloader, model, device, accum_steps, args.progress_bar, swa_model=swa_model, grad_scaler=grad_scaler, use_wandb=args.wandb, step=step, model_dir=args.model_dir)
         val_loss_mag = validate_epoch(val_dataloader, model, swa_model, device)
 

@@ -6,9 +6,8 @@ from lib.lr_scheduler_linear_warmup import LinearWarmupScheduler
 from lib.lr_scheduler_polynomial_decay import PolynomialDecayScheduler
 
 from libft.frame_transformer2 import FrameTransformerEncoder
-from libft.multichannel_linear import MultichannelLinear
 from libft.multichannel_layernorm import MultichannelLayerNorm
-from libft.multichannel_multihead_attention import MultichannelMultiheadAttention
+from libft.multichannel_linear import MultichannelLinear
 
 class SquaredReLU(nn.Module):
     def __call__(self, x):
@@ -89,8 +88,9 @@ class TestNet(nn.Module):
         self.features = n_fft // 2
         self.in_layer = Conv2d(in_channels, channels, self.features, lr=lr, decay_lr=decay_lr, warmup=warmup, decay=decay, curr_step=curr_step)
         self.norm = MultichannelLayerNorm(channels, self.features, trainable=False)
-        self.layers = nn.ModuleList([Layer(channels, channels, self.features, self.features, num_heads, lr=lr) for _ in range(num_layers)])
-        self.out = nn.Conv2d(channels * num_layers, out_channels, kernel_size=1, padding=0, bias=False)
+        self.positive_layers = nn.ModuleList([Layer(channels, channels, self.features, self.features, num_heads, lr=lr) for _ in range(num_layers)])
+        self.negative_layers = nn.ModuleList([Layer(channels, channels, self.features, self.features, num_heads, lr=lr) for _ in range(num_layers)])
+        self.out = MultichannelLinear(channels * num_layers * 2, out_channels, self.features, self.features) # nn.Conv2d(channels * num_layers * 2, out_channels, kernel_size=1, padding=0, bias=False)
         self.optim = torch.optim.Adam(self.out.parameters(), lr=lr)
         self.scaler = torch.cuda.amp.grad_scaler.GradScaler()        
 
@@ -104,8 +104,12 @@ class TestNet(nn.Module):
             h = self.norm(self.in_layer(x, activity))
 
             out = None
-            for layer in self.layers:
+            for layer in self.positive_layers:
                 h = layer(h, activity)
+                out = h if out is None else torch.cat((out, h), dim=1)
+
+            for layer in self.negative_layers:
+                h = layer(h, 1 - activity)
                 out = h if out is None else torch.cat((out, h), dim=1)
 
             self.optim.zero_grad()
@@ -122,7 +126,7 @@ class TestNet(nn.Module):
             h = self.in_layer(x)
 
             out = None
-            for layer in self.layers:
+            for layer in self.positive_layers:
                 h = layer(h)
                 out = h if out is None else torch.cat((out, h), dim=1)
 
