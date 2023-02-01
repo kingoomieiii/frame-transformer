@@ -51,7 +51,7 @@ class Conv2d(nn.Module):
         super(Conv2d, self).__init__()
 
         self.conv = nn.Sequential(
-            MultichannelLinear(in_channels, out_channels, in_features, in_features),
+            nn.Conv2d(in_channels, out_channels, kernel_size=kernel_size, padding=padding),
             nn.ReLU())
 
         self.optim = torch.optim.Adam(self.parameters(), lr=lr)    
@@ -92,7 +92,7 @@ class TestNet(nn.Module):
         self.norm = MultichannelLayerNorm(channels, self.features, trainable=False)
         self.vocal_layers = nn.ModuleList([Layer(channels, channels, self.features, self.features, num_heads, lr=lr) for _ in range(num_layers)])
         self.instrument_layers = nn.ModuleList([Layer(channels, channels, self.features, self.features, num_heads, lr=lr) for _ in range(num_layers)])
-        self.out = MultichannelLinear(channels * num_layers * 2, channels, self.features, self.features)
+        self.out = nn.Conv2d(channels * num_layers * 2, channels, 1, bias=False)
         self.optim = torch.optim.Adam(self.out.parameters(), lr=lr)
         self.scaler = torch.cuda.amp.grad_scaler.GradScaler()
 
