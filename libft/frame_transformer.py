@@ -6,7 +6,6 @@ import torch.nn.functional as F
 from libft.multichannel_linear import MultichannelLinear
 from libft.multichannel_layernorm import MultichannelLayerNorm
 from rotary_embedding_torch import RotaryEmbedding
-from libft.dense_frame_embedding import DenseFrameEmbedding
 
 class FrameTransformer(nn.Module):
     def __init__(self, in_channels=2, out_channels=2, channels=2, dropout=0.1, n_fft=2048, num_heads=4, expansion=4, num_layers=15, repeats=1, num_embeddings=1024):
