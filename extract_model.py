@@ -1,6 +1,7 @@
 from transformers import AutoModel, BertModel
-from libft.fbert import FrameTransformer
+from libft.frame_transformer_bert import FrameTransformer
 import torch
+import numpy as np
 
 import argparse
 import json
@@ -59,7 +60,10 @@ def main():
 
     model = FrameTransformer(channels=args.channels, n_fft=args.n_fft, num_heads=args.num_heads, expansion=args.expansion, num_layers=args.num_layers)
     model.transformer = load_from_huggingface(model.transformer, name=args.name)
-    torch.save(model.state_dict(), model_path)
+
+    model_parameters = filter(lambda p: p.requires_grad, model.parameters())
+    params = sum([np.prod(p.size()) for p in model_parameters])
+    print(f'# num params: {params}')    
 
 if __name__ == '__main__':
     main()

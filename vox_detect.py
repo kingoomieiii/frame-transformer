@@ -1,30 +1,14 @@
 import argparse
-import math
-import os
-import shutil
-import warnings
-import librosa
 import numpy as np
-import soundfile as sf
 import torch
-import json
-import time
-
-import shlex, subprocess
-
-from tqdm import tqdm
-from frame_transformer_thin import FrameTransformer
-
-from torch.nn import functional as F
-
+from libft.dataset_detection import VoxDetectDataset
 from lib import dataset
 from lib import spec_utils
-from lib import utils
 from lib import nets
 
-from vocal_detector import VocalDetector
+import torch.utils.data
 
-import ffmpeg
+from vocal_detector import VocalDetector
 
 class Separator(object):
 
@@ -131,33 +115,18 @@ class Separator(object):
 def main():
     p = argparse.ArgumentParser()
     p.add_argument('--gpu', '-g', type=int, default=-1)
-    p.add_argument('--pretrained_corrector', type=str, default="J://models/local.9.model.pth")
     p.add_argument('--pretrained_model', '-P', type=str, default='baseline.pth')
     p.add_argument('--vocal_detector', type=str, default="voxdetector.pth")
     p.add_argument('--input', '-i', required=True)
     p.add_argument('--output', '-o', type=str, default="G://dataset//novx")
-    p.add_argument('--num_res_encoders', type=int, default=4)
-    p.add_argument('--num_res_decoders', type=int, default=4)
     p.add_argument('--sr', '-r', type=int, default=44100)
     p.add_argument('--n_fft', '-f', type=int, default=2048)
     p.add_argument('--hop_length', '-H', type=int, default=1024)
     p.add_argument('--batchsize', '-B', type=int, default=16)
     p.add_argument('--cropsize', '-c', type=int, default=128)
     p.add_argument('--padding', type=int, default=64)
-    p.add_argument('--output_image', '-I', action='store_true')
-    p.add_argument('--postprocess', '-p', action='store_true')
-    p.add_argument('--create_webm', action='store_true')
-    p.add_argument('--num_encoders', type=int, default=2)
-    p.add_argument('--num_decoders', type=int, default=13)
-    p.add_argument('--tta', '-t', action='store_true')
-    p.add_argument('--cropsizes', type=str, default='128,256,512,1024')
-    p.add_argument('--depth', type=int, default=7)
-    p.add_argument('--num_transformer_blocks', type=int, default=2)
-    p.add_argument('--bias', type=str, default='true')
-    p.add_argument('--flag', type=str, default='false')
-    p.add_argument('--name', type=str, default=None)
 
-    p.add_argument('--include_phase', type=str, default='false')
+    p.add_argument('--instrumental_lib', type=str, default="C://cs2048_sr44100_hl1024_nf2048_of0|D://cs2048_sr44100_hl1024_nf2048_of0|F://cs2048_sr44100_hl1024_nf2048_of0|H://cs2048_sr44100_hl1024_nf2048_of0")
     p.add_argument('--num_heads', type=int, default=8)
     p.add_argument('--channels', type=int, default=8)
     p.add_argument('--num_res_blocks', type=int, default=1)
@@ -169,6 +138,7 @@ def main():
     args.flag = str.lower(args.flag) == 'true'
     args.include_phase = str.lower(args.include_phase) == 'true'
     args.cropsizes = [int(cropsize) for cropsize in args.cropsizes.split(',')]
+    args.instrumental_lib = [p for p in args.instrumental_lib.split('|')]
 
     print('loading model...', end=' ')
     device = torch.device('cpu')
@@ -186,136 +156,56 @@ def main():
         detector.to(device)
     print('done')
 
-    output_folder = os.path.join(args.output, '')
+    dataset = VoxDetectDataset(
+        path=args.instrumental_lib,
+        vocal_path=[],
+        is_validation=False,
+        inst_rate=1
+    )
 
-    process = None
-    queue = []
+    dataloader = torch.utils.data.DataLoader(
+        dataset=dataset,
+        batch_size=1,
+        num_workers=4,
+        prefetch_factor=4,
+        shuffle=False
+    )
 
-    if os.path.isdir(args.input):
-        args.input = os.path.join(args.input, '').replace("/", "\\")
-        d = os.path.basename(os.path.dirname(args.input))
-        output_folder = os.path.join(output_folder, d)
-        print(output_folder)
-        extensions = ['wav', 'm4a', 'mp3', 'mp4', 'flac']
-        cover_ext = ["jpg", "png", "bmp"]
+    model.eval()
 
-        cover = ""
+    for X, s in dataloader:
+        X = X.to(device)
+        
+        with torch.cuda.amp.autocast_mode.autocast():
+            mask = model(X)
 
-        if output_folder != '' and not os.path.exists(output_folder):
-            os.makedirs(output_folder)
+        v = X * (1 - mask)
 
-        files = []
-        d = os.listdir(args.input)
-        for f in d:
-            ext = f[::-1].split('.')[0][::-1]
+        vmin = v.min()
+        vmean = v.mean()
+        vvar = v.var()
+        vmed = torch.median(v)
+        mmin = mask.min()
+        mmean = mask.mean()
+        mmax = mask.max()
+        med = torch.median(mask)
 
-            if ext in extensions:
-                files.append(os.path.join(args.input, f))
+        d = [
+            vmin,
+            vmean,
+            vvar,
+            vmed,
+            mmin,
+            mmean,
+            mmax,
+            med
+        ]
 
-            if ext in cover_ext:
-                cover = os.path.join(args.input, f)
+        values = torch.tensor(d, dtype=torch.float32, device=device).unsqueeze(0)
+        f = torch.sigmoid(detector(values))[0].item()
 
-        curr_min = 0
-        curr_max = 0
-        curr_avg = 0
-
-        values = []
-
-        idx = 0
-        for file in tqdm(files):
-            with warnings.catch_warnings():
-                warnings.simplefilter("ignore")
-                X, sr = librosa.load(
-                    file, args.sr, False, dtype=np.float32, res_type='kaiser_fast')
-            basename = os.path.splitext(os.path.basename(file))[0]
-
-            if X.ndim == 1:
-                X = np.asarray([X, X])
-
-            X_spec = spec_utils.wave_to_spectrogram(X, args.hop_length, args.n_fft)
-
-            sp = Separator(None, model, device, args.batchsize, args.cropsize, args.n_fft,   args.postprocess)
-
-            if args.tta:
-                y_spec, v_spec, m_spec = sp.separate_tta(X_spec)
-            else:
-                y_spec, v_spec, m_spec, mask = sp.separate(X_spec, padding=args.padding, include_phase=args.include_phase)
-
-            v = np.abs(v_spec)
-            v = v / v.max()
-            vmin = v.min()
-            vmean = v.mean()
-            vvar = v.var()
-            vmed = np.median(v)
-            mmin = mask.min()
-            mmean = mask.mean()
-            mmax = mask.max()
-            med = np.median(mask)
-
-            d = [
-                vmin,
-                vmean,
-                vvar,
-                vmed,
-                mmin,
-                mmean,
-                mmax,
-                med
-            ]
-
-
-            values = torch.tensor(d, dtype=torch.float32, device=device).unsqueeze(0)
-            f = torch.sigmoid(detector(values))[0].item()
-
-            if f > 0.5:
-                print(f'{file} min={mask.min()} avg={mask.mean()} max={mask.max()} f={f}')
-
-            del X_spec
-            del X
-
-        print(f'min={curr_min / len(files)}, avg={curr_avg / len(files)}, max={curr_max / len(files)}')
-
-    else:
-        print('loading wave source...', end=' ')
-        X, sr = librosa.load(
-            args.input, args.sr, False, dtype=np.float32, res_type='kaiser_fast')
-        basename = os.path.splitext(os.path.basename(args.input))[0]
-        print('done')
-
-        if X.ndim == 1:
-            # mono to stereo
-            X = np.asarray([X, X])
-
-        print('stft of wave source...', end=' ')
-        X_spec = spec_utils.wave_to_spectrogram(X, args.hop_length, args.n_fft)
-        print('done')
-
-        sp = Separator(model, device, args.batchsize, args.cropsize, args.postprocess)
-
-        if args.tta:
-            y_spec, v_spec, m_spec = sp.separate_tta(X_spec)
-        else:
-            y_spec, v_spec, m_spec = sp.separate(X_spec, padding=args.padding)
-
-        print('inverse stft of instruments...', end=' ')
-        wave = spec_utils.spectrogram_to_wave(y_spec, hop_length=args.hop_length)
-        print('done')
-        sf.write('{}_Instruments.wav'.format(basename), wave.T, sr)
-
-        print('inverse stft of vocals...', end=' ')
-        c = np.abs(y_spec).max()
-        v_spec = c.copy()
-        v_spec.real = (v_spec.real / c + np.random.normal(size=v_spec.shape)) * c
-        wave = spec_utils.spectrogram_to_wave(v_spec, hop_length=args.hop_length)
-        print('done')
-        sf.write('{}_Vocals.wav'.format(basename), wave.T, sr)
-
-        if args.output_image:
-            image = spec_utils.spectrogram_to_image(y_spec)
-            utils.imwrite('{}_Instruments.jpg'.format(basename), image)
-
-            image = spec_utils.spectrogram_to_image(v_spec)
-            utils.imwrite('{}_Vocals.jpg'.format(basename), image)
+        if f > 0.5:
+            print(f'{s} min={mask.min()} avg={mask.mean()} max={mask.max()} f={f}')
 
 if __name__ == '__main__':
     main()

@@ -10,10 +10,9 @@ import torch.utils.data
 import wandb
 
 import os
-
 from tqdm import tqdm
 
-from dataset_voxaug2 import VoxAugDataset
+from libft.dataset_voxaug import VoxAugDataset
 from libft.frame_transformer import FrameTransformer
 from torch.nn import functional as F
 
@@ -74,6 +73,7 @@ def train_epoch(dataloader, model, device, optimizer, accumulation_steps, progre
 
         with torch.cuda.amp.autocast_mode.autocast(enabled=grad_scaler is not None):
             pred = model(X)
+            pred = X * torch.sigmoid(pred)
             
         l1_mag = crit(pred[:, :2], Y[:, :2]) / accumulation_steps
 
@@ -136,6 +136,7 @@ def validate_epoch(dataloader, model, device):
 
             with torch.cuda.amp.autocast_mode.autocast():
                 pred = model(X)
+                pred = X * torch.sigmoid(pred)
 
             l1_mag = crit(pred, Y)
             loss = l1_mag
@@ -155,7 +156,7 @@ def main():
     p.add_argument('--sr', '-r', type=int, default=44100)
     p.add_argument('--hop_length', '-H', type=int, default=1024)
     p.add_argument('--n_fft', '-f', type=int, default=2048)
-    p.add_argument('--checkpoint', type=str, default=None)
+    p.add_argument('--checkpoint', '-P', type=str, default=None)
     p.add_argument('--codebook', type=str, default=None)
     p.add_argument('--mixed_precision', type=str, default='true')
 
@@ -178,7 +179,7 @@ def main():
     p.add_argument('--curr_step', type=int, default=0)
     p.add_argument('--curr_epoch', type=int, default=0)
     p.add_argument('--warmup_steps', type=int, default=8000)
-    p.add_argument('--decay_steps', type=int, default=208000)
+    p.add_argument('--decay_steps', type=int, default=1008000)
     p.add_argument('--lr_scheduler_decay_target', type=int, default=1e-12)
     p.add_argument('--lr_scheduler_decay_power', type=float, default=1)
     p.add_argument('--lr_verbosity', type=int, default=1000)
@@ -186,14 +187,14 @@ def main():
     p.add_argument('--num_quantizers', type=int, default=4)
     p.add_argument('--num_embeddings', type=int, default=1024)
     p.add_argument('--channels', type=int, default=8)
-    p.add_argument('--num_layers', type=int, default=8)
+    p.add_argument('--num_layers', type=int, default=10)
     p.add_argument('--expansion', type=int, default=4)
-    p.add_argument('--num_heads', type=int, default=16)
+    p.add_argument('--num_heads', type=int, default=8)
     p.add_argument('--dropout', type=float, default=0.1)
     
     p.add_argument('--stages', type=str, default='500000')
     p.add_argument('--cropsizes', type=str, default='256')
-    p.add_argument('--batch_sizes', type=str, default='3')
+    p.add_argument('--batch_sizes', type=str, default='4')
     p.add_argument('--accumulation_steps', '-A', type=str, default='2')
     p.add_argument('--gpu', '-g', type=int, default=0)
     p.add_argument('--optimizer', type=str.lower, choices=['adam', 'adamw', 'sgd', 'radam', 'rmsprop'], default='adam')
@@ -345,7 +346,7 @@ def main():
             print('  * best validation loss')
 
         model_path = f'{args.model_dir}models/{wandb.run.name if args.wandb else "local"}.{epoch}'
-        torch.save(model.state_dict(), f'{model_path}.model.pth')
+        torch.save(model.state_dict(), f'{model_path}.v3model.pth')
         epoch += 1
 
 if __name__ == '__main__':

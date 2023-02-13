@@ -9,10 +9,8 @@ import torch.utils.data
 import wandb
 
 from tqdm import tqdm
-from dataset_denoising import DenoisingDataset
-
-from dataset_voxaug import VoxAugDataset
-from frame_transformer2 import FrameTransformer
+from libft.dataset_denoising import DenoisingDataset
+from libft.frame_transformer import FrameTransformer
 
 from lib.lr_scheduler_linear_warmup import LinearWarmupScheduler
 from lib.lr_scheduler_polynomial_decay import PolynomialDecayScheduler

@@ -1,9 +1,5 @@
-import math
 import torch
 import torch.nn as nn
-import numpy as np
-
-import torch.nn.functional as F
 
 # adapted from https://github.com/CompVis/taming-transformers/blob/master/taming/modules/vqvae/quantize.py
 
@@ -13,7 +9,7 @@ class FrameQuantizer(nn.Module):
 
         self.beta = beta
         self.embedding = nn.Embedding(num_embeddings, bins)
-        self.embedding.weight.data.uniform_()
+        self.embedding.weight.data.normal_()
 
     def forward(self, z):
         b,c,h,w = z.shape

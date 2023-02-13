@@ -6,15 +6,13 @@ import torch
 import torch.nn as nn
 import torch.utils.data
 import wandb
-import os
 
 from torch.optim.swa_utils import AveragedModel, SWALR
 
 from tqdm import tqdm
 
-from dataset_voxaug2ff import VoxAugDataset
-from libftff.testnet import TestNet
-
+from dataset_voxaug2 import VoxAugDataset
+from libft.frame_transformer_thin import FrameTransformer
 from torch.nn import functional as F
 
 from lib.lr_scheduler_linear_warmup import LinearWarmupScheduler
@@ -53,73 +51,113 @@ def init_epoch(dataloader, model, device):
 
         break
 
-def train_epoch(dataloader, model, device, accumulation_steps, progress_bar, lr_warmup=None, swa_model=None, grad_scaler=None, use_wandb=True, step=0, model_dir="", save_every=20000):
+def train_epoch(dataloader, model, device, optimizer, accumulation_steps, progress_bar, lr_warmup=None, swa_model=None, grad_scaler=None, use_wandb=True, step=0, include_phase=False, model_dir="", save_every=20000):
     model.train()
 
     mag_loss = 0
     batch_mag_loss = 0
     
+    phase_loss = 0
+    batch_phase_loss = 0
+
+    sum_loss = 0
     crit = nn.L1Loss()
     batch_loss = 0
     batches = 0
-
-    torch.cuda.empty_cache()
     
+    model.zero_grad()
+
     pbar = tqdm(dataloader) if progress_bar else dataloader
-    for itr, (X, Y, VA, IA) in enumerate(pbar):
-        X = X.to(device)[:, :, :model.features]
-        Y = Y.to(device)[:, :, :model.features]
-        VA = VA.to(device)
-        IA = IA.to(device)
+    for itr, (X, Y) in enumerate(pbar):
+        X = X.to(device)[:, :, :model.max_bin]
+        Y = Y.to(device)[:, :, :model.max_bin]
 
         with torch.cuda.amp.autocast_mode.autocast(enabled=grad_scaler is not None):
-            out = model(X, y=Y, va=VA, ia=IA)
+            pred = torch.sigmoid(model(X))
             
-        l1_mag = crit(out.detach(), Y[:, :2]) / accumulation_steps
-        batch_mag_loss = batch_mag_loss + l1_mag
+        l1_mag = crit(X[:, :2] * pred[:, :2], Y[:, :2]) / accumulation_steps
+        l1_phase = crit(pred[:, 2:], Y[:, 2:]) / accumulation_steps if include_phase else torch.zeros_like(l1_mag)
 
-        if torch.logical_or(l1_mag.isnan(), l1_mag.isinf()):
+        batch_mag_loss = batch_mag_loss + l1_mag
+        batch_phase_loss = batch_phase_loss + l1_phase
+        accum_loss = l1_mag + l1_phase
+
+        if torch.logical_or(accum_loss.isnan(), accum_loss.isinf()):
             print('nan training loss; aborting')
             quit()
 
-        if progress_bar:
-            pbar.set_description(f'{step}: {str(l1_mag.item())}')
+        if grad_scaler is not None:
+            grad_scaler.scale(accum_loss).backward()
+        else:
+            accum_loss.backward()
 
-        if use_wandb:
-            wandb.log({
-                'loss': batch_loss.item()
-            })
+        if (itr + 1) % accumulation_steps == 0:
+            if progress_bar:
+                pbar.set_description(f'{step}: {str(batch_mag_loss.item())}|{str(batch_phase_loss.item())}')
 
-        batches = batches + 1
-        mag_loss = mag_loss + batch_mag_loss.item()
-        batch_mag_loss = 0
-        step = step + 1
+            if use_wandb:
+                wandb.log({
+                    'loss': batch_loss.item()
+                })
 
-    return mag_loss / batches, step
+            if grad_scaler is not None:
+                grad_scaler.unscale_(optimizer)
+                torch.nn.utils.clip_grad.clip_grad_norm_(model.parameters(), 0.5)
+                grad_scaler.step(optimizer)
+                grad_scaler.update()
+            else:
+                optimizer.step()
 
-def validate_epoch(dataloader, model, swa_model, device):
+            step = step + 1
+            
+            if lr_warmup is not None:
+                if swa_model is not None:
+                    swa_model.update_parameters(model)
+                
+                lr_warmup.step()
+
+            model.zero_grad()
+            batches = batches + 1
+            mag_loss = mag_loss + batch_mag_loss.item()
+            phase_loss = phase_loss + batch_phase_loss.item()
+            batch_mag_loss = 0
+            batch_phase_loss = 0
+
+            if batches % save_every == 0:
+                model_path = f'{model_dir}models/remover.{step}.tmp.pth'
+                torch.save(model.state_dict(), model_path)
+
+    return mag_loss / batches, phase_loss / batches, step
+
+def validate_epoch(dataloader, model, swa_model, device, include_phase=False):
     model.eval()
     crit = nn.L1Loss()
 
     mag_loss = 0
+    phase_loss = 0
 
     with torch.no_grad():
-        for X, Y, _, _ in dataloader:
-            X = X.to(device)[:, :, :model.features]
-            Y = Y.to(device)[:, :, :model.features]
+        for X, Y in dataloader:
+            X = X.to(device)[:, :, :model.max_bin]
+            Y = Y.to(device)[:, :, :model.max_bin]
 
-            pred = model(X)
+            if swa_model is not None:
+                pred = torch.sigmoid(swa_model(X))
+            else:
+                pred = torch.sigmoid(model(X))
 
-            l1_mag = crit(pred[:, :2], Y[:, :2])
-            loss = l1_mag
+            l1_mag = crit(X[:, :2] * pred[:, :2], Y[:, :2])
+            l1_phase = crit(pred[:, 2:], Y[:, 2:]) if include_phase else torch.zeros_like(l1_mag)
+            loss = l1_mag + l1_phase
 
             if torch.logical_or(loss.isnan(), loss.isinf()):
                 print('nan validation loss; aborting')
                 quit()
             else:
                 mag_loss += l1_mag.item() * len(X)
+                phase_loss += l1_phase.item() * len(X)
 
-    return mag_loss / len(dataloader.dataset)
+    return mag_loss / len(dataloader.dataset), phase_loss / len(dataloader.dataset)
 
 def main():
     p = argparse.ArgumentParser()
@@ -132,35 +170,37 @@ def main():
     p.add_argument('--mixed_precision', type=str, default='true')
     p.add_argument('--use_swa', type=str, default="false")
     p.add_argument('--learning_rate', '-l', type=float, default=1e-4)
+    p.add_argument('--learning_rate_swa', type=float, default=1e-4)
     
-    p.add_argument('--model_dir', type=str, default='/media/ben/internal-nvme-b')
-    p.add_argument('--instrumental_lib', type=str, default="/home/ben/cs2048_sr44100_hl1024_nf2048_of0_PAIRS|/media/ben/internal-nvme-b/cs2048_sr44100_hl1024_nf2048_of0_PAIRS")
-    p.add_argument('--vocal_lib', type=str, default="/media/ben/internal-nvme-b/cs2048_sr44100_hl1024_nf2048_of0_VOCALS")
-    p.add_argument('--validation_lib', type=str, default="/media/ben/internal-nvme-b/cs2048_sr44100_hl1024_nf2048_of0_VALIDATION")
+    p.add_argument('--model_dir', type=str, default='H://')
+    p.add_argument('--instrumental_lib', type=str, default="C://cs2048_sr44100_hl1024_nf2048_of0|D://cs2048_sr44100_hl1024_nf2048_of0|F://cs2048_sr44100_hl1024_nf2048_of0|H://cs2048_sr44100_hl1024_nf2048_of0")
+    p.add_argument('--vocal_lib', type=str, default="C://cs2048_sr44100_hl1024_nf2048_of0_VOCALS|D://cs2048_sr44100_hl1024_nf2048_of0_VOCALS")
+    p.add_argument('--validation_lib', type=str, default="C://cs2048_sr44100_hl1024_nf2048_of0_VALIDATION")
 
     p.add_argument('--curr_step', type=int, default=0)
     p.add_argument('--curr_epoch', type=int, default=0)
-    p.add_argument('--warmup_steps', type=int, default=8000)
+    p.add_argument('--warmup_steps', type=int, default=2)
     p.add_argument('--decay_steps', type=int, default=1000000)
     p.add_argument('--lr_scheduler_decay_target', type=int, default=1e-12)
     p.add_argument('--lr_scheduler_decay_power', type=float, default=0.1)
     p.add_argument('--lr_verbosity', type=int, default=1000)
     
-    p.add_argument('--num_layers', type=int, default=12)
-    p.add_argument('--channels', type=int, default=16)
+    p.add_argument('--include_phase', type=str, default='false')
+    p.add_argument('--channels', type=int, default=8)
     p.add_argument('--feedforward_expansion', type=int, default=24)
     p.add_argument('--num_heads', type=int, default=8)
     p.add_argument('--dropout', type=float, default=0.1)
     
     p.add_argument('--stages', type=str, default='1108000')
     p.add_argument('--cropsizes', type=str, default='256')
-    p.add_argument('--batch_sizes', type=str, default='4')
+    p.add_argument('--batch_sizes', type=str, default='8')
     p.add_argument('--accumulation_steps', '-A', type=str, default='1')
     p.add_argument('--gpu', '-g', type=int, default=-1)
     p.add_argument('--optimizer', type=str.lower, choices=['adam', 'adamw', 'sgd', 'radam', 'rmsprop'], default='adam')
     p.add_argument('--amsgrad', type=str, default='false')
     p.add_argument('--weight_decay', type=float, default=0)
-    p.add_argument('--num_workers', '-w', type=int, default=4)
+    p.add_argument('--prefetch_factor', type=int, default=3)
+    p.add_argument('--num_workers', '-w', type=int, default=6)
     p.add_argument('--epoch', '-E', type=int, default=40)
     p.add_argument('--progress_bar', '-pb', type=str, default='true')
     p.add_argument('--save_all', type=str, default='true')
@@ -171,12 +211,10 @@ def main():
     p.add_argument('--wandb_project', type=str, default='VOCAL-REMOVER')
     p.add_argument('--wandb_entity', type=str, default='carperbr')
     p.add_argument('--wandb_run_id', type=str, default=None)
-    p.add_argument('--prefetch_factor', type=int, default=2)
     p.add_argument('--cropsize', type=int, default=0)
     args = p.parse_args()
 
-    args.model_dir = os.path.join(args.model_dir, '')
-
+    args.include_phase = str.lower(args.include_phase) == 'true'
     args.amsgrad = str.lower(args.amsgrad) == 'true'
     args.progress_bar = str.lower(args.progress_bar) == 'true'
     args.mixed_precision = str.lower(args.mixed_precision) == 'true'
@@ -212,7 +250,7 @@ def main():
     torch.manual_seed(args.seed)
 
     device = torch.device('cpu')
-    model = TestNet(channels=args.channels, num_heads=args.num_heads, n_fft=args.n_fft, num_layers=args.num_layers, lr=args.learning_rate, warmup=args.warmup_steps, decay=args.decay_steps, curr_step=args.curr_step)
+    model = FrameTransformer(in_channels=4 if args.include_phase else 2, out_channels=4 if args.include_phase else 2, channels=args.channels, expansion=args.feedforward_expansion, n_fft=args.n_fft, dropout=args.dropout, num_heads=args.num_heads)
     
     if torch.cuda.is_available() and args.gpu >= 0:
         device = torch.device('cuda:{}'.format(args.gpu))
@@ -233,12 +271,26 @@ def main():
     params = sum([np.prod(p.size()) for p in model_parameters])
     print(f'# {wandb.run.name if args.wandb else ""}; num params: {params}')    
     
+    optimizer = torch.optim.Adam(
+        groups,
+        lr=args.learning_rate,
+        weight_decay=args.weight_decay
+    )
+
     val_dataset = None
     grad_scaler = torch.cuda.amp.grad_scaler.GradScaler() if args.mixed_precision else None
     
     stage = 0
     step = args.curr_step
     epoch = args.curr_epoch
+
+    if args.use_swa:
+        scheduler = SWALR(optimizer, swa_lr=args.learning_rate_swa)
+    else:
+        scheduler = torch.optim.lr_scheduler.ChainedScheduler([
+            LinearWarmupScheduler(optimizer, target_lr=args.learning_rate, num_steps=args.warmup_steps, current_step=step, verbose_skip_steps=args.lr_verbosity),
+            PolynomialDecayScheduler(optimizer, target=args.lr_scheduler_decay_target, power=args.lr_scheduler_decay_power, num_decay_steps=args.decay_steps, start_step=args.warmup_steps, current_step=step, verbose_skip_steps=args.lr_verbosity)
+        ])
 
     best_loss = float('inf')
     while step < args.stages[-1]:
@@ -277,18 +329,20 @@ def main():
 
         print('# epoch {}'.format(epoch))
         train_dataloader.dataset.set_epoch(epoch)
-        train_loss_mag, step = train_epoch(train_dataloader, model, device, accum_steps, args.progress_bar, swa_model=swa_model, grad_scaler=grad_scaler, use_wandb=args.wandb, step=step, model_dir=args.model_dir)
-        val_loss_mag = validate_epoch(val_dataloader, model, swa_model, device)
+        train_loss_mag, train_loss_phase, step = train_epoch(train_dataloader, model, device, optimizer, accum_steps, args.progress_bar, lr_warmup=scheduler, swa_model=swa_model, grad_scaler=grad_scaler, use_wandb=args.wandb, step=step, include_phase=args.include_phase, model_dir=args.model_dir)
+        val_loss_mag, val_loss_phase = validate_epoch(val_dataloader, model, swa_model, device, include_phase=args.include_phase)
 
         if args.wandb:
             wandb.log({
                 'train_loss_mag': train_loss_mag,
+                'train_loss_phase': train_loss_phase,
                 'val_loss_mag': val_loss_mag,
+                'val_loss_phase': val_loss_phase
             })
 
         print(
-            '  * training loss = {:.6f}, validation loss = {:.6f}'
-            .format(train_loss_mag, val_loss_mag)
+            '  * training loss = {:.6f}, validation loss = {:.6f}, phase = {:.6f}'
+            .format(train_loss_mag, val_loss_mag, val_loss_phase)
         )
 
         if val_loss_mag < best_loss:
@@ -298,9 +352,9 @@ def main():
         model_path = f'{args.model_dir}models/{wandb.run.name if args.wandb else "local"}.{epoch}'
 
         if swa_model is not None:
-            torch.save(swa_model.state_dict(), f'{model_path}.modelwat.pth')
+            torch.save(swa_model.state_dict(), f'{model_path}.modelt.pth')
         else:
-            torch.save(model.state_dict(), f'{model_path}.modelwat.pth')
+            torch.save(model.state_dict(), f'{model_path}.modelt.pth')
 
         epoch += 1
 

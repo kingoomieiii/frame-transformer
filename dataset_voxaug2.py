@@ -7,12 +7,13 @@ import torch
 import torch.utils.data
 
 class VoxAugDataset(torch.utils.data.Dataset):
-    def __init__(self, path=[], vocal_path=[], is_validation=False, cropsize=256, seed=0):
+    def __init__(self, path=[], vocal_path=[], is_validation=False, cropsize=256, seed=0, inst_rate=0.025, data_limit=None):
         self.is_validation = is_validation
         self.cropsize = cropsize
         self.vocal_list = []
         self.curr_list = []
         self.epoch = 0
+        self.inst_rate = inst_rate
 
         for mp in path:
             mixes = [os.path.join(mp, f) for f in os.listdir(mp) if os.path.isfile(os.path.join(mp, f))]
@@ -30,6 +31,9 @@ class VoxAugDataset(torch.utils.data.Dataset):
             random.Random(seed).shuffle(self.vocal_list)
 
         random.Random(seed+1).shuffle(self.curr_list)
+
+        if data_limit is not None:
+            self.curr_list = self.curr_list[:data_limit]
 
     def set_epoch(self, epoch):
         self.epoch = epoch
@@ -56,10 +60,6 @@ class VoxAugDataset(torch.utils.data.Dataset):
             else:
                 V[1] = 0
 
-        if np.random.uniform() < 0.075:
-            V2 = self._get_vocals(np.random.randint(len(self.vocal_list)))
-            V = V + V2
-
         return V
 
     def __getitem__(self, idx):
@@ -78,10 +78,12 @@ class VoxAugDataset(torch.utils.data.Dataset):
 
             V = self._get_vocals(idx)
             X = Y + V
+
             c = np.max([c, np.abs(X).max()])
 
-            if np.random.uniform() < 0.025:
+            if np.random.uniform() < self.inst_rate:
                 X = Y
+                c = data['c']
 
             if np.random.uniform() < 0.5:
                 X = X[::-1]

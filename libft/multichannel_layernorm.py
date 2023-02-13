@@ -29,4 +29,26 @@ class MultichannelLayerNorm(nn.Module):
         if d == 2 or d == 3:
             x = x.squeeze(-1)
 
-        return x
+        return x   
+
+class FrameNorm(nn.Module):
+    def __init__(self, features):
+        super(FrameNorm, self).__init__()
+        
+        self.norm = nn.LayerNorm(features)
+
+    def __call__(self, x):
+        d = len(x.shape)
+        h = x
+
+        if d == 2:
+            h = h.unsqueeze(-1).unsqueeze(1)
+        elif d == 3:
+            h = h.unsqueeze(-1)
+
+        h = self.norm(h.transpose(2,3)).transpose(2,3)
+
+        if d == 2 or d == 3:
+            h = h.squeeze(-1)
+
+        return h

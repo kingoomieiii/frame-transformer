@@ -1,6 +1,5 @@
 import torch
 import torch.nn as nn
-import random
 import numpy as np
 import argparse
 import torch.utils.data
@@ -107,7 +106,7 @@ def main():
     ])
 
     step = 0
-    for epoch in range(100000):
+    for _ in range(100000):
         model.zero_grad()
 
         epoch_loss = 0
