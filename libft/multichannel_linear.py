@@ -26,7 +26,7 @@ class MultichannelLinear(nn.Module):
             if bias:
                 self.bias_dw = nn.Parameter(torch.empty(out_channels, 1, 1))
                 bound = 1 / math.sqrt(in_channels)
-                nn.init.uniform_(self.bias_pw, -bound, bound)
+                nn.init.uniform_(self.bias_dw, -bound, bound)
 
     def __call__(self, x):
         d = len(x.shape)
