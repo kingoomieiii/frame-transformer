@@ -82,16 +82,16 @@ class VoxAugDataset(torch.utils.data.Dataset):
                 V.imag = F.interpolate(torch.from_numpy(cropped.imag).unsqueeze(0), size=(V.shape[1], V.shape[2]), mode='bilinear', align_corners=True).squeeze(0).numpy()
 
         if np.random.uniform() < 0.2:
-            arr1 = F.interpolate(torch.rand((1, 1, 512,)) + 0.5, size=(1025), mode='linear', align_corners=True).squeeze(0).squeeze(0).numpy() * np.random.uniform(0.8, 1.2)
-            arr2 = F.interpolate(torch.rand((1, 1, 256,)) + 0.5, size=(1025), mode='linear', align_corners=True).squeeze(0).squeeze(0).numpy() * np.random.uniform(0.8, 1.2)
-            arr3 = F.interpolate(torch.rand((1, 1, 128,)) + 0.5, size=(1025), mode='linear', align_corners=True).squeeze(0).squeeze(0).numpy() * np.random.uniform(0.8, 1.2)
-            arr4 = F.interpolate(torch.rand((1, 1, 64,)) + 0.5, size=(1025), mode='linear', align_corners=True).squeeze(0).squeeze(0).numpy() * np.random.uniform(0.8, 1.2)
-            arr5 = F.interpolate(torch.rand((1, 1, 32,)) + 0.5, size=(1025), mode='linear', align_corners=True).squeeze(0).squeeze(0).numpy() * np.random.uniform(0.8, 1.2)
+            arr1 = F.interpolate(torch.rand((1, 1, 512,)) + 0.5, size=(1025), mode='linear', align_corners=True).squeeze(0).squeeze(0).numpy() * np.random.uniform(0.75, 1.5)
+            arr2 = F.interpolate(torch.rand((1, 1, 256,)) + 0.5, size=(1025), mode='linear', align_corners=True).squeeze(0).squeeze(0).numpy() * np.random.uniform(0.75, 1.5)
+            arr3 = F.interpolate(torch.rand((1, 1, 128,)) + 0.5, size=(1025), mode='linear', align_corners=True).squeeze(0).squeeze(0).numpy() * np.random.uniform(0.75, 1.5)
+            arr4 = F.interpolate(torch.rand((1, 1, 64,)) + 0.5, size=(1025), mode='linear', align_corners=True).squeeze(0).squeeze(0).numpy() * np.random.uniform(0.75, 1.5)
+            arr5 = F.interpolate(torch.rand((1, 1, 32,)) + 0.5, size=(1025), mode='linear', align_corners=True).squeeze(0).squeeze(0).numpy() * np.random.uniform(0.75, 1.5)
             eq = (arr1 + arr2 + arr3 + arr4 + arr5) * (1.0 / 5.0)
             eq = scipy.ndimage.gaussian_filter1d(eq, sigma=1)
             eq = np.expand_dims(eq, (0, 2))
             Vs = np.abs(V) / Vc
-            V = (Vs * eq) * np.abs(V).max() * np.exp(1.j * np.angle(V))
+            V = (Vs * eq) * Vc * np.exp(1.j * np.angle(V))
 
         if np.random.uniform() < 0.5:
             V = V[::-1]
@@ -101,10 +101,6 @@ class VoxAugDataset(torch.utils.data.Dataset):
                 V[0] = 0
             else:
                 V[1] = 0
-
-        if np.random.uniform() < 0.075:
-            V2 = self._get_vocals(np.random.randint(len(self.vocal_list)))
-            V = V + V2
 
         return V
 
