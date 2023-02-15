@@ -1,11 +1,12 @@
 import torch
 from torch import nn
 
-from libft.multichannel_multihead_attention import MultichannelMultiheadAttention
+from libft.multichannel_multihead_attention2 import MultichannelMultiheadAttention
 from libft.multichannel_layernorm import MultichannelLayerNorm
+from libft.positional_embedding import PositionalEmbedding
 
 class FrameTransformer(nn.Module):
-    def __init__(self, in_channels=2, out_channels=2, channels=2, dropout=0.1, n_fft=2048, num_heads=4, expansion=4, num_layers=15, repeats=1, num_embeddings=1024):
+    def __init__(self, in_channels=2, out_channels=2, channels=2, dropout=0.1, n_fft=2048, num_heads=4, expansion=4, num_layers=15, repeats=1, num_embeddings=1024, use_local_embedding=True):
         super(FrameTransformer, self).__init__()
         
         self.max_bin = n_fft // 2
@@ -14,12 +15,16 @@ class FrameTransformer(nn.Module):
         self.out_channels = out_channels
         self.repeats = repeats
         
-        self.embed = nn.Conv2d(in_channels, channels, kernel_size=3, padding=1, bias=False)
+        self.positional_embedding = PositionalEmbedding(channels - 1, self.max_bin) if use_local_embedding else None
+        self.embed = nn.Conv2d(in_channels, channels - (1 if use_local_embedding else 0), kernel_size=3, padding=1, bias=False)
         self.transformer = nn.ModuleList([FrameTransformerEncoder(channels, self.max_bin, dropout=dropout, expansion=expansion, num_heads=num_heads) for _ in range(num_layers)])
         self.out = nn.Conv2d(channels, out_channels, kernel_size=1, padding=0, bias=False)
 
     def __call__(self, x):
         h = self.embed(x)
+
+        if self.positional_embedding is not None:
+            h = torch.cat((h, self.positional_embedding(h)), dim=1)
 
         prev_qk = None
         for encoder in self.transformer:
