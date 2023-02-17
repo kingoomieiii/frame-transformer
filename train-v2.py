@@ -12,12 +12,23 @@ import wandb
 import os
 from tqdm import tqdm
 
-from libft.dataset_voxaug import VoxAugDataset
-from libft.frame_transformer_embedded import FrameTransformer
+from libft.dataset_voxaug2 import VoxAugDataset
+from libft.frame_transformer_full import FrameTransformer
 from torch.nn import functional as F
+
+import torch.fft
 
 from lib.lr_scheduler_linear_warmup import LinearWarmupScheduler
 from lib.lr_scheduler_polynomial_decay import PolynomialDecayScheduler
+
+# function
+def wiener_filter(signal, noise, snr, eps=1e-8):
+    signal_psd = torch.fft.fft(signal.transpose(2,3), dim=-1).abs().pow(2).mean(dim=-2)
+    noise_psd = torch.fft.fft(noise.transpose(2,3), dim=-1).abs().pow(2).mean(dim=-2)
+    wiener_coeffs = signal_psd / (signal_psd + noise_psd * 10**(-snr / 10) + eps)
+    filtered_signal = torch.sigmoid(torch.fft.ifft(torch.fft.fft(signal, dim=-1) * wiener_coeffs.unsqueeze(-1), dim=-1).real)
+    
+    return filtered_signal
 
 def setup_logger(name, logfile='LOGFILENAME.log', out_dir='logs'):
     logger = logging.getLogger(name)
@@ -55,8 +66,10 @@ def init_epoch(dataloader, model, device):
 def train_epoch(dataloader, model, device, optimizer, accumulation_steps, progress_bar, lr_warmup=None, grad_scaler=None, use_wandb=True, step=0, model_dir="", save_every=20000):
     model.train()
 
+    phase_loss = 0
     mag_loss = 0
     batch_mag_loss = 0
+    batch_p_loss = 0
     
     sum_loss = 0
     crit = nn.L1Loss()
@@ -67,18 +80,23 @@ def train_epoch(dataloader, model, device, optimizer, accumulation_steps, progre
     torch.cuda.empty_cache()
 
     pbar = tqdm(dataloader) if progress_bar else dataloader
-    for itr, (X, Y) in enumerate(pbar):
+    for itr, (X, PX, Y, PY) in enumerate(pbar):
         X = X.to(device)[:, :, :model.max_bin]
+        PX = PX.to(device)[:, :, :model.max_bin]
         Y = Y.to(device)[:, :, :model.max_bin]
+        PY = PY.to(device)[:, :, :model.max_bin]
 
         with torch.cuda.amp.autocast_mode.autocast(enabled=grad_scaler is not None):
-            pred = model(X)
-            pred = X * torch.sigmoid(pred)
+            pred = model(torch.cat((X, PX), dim=1))
+            phase = pred[:, 2:]
+            pred = X * torch.sigmoid(pred[:, :2])
             
-        l1_mag = crit(pred[:, :2], Y[:, :2]) / accumulation_steps
+        l1_mag = crit(pred, Y) / accumulation_steps
+        l1_p = crit(phase, PY) / accumulation_steps
 
         batch_mag_loss = batch_mag_loss + l1_mag
-        accum_loss = l1_mag
+        batch_p_loss = batch_p_loss + l1_p
+        accum_loss = l1_mag + l1_p
 
         if torch.logical_or(accum_loss.isnan(), accum_loss.isinf()):
             print('nan training loss; aborting')
@@ -91,7 +109,7 @@ def train_epoch(dataloader, model, device, optimizer, accumulation_steps, progre
 
         if (itr + 1) % accumulation_steps == 0:
             if progress_bar:
-                pbar.set_description(f'{step}: {str(batch_mag_loss.item())}')
+                pbar.set_description(f'{step}: {str(batch_mag_loss.item())}|{str(batch_p_loss.item())}')
 
             if use_wandb:
                 wandb.log({
@@ -115,6 +133,7 @@ def train_epoch(dataloader, model, device, optimizer, accumulation_steps, progre
             batches = batches + 1
             mag_loss = mag_loss + batch_mag_loss.item()
             batch_mag_loss = 0
+            batch_p_loss = 0
 
             if batches % save_every == 0:
                 model_path = f'{model_dir}models/remover.{step}.tmp.pth'
@@ -130,13 +149,15 @@ def validate_epoch(dataloader, model, device):
     torch.cuda.empty_cache()
 
     with torch.no_grad():
-        for X, Y in dataloader:
+        for X, PX, Y, PY in dataloader:
             X = X.to(device)[:, :, :model.max_bin]
+            PX = PX.to(device)[:, :, :model.max_bin]
             Y = Y.to(device)[:, :, :model.max_bin]
+            PY = PY.to(device)[:, :, :model.max_bin]
 
             with torch.cuda.amp.autocast_mode.autocast():
-                pred = model(X)
-                pred = X * torch.sigmoid(pred)
+                pred = model(torch.cat((X, PX), dim=1))
+                pred = X * torch.sigmoid(pred[:, :2])
 
             l1_mag = crit(pred, Y)
             loss = l1_mag
@@ -189,7 +210,7 @@ def main():
     p.add_argument('--channels', type=int, default=8)
     p.add_argument('--num_layers', type=int, default=10)
     p.add_argument('--expansion', type=int, default=4)
-    p.add_argument('--num_heads', type=int, default=16)
+    p.add_argument('--num_heads', type=int, default=8)
     p.add_argument('--dropout', type=float, default=0.1)
     
     p.add_argument('--stages', type=str, default='1000000')
@@ -251,7 +272,7 @@ def main():
     torch.manual_seed(args.seed)
 
     device = torch.device('cpu')
-    model = FrameTransformer(channels=args.channels, dropout=args.dropout, n_fft=args.n_fft, num_heads=args.num_heads, expansion=args.expansion)
+    model = FrameTransformer(in_channels=4, out_channels=4, channels=args.channels, dropout=args.dropout, n_fft=args.n_fft, num_heads=args.num_heads, expansion=args.expansion)
 
     val_dataset = None
     grad_scaler = torch.cuda.amp.grad_scaler.GradScaler() if args.mixed_precision else None
