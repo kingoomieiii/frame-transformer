@@ -56,10 +56,8 @@ class FrameTransformer(nn.Module):
         self.dec1 = FrameDecoder(channels * 2, channels * 1, self.max_bin)
         self.dec1_transformer = FrameTransformerDecoder(channels * 1, self.max_bin // 1, dropout=dropout, expansion=expansion, num_heads=num_heads, groups=1)
 
-        self.out = nn.Parameter(torch.empty(out_channels, channels))
-
-        nn.init.uniform_(self.out, a=-1/math.sqrt(channels+1), b=1/math.sqrt(channels+1))
-
+        self.out = Conv2d(channels, out_channels, kernel_size=1, padding=0)
+        
     def __call__(self, x):
         x = torch.cat((x, self.positional_embedding(x)), dim=1)
 
@@ -85,9 +83,7 @@ class FrameTransformer(nn.Module):
         d1 = self.dec1(d2, e1)
         d1 = self.dec1_transformer(d1, skip=e1)
 
-        out = torch.matmul(d1.transpose(1,3), self.out.t()).transpose(1,3)
-
-        return out
+        return self.out(d1)
         
 class FrameTransformerEncoder(nn.Module):
     def __init__(self, channels, features, dropout=0.1, expansion=4, num_heads=8, groups=2):
@@ -144,6 +140,21 @@ class FrameTransformerDecoder(nn.Module):
 class SquaredReLU(nn.Module):
     def __call__(self, x):
         return torch.relu(x) ** 2
+    
+class Conv2d(nn.Module):
+    def __init__(self, in_channels, out_channels, kernel_size, padding, groups=1, stride=1, bias=False):
+        super(Conv2d, self).__init__()
+
+        self.conv = nn.Conv2d(in_channels, out_channels, kernel_size=kernel_size, padding=padding, groups=groups, stride=stride, bias=bias)                
+        self.register_buffer('idx_dw', torch.arange(in_channels))
+        self.embedding_dw = nn.Embedding(in_channels, 1)
+        self.conv_dw = nn.Conv1d(1, 1, kernel_size=7, padding=3)
+
+    def forward(self, x):
+        if self.embedding_dw is not None:
+            x = x + self.conv_dw(self.embedding_dw(self.idx_dw).unsqueeze(0).unsqueeze(1).squeeze(-1)).unsqueeze(-1).transpose(1,2)
+
+        return self.conv(x)
 
 class ResBlock(nn.Module):
     def __init__(self, in_channels, out_channels, features, downsample=False):
@@ -152,9 +163,9 @@ class ResBlock(nn.Module):
         self.downsample = downsample
         self.activate = SquaredReLU()
         self.norm = MultichannelLayerNorm(in_channels * (2 if downsample else 1), features)
-        self.conv1 = nn.Conv2d(in_channels * (2 if downsample else 1), (in_channels * 2) if downsample else out_channels, kernel_size=3, padding=1, groups=2 if downsample else 1, stride=(2,1) if downsample else 1)
-        self.conv2 = nn.Conv2d(in_channels * 2 if downsample else out_channels, in_channels * 2 if downsample else out_channels, kernel_size=3, padding=1, groups=2 if downsample else 1)
-        self.identity = nn.Conv2d(in_channels * (2 if downsample else 1), (in_channels * 2) if downsample else out_channels, kernel_size=1, padding=0, groups=2 if downsample else 1, stride=(2,1) if downsample else 1) if (not downsample and in_channels != out_channels) or downsample else nn.Identity()
+        self.conv1 = Conv2d(in_channels * (2 if downsample else 1), (in_channels * 2) if downsample else out_channels, kernel_size=3, padding=1, groups=2 if downsample else 1, stride=(2,1) if downsample else 1)
+        self.conv2 = Conv2d(in_channels * 2 if downsample else out_channels, in_channels * 2 if downsample else out_channels, kernel_size=3, padding=1, groups=2 if downsample else 1)
+        self.identity = Conv2d(in_channels * (2 if downsample else 1), (in_channels * 2) if downsample else out_channels, kernel_size=1, padding=0, groups=2 if downsample else 1, stride=(2,1) if downsample else 1) if (not downsample and in_channels != out_channels) or downsample else nn.Identity()
 
     def __call__(self, x):
         h = self.conv2(self.activate(self.conv1(self.norm(x))))
