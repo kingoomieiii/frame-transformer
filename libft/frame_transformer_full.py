@@ -107,19 +107,6 @@ class FrameTransformer(nn.Module):
         d1 = self.dec1_transformer(d1, skip=e1)
 
         return self.out(d1)
-    
-        # function
-    def wiener_filter(self, signal, noise, snr, eps=1e-6):
-        # Compute power spectral densities (PSDs) of signal and noise
-        signal_psd = torch.fft.fft(signal.transpose(2,3), dim=-1).abs().pow(2).mean(dim=-2)
-        noise_psd = torch.fft.fft(noise.transpose(2,3), dim=-1).abs().pow(2).mean(dim=-2)
-        
-        # Compute optimal Wiener filter coefficients
-        wiener_coeffs = signal_psd / (signal_psd + noise_psd * 10**(-snr / 10) + eps)
-        # Apply Wiener filter to noisy signal
-        filtered_signal = torch.fft.ifft(torch.fft.fft(signal, dim=-1) * (wiener_coeffs + self.wiener_transform(wiener_coeffs)).unsqueeze(-1), dim=-1).real
-        
-        return filtered_signal
         
 class FrameTransformerEncoder(nn.Module):
     def __init__(self, channels, features, dropout=0.1, expansion=4, num_heads=8, groups=2):
@@ -133,7 +120,7 @@ class FrameTransformerEncoder(nn.Module):
 
         self.norm2 = MultichannelLayerNorm(channels, features)
         self.conv1 = MultichannelLinear(channels, channels, features, features * expansion, depthwise=True)
-        self.conv2 = MultichannelLinear(channels, channels, features * expansion, features, depthwise=True)
+        self.conv2 = MultichannelLinear(channels, channels, features * expansion, features)
         
     def __call__(self, x):
         z, _ = self.attn(self.norm1(x))
@@ -159,7 +146,7 @@ class FrameTransformerDecoder(nn.Module):
 
         self.norm3 = MultichannelLayerNorm(channels, features)
         self.conv1 = MultichannelLinear(channels, channels, features, features * expansion, depthwise=True)
-        self.conv2 = MultichannelLinear(channels, channels, features * expansion, features, depthwise=True)
+        self.conv2 = MultichannelLinear(channels, channels, features * expansion, features)
         
     def __call__(self, x, skip):      
         z, _ = self.attn1(self.norm1(x))
@@ -185,7 +172,7 @@ class ResBlock(nn.Module):
         self.activate = SquaredReLU()
         self.norm = MultichannelLayerNorm(in_channels * (2 if downsample else 1), features)
         self.conv1 = Conv2d(in_channels * (2 if downsample else 1), (in_channels * 2) if downsample else out_channels, kernel_size=3, padding=1, groups=4 if downsample else 2, stride=(2,1) if downsample else 1)
-        self.conv2 = Conv2d(in_channels * 2 if downsample else out_channels, in_channels * 2 if downsample else out_channels, kernel_size=3, padding=1, groups=4 if downsample else 1)
+        self.conv2 = Conv2d(in_channels * 2 if downsample else out_channels, in_channels * 2 if downsample else out_channels, kernel_size=3, padding=1, groups=4 if downsample else 2)
         self.identity = Conv2d(in_channels * (2 if downsample else 1), (in_channels * 2) if downsample else out_channels, kernel_size=1, padding=0, groups=4 if downsample else 2, stride=(2,1) if downsample else 1) if (not downsample and in_channels != out_channels) or downsample else nn.Identity()
 
     def __call__(self, x):
