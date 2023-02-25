@@ -2,7 +2,7 @@ import torch
 import torch.nn as nn
 
 class MultichannelLayerNorm(nn.Module):
-    def __init__(self, channels, features, eps=0.00001, trainable=True):
+    def __init__(self, channels, features, eps=1e-8, trainable=True):
         super(MultichannelLayerNorm, self).__init__()
         
         self.eps = eps

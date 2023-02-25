@@ -23,8 +23,8 @@ class PositionalEmbedding(nn.Module):
     def __init__(self, channels, features, max_seq_length=2048):
         super(PositionalEmbedding, self).__init__()
 
-        self.embedding = nn.Embedding(num_embeddings=max_seq_length, embedding_dim=features)
-        self.register_buffer('indices', torch.arange(max_seq_length))
+        # self.embedding = nn.Embedding(num_embeddings=max_seq_length, embedding_dim=features)
+        # self.register_buffer('indices', torch.arange(max_seq_length))
 
         self.extract1 = ResBlock(channels, 1, features, kernel_size=9, padding=4)
         self.extract2 = ResBlock(channels * 2, 1, features // 2, kernel_size=9, padding=4)
@@ -74,7 +74,7 @@ class PositionalEmbedding(nn.Module):
 
         e9 = F.interpolate(self.extract9(h), size=x.shape[2:], mode='bilinear', align_corners=True)
 
-        eg = self.embedding(self.indices[:x.shape[3]])
-        eg = eg.transpose(0,1).unsqueeze(0).unsqueeze(0)
+        # eg = self.embedding(self.indices[:x.shape[3]])
+        # eg = eg.transpose(0,1).unsqueeze(0).unsqueeze(0)
 
-        return self.out(torch.cat((e1, e2, e3, e4, e5, e6, e7, e8, e9), dim=1)) + eg
+        return self.out(torch.cat((e1, e2, e3, e4, e5, e6, e7, e8, e9), dim=1))

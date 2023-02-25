@@ -13,21 +13,27 @@ import os
 from tqdm import tqdm
 
 from libft.dataset_voxaug import VoxAugDataset
-from libft.frame_transformer_full import FrameTransformer
-from libft.signal_loss import sdr_loss
+from libft.frame_transformer import FrameTransformer
 from torch.nn import functional as F
 
-from lib.lr_scheduler_linear_warmup import LinearWarmupScheduler
+from lib.lr_scheduler_linear_warmup import LinearWarmupScheduler, LinearWarmup
 from lib.lr_scheduler_polynomial_decay import PolynomialDecayScheduler
 
+from libft.signal_loss import sdr_loss
 
-def train_epoch(dataloader, model, device, optimizer, accumulation_steps, progress_bar, lr_warmup=None, grad_scaler=None, use_wandb=True, step=0, model_dir="", save_every=20000):
+def train_epoch(dataloader, model, device, optimizer, accumulation_steps, progress_bar, lr_warmup=None, grad_scaler=None, use_wandb=True, step=0, model_dir="", save_every=20000, sdr_warmup: LinearWarmup = None):
     model.train()
 
     mag_loss = 0
     batch_mag_loss = 0
+    batch_mag2_loss = 0
     
+    sum_loss = 0
+
+    mae = nn.L1Loss()
+    mse = nn.MSELoss()
     batches = 0
+    gamma = 0.75
     
     model.zero_grad()
     torch.cuda.empty_cache()
@@ -39,13 +45,18 @@ def train_epoch(dataloader, model, device, optimizer, accumulation_steps, progre
 
         with torch.cuda.amp.autocast_mode.autocast(enabled=grad_scaler is not None):
             pred = model(X)
-            pred = X * torch.sigmoid(pred)
+            pred = torch.sigmoid(pred)
+            pmax = torch.max(pred)
+            pavg = torch.mean(pred)
+            pmin = torch.min(pred)
+            pred = X * pred
         
-        sdr = sdr_loss(pred, Y) / accumulation_steps
+        snr = sdr_loss(pred, Y) / accumulation_steps
         mae = F.l1_loss(pred, Y) / accumulation_steps
-        accum_loss = (mae + sdr) * 0.5
+        accum_loss = (mae + snr) * 0.5
         batch_mag_loss = batch_mag_loss + mae
-
+        batch_mag2_loss = batch_mag2_loss + snr
+        
         if torch.logical_or(accum_loss.isnan(), accum_loss.isinf()):
             print('nan training loss; aborting')
             quit()
@@ -57,7 +68,7 @@ def train_epoch(dataloader, model, device, optimizer, accumulation_steps, progre
 
         if (itr + 1) % accumulation_steps == 0:
             if progress_bar:
-                pbar.set_description(f'{step}: {str(batch_mag_loss.item())}')
+                pbar.set_description(f'{step}: {str(batch_mag_loss.item())}|{batch_mag2_loss.item()}-{pavg.item()}-{pmin.item()}')
 
             if use_wandb:
                 wandb.log({
@@ -66,7 +77,7 @@ def train_epoch(dataloader, model, device, optimizer, accumulation_steps, progre
 
             if grad_scaler is not None:
                 grad_scaler.unscale_(optimizer)
-                torch.nn.utils.clip_grad.clip_grad_norm_(model.parameters(), 0.5)
+                torch.nn.utils.clip_grad.clip_grad_norm_(model.parameters(), 1)
                 grad_scaler.step(optimizer)
                 grad_scaler.update()
             else:
@@ -77,10 +88,15 @@ def train_epoch(dataloader, model, device, optimizer, accumulation_steps, progre
             if lr_warmup is not None:
                 lr_warmup.step()
 
+            if sdr_warmup is not None:
+                sdr_warmup.step()
+
             model.zero_grad()
             batches = batches + 1
             mag_loss = mag_loss + batch_mag_loss.item()
             batch_mag_loss = 0
+            batch_mag2_loss = 0
+
             if batches % save_every == 0:
                 model_path = f'{model_dir}models/remover.{step}.tmp.pth'
                 torch.save(model.state_dict(), model_path)
@@ -157,7 +173,7 @@ def main():
     p.add_argument('--num_heads', type=int, default=8)
     p.add_argument('--dropout', type=float, default=0.1)
     
-    p.add_argument('--stages', type=str, default='1000000')
+    p.add_argument('--stages', type=str, default='500000')
     p.add_argument('--cropsizes', type=str, default='256')
     p.add_argument('--batch_sizes', type=str, default='4')
     p.add_argument('--accumulation_steps', '-A', type=str, default='2')
@@ -208,7 +224,8 @@ def main():
     train_dataset = VoxAugDataset(
         path=args.instrumental_lib,
         vocal_path=args.vocal_lib,
-        is_validation=False
+        is_validation=False,
+        seed=1
     )
     
     random.seed(args.seed)
@@ -216,7 +233,7 @@ def main():
     torch.manual_seed(args.seed)
 
     device = torch.device('cpu')
-    model = FrameTransformer(in_channels=2, out_channels=2, channels=args.channels, dropout=args.dropout, n_fft=args.n_fft, num_heads=args.num_heads, expansion=args.expansion)
+    model = FrameTransformer(channels=args.channels, dropout=args.dropout, n_fft=args.n_fft, num_heads=args.num_heads, expansion=args.expansion, num_layers=args.num_layers)
 
     val_dataset = None
     grad_scaler = torch.cuda.amp.grad_scaler.GradScaler() if args.mixed_precision else None

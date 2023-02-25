@@ -21,8 +21,8 @@ class MultichannelLinear(nn.Module):
 
             if include_position:
                 self.register_buffer('idx_pw', torch.arange(in_features))
-                self.embedding_pw = nn.Embedding(in_features, 1)
-                self.conv_pw = nn.Conv1d(1, 1, kernel_size=7, padding=3)
+                self.embedding_pw = nn.Embedding(in_features, in_features)
+                self.conv_pw = nn.Conv1d(in_features, 1, kernel_size=3, padding=1)
 
         self.weight_dw = None
         self.bias_dw = None
@@ -37,8 +37,8 @@ class MultichannelLinear(nn.Module):
 
             if include_position:
                 self.register_buffer('idx_dw', torch.arange(in_channels))
-                self.embedding_dw = nn.Embedding(in_channels, 1)
-                self.conv_dw = nn.Conv1d(1, 1, kernel_size=7, padding=3)
+                self.embedding_dw = nn.Embedding(in_channels, in_channels)
+                self.conv_dw = nn.Conv1d(in_channels, 1, kernel_size=3, padding=1)
 
     def __call__(self, x):
         d = len(x.shape)
@@ -49,7 +49,7 @@ class MultichannelLinear(nn.Module):
             x = x.unsqueeze(-1)
 
         if self.embedding_pw is not None:
-            x = x + self.conv_pw(self.embedding_pw(self.idx_pw).unsqueeze(0).unsqueeze(1).squeeze(-1)).unsqueeze(-1)
+            x = x + self.conv_pw(self.embedding_pw(self.idx_pw).unsqueeze(0)).unsqueeze(-1)
 
         if self.weight_pw is not None:
             x = torch.matmul(x.transpose(2,3), self.weight_pw.transpose(1,2)).transpose(2,3)
@@ -58,7 +58,7 @@ class MultichannelLinear(nn.Module):
                 x = x + self.bias_pw
 
         if self.embedding_dw is not None:
-            x = x + self.conv_dw(self.embedding_dw(self.idx_dw).unsqueeze(0).unsqueeze(1).squeeze(-1)).unsqueeze(-1).transpose(1,2)
+            x = x + self.conv_dw(self.embedding_dw(self.idx_dw).unsqueeze(0)).transpose(1,2).unsqueeze(-1)
 
         if self.weight_dw is not None:
             x = torch.matmul(x.transpose(1,3), self.weight_dw.t()).transpose(1,3)
@@ -70,3 +70,7 @@ class MultichannelLinear(nn.Module):
             x = x.squeeze(-1)
         
         return x
+
+class SquaredReLU(nn.Module):
+    def __call__(self, x):
+        return torch.relu(x) ** 2
