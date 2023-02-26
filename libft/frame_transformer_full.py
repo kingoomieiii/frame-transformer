@@ -40,8 +40,8 @@ class FrameTransformer(nn.Module):
         self.enc6 = nn.Sequential(
             FrameEncoder(channels * 16, channels * 32, self.max_bin // 16),
             FrameTransformerEncoder(channels * 32, self.max_bin // 32, dropout=dropout, expansion=expansion, num_heads=num_heads))
-        
-        self.bridge = nn.Sequential(*[FrameTransformerEncoder(channels * 32, self.max_bin // 32, dropout=dropout, expansion=expansion, num_heads=num_heads) for _ in range(4)])
+                
+        self.bridge = nn.Sequential(*[FrameTransformerEncoder(channels * 32, self.max_bin // 32, dropout=dropout, expansion=expansion, num_heads=num_heads) for _ in range(8)])
         
         self.dec5 = FrameDecoder(channels * 32, channels * 16, self.max_bin // 16)
         self.dec5_transformer = FrameTransformerDecoder(channels * 16, self.max_bin // 16, dropout=dropout, expansion=expansion, num_heads=num_heads)
@@ -101,8 +101,8 @@ class FrameTransformerEncoder(nn.Module):
         self.attn = MultichannelMultiheadAttention(channels, num_heads, features, depthwise=True)
 
         self.norm2 = MultichannelLayerNorm(channels, features)
-        self.conv1 = MultichannelLinear(channels, channels * expansion, features, features, depthwise=True)
-        self.conv2 = MultichannelLinear(channels * expansion, channels, features, features)
+        self.conv1 = MultichannelLinear(channels, channels, features, features * expansion, depthwise=True)
+        self.conv2 = MultichannelLinear(channels, channels, features * expansion, features)
 
     def __call__(self, x):
         z, _ = self.attn(self.norm1(x))
@@ -147,15 +147,15 @@ class SquaredReLU(nn.Module):
         return torch.relu(x) ** 2
 
 class ResBlock(nn.Module):
-    def __init__(self, in_channels, out_channels, features, downsample=False, upsample=False):
+    def __init__(self, in_channels, out_channels, features, downsample=False, upsample=False, kernel_size=3, padding=1):
         super(ResBlock, self).__init__()
 
         self.downsample = downsample
         self.activate = SquaredReLU()
         self.norm = MultichannelLayerNorm(in_channels * (2 if downsample else 1), features)
-        self.conv1 = nn.Conv2d(in_channels * (2 if downsample else 1), (in_channels * 2) if downsample else out_channels, kernel_size=3, padding=1, stride=(2,1) if downsample else 1)
-        self.conv2 = nn.Conv2d(in_channels * 2 if downsample else out_channels, in_channels * 2 if downsample else out_channels, kernel_size=3, padding=1)
-        self.identity = nn.Conv2d(in_channels * (2 if downsample else 1), (in_channels * 2) if downsample else out_channels, kernel_size=1, padding=0, stride=(2,1) if downsample else 1) if (not downsample and in_channels != out_channels) or downsample else nn.Identity()
+        self.conv1 = Conv2d(in_channels * (2 if downsample else 1), (in_channels * 2) if downsample else out_channels, kernel_size=kernel_size, padding=padding, stride=(2,1) if downsample else 1, transpose=upsample)
+        self.conv2 = Conv2d(in_channels * 2 if downsample else out_channels, in_channels * 2 if downsample else out_channels, kernel_size=3, padding=1)
+        self.identity = Conv2d(in_channels * (2 if downsample else 1), (in_channels * 2) if downsample else out_channels, kernel_size=1, padding=0, stride=(2,1) if downsample else 1, transpose=upsample) if (not downsample and in_channels != out_channels) or downsample else nn.Identity()
 
     def __call__(self, x):
         h = self.conv2(self.activate(self.conv1(self.norm(x))))
@@ -182,12 +182,16 @@ class FrameDecoder(nn.Module):
     def __init__(self, in_channels, out_channels, features):
         super(FrameDecoder, self).__init__()
 
-        self.upsample = nn.ConvTranspose2d(out_channels, out_channels, kernel_size=(4,3), padding=1, stride=(2,1), bias=False)
+        self.activate = SquaredReLU()
+        self.conv1 = Conv2d(out_channels, out_channels, kernel_size=(4,3), padding=1, stride=(2,1), transpose=True)
+        self.conv2 = Conv2d(out_channels, out_channels, kernel_size=3, padding=1)
+        self.identity = nn.Upsample(scale_factor=(2,1), mode='bilinear', align_corners=True)
         self.body = ResBlock(out_channels * 2, out_channels, features)
 
     def __call__(self, x, skip):
         x = torch.cat((x[:, :(x.shape[1] // 2), :, :], x[:, (x.shape[1] // 2):]), dim=3)
-        x = torch.cat((self.upsample(x), skip), dim=1)
+        x = self.identity(x) + self.conv2(self.activate(self.conv1(x)))
+        x = torch.cat((x, skip), dim=1)
         x = self.body(x)
 
         return x
@@ -197,35 +201,36 @@ class MultichannelMultiheadAttention(nn.Module):
         super().__init__()
 
         self.num_heads = num_heads
-        self.rotary_embedding = RotaryEmbedding(features  // num_heads)
 
         self.q_proj = nn.Sequential(
-            Conv2d(channels, channels, kernel_size=3, padding=1, bias=False, groups=1) if include_conv else nn.Identity(),
-            MultichannelLinear(channels, channels, features, features))
+            Conv2d(channels, channels, kernel_size=7, padding=3, bias=False, groups=channels) if include_conv else nn.Identity(),
+            MultichannelLinear(channels, channels, features, features, depthwise=True))
         
         self.k_proj = nn.Sequential(
-            Conv2d(channels, channels, kernel_size=3, padding=1, bias=False, groups=1) if include_conv else nn.Identity(),
-            MultichannelLinear(channels, channels, features, features))
+            Conv2d(channels, channels, kernel_size=7, padding=3, bias=False, groups=channels) if include_conv else nn.Identity(),
+            MultichannelLinear(channels, channels, features, features, depthwise=True))
         
         self.v_proj = nn.Sequential(
-            Conv2d(channels, channels, kernel_size=3, padding=1, bias=False, groups=1) if include_conv else nn.Identity(),
-            MultichannelLinear(channels, channels, features, features))
+            Conv2d(channels, channels, kernel_size=7, padding=3, bias=False, groups=channels) if include_conv else nn.Identity(),
+            MultichannelLinear(channels, channels, features, features, depthwise=True))
         
         self.o_proj = MultichannelLinear(channels, channels, features, features, depthwise=True)
 
     def __call__(self, x, mem=None, prev_qk=None):
         b,c,h,w = x.shape
-        q = self.rotary_embedding.rotate_queries_or_keys(self.q_proj(x).transpose(2,3).reshape(b,c,w,self.num_heads,-1).permute(0,1,3,2,4))
-        k = self.rotary_embedding.rotate_queries_or_keys(self.k_proj(x if mem is None else mem).transpose(2,3).reshape(b,c,w,self.num_heads,-1).permute(0,1,3,2,4)).transpose(3,4)
+        q = self.q_proj(x).transpose(2,3).reshape(b,c,w,self.num_heads,-1).permute(0,1,3,2,4)
+        k = self.k_proj(x if mem is None else mem).transpose(2,3).reshape(b,c,w,self.num_heads,-1).permute(0,1,3,2,4).transpose(3,4)
         v = self.v_proj(x if mem is None else mem).transpose(2,3).reshape(b,c,w,self.num_heads,-1).permute(0,1,3,2,4)
 
-        with torch.cuda.amp.autocast_mode.autocast(enabled=False):
-            qk = torch.matmul(q.float(), k.float()) / math.sqrt(h)
+        qk = torch.matmul(q.float(), k.float()) / math.sqrt(h)
 
-            if prev_qk is not None:
-                qk = qk + prev_qk
+        if prev_qk is not None:
+            qk = qk + prev_qk
 
             a = torch.matmul(F.softmax(qk, dim=-1),v.float()).transpose(2,3).reshape(b,c,w,-1).transpose(2,3)
+            a = torch.matmul(F.softmax(qk, dim=-1),v.float()).transpose(2,3).reshape(b,c,w,-1).transpose(2,3)
+
+        a = torch.matmul(F.softmax(qk, dim=-1),v.float()).transpose(2,3).reshape(b,c,w,-1).transpose(2,3)
 
         x = self.o_proj(a)
 

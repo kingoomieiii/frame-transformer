@@ -22,7 +22,7 @@ class MultichannelLinear(nn.Module):
             if include_position:
                 self.register_buffer('idx_pw', torch.arange(in_features))
                 self.embedding_pw = nn.Embedding(in_features, in_features)
-                self.conv_pw = nn.Conv1d(in_features, 1, kernel_size=3, padding=1)
+                self.conv_pw = nn.Conv1d(in_features, 1, kernel_size=9, padding=4)
 
         self.weight_dw = None
         self.bias_dw = None
@@ -38,7 +38,7 @@ class MultichannelLinear(nn.Module):
             if include_position:
                 self.register_buffer('idx_dw', torch.arange(in_channels))
                 self.embedding_dw = nn.Embedding(in_channels, in_channels)
-                self.conv_dw = nn.Conv1d(in_channels, 1, kernel_size=3, padding=1)
+                self.conv_dw = nn.Conv1d(in_channels, 1, kernel_size=9, padding=4)
 
     def __call__(self, x):
         d = len(x.shape)
