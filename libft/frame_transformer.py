@@ -63,7 +63,7 @@ class Conv2d(nn.Module):
         self.conv = nn.Conv2d(in_channels, out_channels, kernel_size=kernel_size, padding=padding, groups=groups, stride=stride, bias=bias) if not transpose else nn.ConvTranspose2d(in_channels, out_channels, kernel_size=kernel_size, padding=padding, groups=groups, stride=stride, bias=bias)
         self.register_buffer('idx_dw', torch.arange(in_channels))
         self.embedding_dw = nn.Embedding(in_channels, in_channels)
-        self.conv_dw = nn.Conv1d(in_channels, 1, kernel_size=7, padding=3, bias=True)
+        self.conv_dw = nn.Conv1d(in_channels, 1, kernel_size=9, padding=4)
 
     def forward(self, x):
         if self.embedding_dw is not None:
