@@ -36,7 +36,7 @@ class FrameTransformer(nn.Module):
         self.enc6 = FrameEncoder(channels * 16, channels * 32, self.max_bin // 16)
         self.enc6_transformer = FrameTransformerEncoder(channels * 32, self.max_bin // 32, dropout=dropout, expansion=expansion, num_heads=num_heads)
         
-        self.bridge = nn.Sequential(*[FrameTransformerBridge(channels * 32, self.max_bin // 32, dropout=dropout, expansion=expansion, num_heads=num_heads) for _ in range(4)])
+        self.bridge = nn.Sequential(*[FrameTransformerBridge(channels * 32, self.max_bin // 32, dropout=dropout, expansion=expansion, num_heads=num_heads) for _ in range(11)])
         
         self.dec5 = FrameDecoder(channels * 32, channels * 16, self.max_bin // 16)
         self.dec5_transformer = FrameTransformerDecoder(channels * 16, self.max_bin // 16, dropout=dropout, expansion=expansion, num_heads=num_heads)
@@ -237,15 +237,15 @@ class FrameDecoder(nn.Module):
         self.body = ResBlock(out_channels * 4, out_channels * 2, features)
 
     def __call__(self, x, skip):
-        skip = torch.cat((skip[:, :, :, :skip.shape[3] // 2], skip[:, :, :, skip.shape[3] // 2:]), dim=1)
-        x = torch.cat((self.upsample(x), skip), dim=1)
+        x = self.upsample(x)
+        x = torch.cat((x[:, :(x.shape[1] // 2), :, :], skip[:, :, :, :skip.shape[3] // 2], x[:, (x.shape[1] // 2):], skip[:, :, :, skip.shape[3] // 2:]), dim=1)
         x = self.body(x)
         x = torch.cat((x[:, :(x.shape[1] // 2), :, :], x[:, (x.shape[1] // 2):]), dim=3)
 
         return x
 
 class MultichannelMultiheadAttention(nn.Module):
-    def __init__(self, channels, num_heads, features, depthwise=False, include_conv=True):
+    def __init__(self, channels, num_heads, features, depthwise=False, include_conv=True, kernel_size=3, padding=1):
         super().__init__()
 
         self.num_heads = num_heads
@@ -270,13 +270,13 @@ class MultichannelMultiheadAttention(nn.Module):
         k = self.k_proj(x if mem is None else mem).transpose(2,3).reshape(b,c,w,self.num_heads,-1).permute(0,1,3,2,4).transpose(3,4)
         v = self.v_proj(x if mem is None else mem).transpose(2,3).reshape(b,c,w,self.num_heads,-1).permute(0,1,3,2,4)
 
-        qk = torch.matmul(q, k) / math.sqrt(h)
+        with torch.cuda.amp.autocast_mode.autocast(enabled=False):
+            qk = torch.matmul(q.float(), k.float()) / math.sqrt(h)
 
         if prev_qk is not None:
             qk = qk + prev_qk
 
         a = torch.matmul(F.softmax(qk, dim=-1),v).transpose(2,3).reshape(b,c,w,-1).transpose(2,3)
-
         x = self.o_proj(a)
 
         return x, qk
