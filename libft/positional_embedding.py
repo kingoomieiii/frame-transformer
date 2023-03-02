@@ -1,10 +1,11 @@
 # inspired from https://arxiv.org/abs/2001.08248
 
+import math
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from libft.multichannel_layernorm import MultichannelLayerNorm
-
+           
 class ResBlock(nn.Module):
     def __init__(self, in_channels, out_channels, features, kernel_size=3, padding=1, downsample=False):
         super(ResBlock, self).__init__()
@@ -20,21 +21,18 @@ class ResBlock(nn.Module):
         return x
 
 class PositionalEmbedding(nn.Module):
-    def __init__(self, channels, features, max_seq_length=2048):
+    def __init__(self, channels, features, max_seq_length=4096):
         super(PositionalEmbedding, self).__init__()
 
-        # self.embedding = nn.Embedding(num_embeddings=max_seq_length, embedding_dim=features)
-        # self.register_buffer('indices', torch.arange(max_seq_length))
-
-        self.extract1 = ResBlock(channels, 1, features, kernel_size=9, padding=4)
-        self.extract2 = ResBlock(channels * 2, 1, features // 2, kernel_size=9, padding=4)
-        self.extract3 = ResBlock(channels * 4, 1, features // 4, kernel_size=9, padding=4)
-        self.extract4 = ResBlock(channels * 6, 1, features // 8, kernel_size=9, padding=4)
-        self.extract5 = ResBlock(channels * 8, 1, features // 16, kernel_size=9, padding=4)
-        self.extract6 = ResBlock(channels * 10, 1, features // 32, kernel_size=9, padding=4)
-        self.extract7 = ResBlock(channels * 12, 1, features // 64, kernel_size=9, padding=4)
-        self.extract8 = ResBlock(channels * 14, 1, features // 128, kernel_size=9, padding=4)
-        self.extract9 = ResBlock(channels * 16, 1, features // 256, kernel_size=9, padding=4)
+        self.extract1 = ResBlock(channels, 1, features, kernel_size=11, padding=5)
+        self.extract2 = ResBlock(channels * 2, 1, features // 2, kernel_size=11, padding=5)
+        self.extract3 = ResBlock(channels * 4, 1, features // 4, kernel_size=11, padding=5)
+        self.extract4 = ResBlock(channels * 6, 1, features // 8, kernel_size=11, padding=5)
+        self.extract5 = ResBlock(channels * 8, 1, features // 16, kernel_size=11, padding=5)
+        self.extract6 = ResBlock(channels * 10, 1, features // 32, kernel_size=11, padding=5)
+        self.extract7 = ResBlock(channels * 12, 1, features // 64, kernel_size=11, padding=5)
+        self.extract8 = ResBlock(channels * 14, 1, features // 128, kernel_size=11, padding=5)
+        self.extract9 = ResBlock(channels * 16, 1, features // 256, kernel_size=11, padding=5)
 
         self.encoder1 = ResBlock(channels, channels * 2, features, kernel_size=3, padding=1, downsample=True)
         self.encoder2 = ResBlock(channels * 2, channels * 4, features // 2, kernel_size=3, padding=1, downsample=True)
@@ -45,7 +43,14 @@ class PositionalEmbedding(nn.Module):
         self.encoder7 = ResBlock(channels * 12, channels * 14, features // 64, kernel_size=3, padding=1, downsample=True)
         self.encoder8 = ResBlock(channels * 14, channels * 16, features // 128, kernel_size=3, padding=1, downsample=True)
 
-        self.out = nn.Conv2d(9, 1, kernel_size=1, padding=0)
+        position = torch.arange(max_seq_length).unsqueeze(1)
+        div_term = torch.exp(torch.arange(0, features, 2) * (-math.log(10000.0) / features))
+        pe = torch.zeros(max_seq_length, 1, features)
+        pe[:, 0, 0::2] = torch.sin(position * div_term)
+        pe[:, 0, 1::2] = torch.cos(position * div_term)
+        self.register_buffer('pe', pe)
+
+        self.out = ResBlock(10, 1, features, kernel_size=1, padding=0)
 
     def __call__(self, x):
         e1 = self.extract1(x)
@@ -74,7 +79,6 @@ class PositionalEmbedding(nn.Module):
 
         e9 = F.interpolate(self.extract9(h), size=x.shape[2:], mode='bilinear', align_corners=True)
 
-        # eg = self.embedding(self.indices[:x.shape[3]])
-        # eg = eg.transpose(0,1).unsqueeze(0).unsqueeze(0)
+        sinusoidal = self.pe[:x.shape[3]].transpose(0,1).unsqueeze(0).transpose(2,3).expand((x.shape[0], -1, -1, -1))
 
-        return self.out(torch.cat((e1, e2, e3, e4, e5, e6, e7, e8, e9), dim=1))
+        return self.out(torch.cat((e1, e2, e3, e4, e5, e6, e7, e8, e9, sinusoidal), dim=1))

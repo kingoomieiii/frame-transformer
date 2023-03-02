@@ -7,24 +7,24 @@ from libft.rotary_embedding_torch import RotaryEmbedding
 from libft.multichannel_linear import MultichannelLinear
 
 class MultichannelMultiheadAttention(nn.Module):
-    def __init__(self, channels, num_heads, features, depthwise=True, include_conv=True, kernel_size=3, padding=1):
+    def __init__(self, channels, num_heads, features, depthwise=False, include_conv=True, kernel_size=3, padding=1):
         super().__init__()
 
         self.num_heads = num_heads
 
         self.q_proj = nn.Sequential(
-            nn.Conv2d(channels, channels, kernel_size=kernel_size, padding=padding, groups=1, bias=False) if include_conv else nn.Identity(),
+            nn.Conv2d(channels, channels, kernel_size=3, padding=1),
             MultichannelLinear(channels, channels, features, features))
         
         self.k_proj = nn.Sequential(
-            nn.Conv2d(channels, channels, kernel_size=kernel_size, padding=padding, groups=1, bias=False) if include_conv else nn.Identity(),
+            nn.Conv2d(channels, channels, kernel_size=3, padding=1),
             MultichannelLinear(channels, channels, features, features))
         
         self.v_proj = nn.Sequential(
-            nn.Conv2d(channels, channels, kernel_size=kernel_size, padding=padding, groups=1, bias=False) if include_conv else nn.Identity(),
+            nn.Conv2d(channels, channels, kernel_size=3, padding=1),
             MultichannelLinear(channels, channels, features, features))
         
-        self.o_proj = MultichannelLinear(channels, channels, features, features, depthwise=depthwise)
+        self.o_proj = MultichannelLinear(channels, channels, features, features, depthwise=True)
 
     def __call__(self, x, mem=None, prev_qk=None):
         b,c,h,w = x.shape
@@ -35,11 +35,10 @@ class MultichannelMultiheadAttention(nn.Module):
         with torch.cuda.amp.autocast_mode.autocast(enabled=False):
             qk = torch.matmul(q.float(), k.float()) / math.sqrt(h)
 
-            if prev_qk is not None:
-                qk = qk + prev_qk
+        if prev_qk is not None:
+            qk = qk + prev_qk
 
-            a = torch.matmul(F.softmax(qk, dim=-1),v.float()).transpose(2,3).reshape(b,c,w,-1).transpose(2,3)
-
+        a = torch.matmul(F.softmax(qk, dim=-1),v).transpose(2,3).reshape(b,c,w,-1).transpose(2,3)
         x = self.o_proj(a)
 
         return x, qk
