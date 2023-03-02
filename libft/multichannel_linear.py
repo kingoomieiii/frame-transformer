@@ -3,11 +3,9 @@ import torch.nn as nn
 import math
 
 class MultichannelLinear(nn.Module):
-    def __init__(self, in_channels, out_channels, in_features, out_features, positionwise=True, depthwise=False, bias=False, include_position=True):
+    def __init__(self, in_channels, out_channels, in_features, out_features, positionwise=True, depthwise=False, bias=False, include_position=False):
         super(MultichannelLinear, self).__init__()
 
-        self.embedding_dw = None
-        self.embedding_pw = None
         self.weight_pw = None
         self.bias_pw = None
         if in_features != out_features or positionwise:
@@ -18,11 +16,6 @@ class MultichannelLinear(nn.Module):
                 self.bias_pw = nn.Parameter(torch.empty(in_channels, out_features, 1))
                 bound = 1 / math.sqrt(in_features)
                 nn.init.uniform_(self.bias_pw, -bound, bound)
-
-            if include_position:
-                self.register_buffer('idx_pw', torch.arange(in_features))
-                self.embedding_pw = nn.Embedding(in_features, in_features)
-                self.conv_pw = nn.Conv1d(in_features, 1, kernel_size=9, padding=4)
 
         self.weight_dw = None
         self.bias_dw = None
@@ -35,11 +28,6 @@ class MultichannelLinear(nn.Module):
                 bound = 1 / math.sqrt(in_channels)
                 nn.init.uniform_(self.bias_dw, -bound, bound)
 
-            if include_position:
-                self.register_buffer('idx_dw', torch.arange(in_channels))
-                self.embedding_dw = nn.Embedding(in_channels, in_channels)
-                self.conv_dw = nn.Conv1d(in_channels, 1, kernel_size=9, padding=4)
-
     def __call__(self, x):
         d = len(x.shape)
 
@@ -48,17 +36,11 @@ class MultichannelLinear(nn.Module):
         elif d == 3:
             x = x.unsqueeze(-1)
 
-        if self.embedding_pw is not None:
-            x = x + self.conv_pw(self.embedding_pw(self.idx_pw).unsqueeze(0)).unsqueeze(-1)
-
         if self.weight_pw is not None:
             x = torch.matmul(x.transpose(2,3), self.weight_pw.transpose(1,2)).transpose(2,3)
 
             if self.bias_pw is not None:
                 x = x + self.bias_pw
-
-        if self.embedding_dw is not None:
-            x = x + self.conv_dw(self.embedding_dw(self.idx_dw).unsqueeze(0)).transpose(1,2).unsqueeze(-1)
 
         if self.weight_dw is not None:
             x = torch.matmul(x.transpose(1,3), self.weight_dw.t()).transpose(1,3)
