@@ -11,20 +11,19 @@ class MultichannelMultiheadAttention(nn.Module):
         super().__init__()
 
         self.num_heads = num_heads
-
         self.q_proj = nn.Sequential(
-            nn.Conv2d(channels, channels, kernel_size=3, padding=1),
+            nn.Conv2d(channels, channels, kernel_size=7, padding=3, groups=channels),
             MultichannelLinear(channels, channels, features, features))
         
         self.k_proj = nn.Sequential(
-            nn.Conv2d(channels, channels, kernel_size=3, padding=1),
+            nn.Conv2d(channels, channels, kernel_size=7, padding=3, groups=channels),
             MultichannelLinear(channels, channels, features, features))
         
         self.v_proj = nn.Sequential(
-            nn.Conv2d(channels, channels, kernel_size=3, padding=1),
+            nn.Conv2d(channels, channels, kernel_size=7, padding=3, groups=channels),
             MultichannelLinear(channels, channels, features, features))
         
-        self.o_proj = MultichannelLinear(channels, channels, features, features, depthwise=True)
+        self.o_proj = MultichannelLinear(channels, channels, features, features)
 
     def __call__(self, x, mem=None, prev_qk=None):
         b,c,h,w = x.shape
@@ -32,8 +31,7 @@ class MultichannelMultiheadAttention(nn.Module):
         k = self.k_proj(x if mem is None else mem).transpose(2,3).reshape(b,c,w,self.num_heads,-1).permute(0,1,3,2,4).transpose(3,4)
         v = self.v_proj(x if mem is None else mem).transpose(2,3).reshape(b,c,w,self.num_heads,-1).permute(0,1,3,2,4)
 
-        with torch.cuda.amp.autocast_mode.autocast(enabled=False):
-            qk = torch.matmul(q.float(), k.float()) / math.sqrt(h)
+        qk = torch.matmul(q,k) / math.sqrt(h)
 
         if prev_qk is not None:
             qk = qk + prev_qk

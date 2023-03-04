@@ -3,7 +3,7 @@ import torch.nn as nn
 import math
 
 class MultichannelLinear(nn.Module):
-    def __init__(self, in_channels, out_channels, in_features, out_features, positionwise=True, depthwise=False, bias=False, include_position=False):
+    def __init__(self, in_channels, out_channels, in_features, out_features, positionwise=True, depthwise=False, bias=True, include_position=False):
         super(MultichannelLinear, self).__init__()
 
         self.weight_pw = None
