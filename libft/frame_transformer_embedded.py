@@ -127,6 +127,8 @@ class FrameTransformerDecoder(nn.Module):
         h = h + self.dropout(z)
 
         if skip_qk is not None:
+            prev_qk1 = prev_qk1 + skip_qk
+
             if prev_qk2 is not None:
                 prev_qk2 = prev_qk2 + skip_qk
             else:
