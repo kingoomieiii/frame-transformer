@@ -50,15 +50,13 @@ class FrameTransformer(nn.Module):
         self.dec2_transformer = FrameTransformerDecoder(channels * 2, transformer_channels, self.max_bin // 2, dropout=dropout, expansion=expansion, num_heads=num_heads)
         self.dec1 = FrameDecoder(channels * 2 + 2 * transformer_channels, channels * 1, self.max_bin)
 
-        self.dec1_transformer = FrameTransformerDecoder(channels * 1, transformer_channels, self.max_bin, dropout=dropout, expansion=expansion, num_heads=num_heads)
+        self.dec1_transformer = FrameTransformerDecoder(channels, transformer_channels, self.max_bin, dropout=dropout, expansion=expansion, num_heads=num_heads, dual_skip=True)
         self.out = nn.Parameter(torch.empty(out_channels, channels + transformer_channels))
-
         nn.init.uniform_(self.out, a=-1/math.sqrt(channels+1), b=1/math.sqrt(channels+1))
 
     def __call__(self, x):
         x = torch.cat((x, self.positional_embedding(x)), dim=1)
-
-        e0, _, eqk0 = self.enc0_transformer(x)
+        e0, a0, eqk0 = self.enc0_transformer(x)
         e1, a1, eqk1 = self.enc1_transformer(self.enc1(e0), prev_qk=eqk0)
         e2, a2, eqk2 = self.enc2_transformer(self.enc2(e1), prev_qk=eqk1)
         e3, a3, eqk3 = self.enc3_transformer(self.enc3(e2), prev_qk=eqk2)
@@ -69,7 +67,7 @@ class FrameTransformer(nn.Module):
         d4, pqk1, pqk2 = self.dec4_transformer(self.dec4(d5, e4), skip=a4, prev_qk1=pqk1, prev_qk2=pqk2, skip_qk=eqk4)
         d3, pqk1, pqk2 = self.dec3_transformer(self.dec3(d4, e3), skip=a3, prev_qk1=pqk1, prev_qk2=pqk2, skip_qk=eqk3)
         d2, pqk1, pqk2 = self.dec2_transformer(self.dec2(d3, e2), skip=a2, prev_qk1=pqk1, prev_qk2=pqk2, skip_qk=eqk2)
-        d1, _, _ = self.dec1_transformer(self.dec1(d2, e1), skip=a1, prev_qk1=pqk1, prev_qk2=pqk2, skip_qk=eqk1)
+        d1, pqk1, pqk2 = self.dec1_transformer(self.dec1(d2, e1), skip=torch.cat((a0, a1), dim=1), prev_qk1=pqk1, prev_qk2=pqk2, skip_qk=(eqk0 + eqk1))
         out = torch.matmul(d1.transpose(1,3), self.out.t()).transpose(1,3)
 
         return out
@@ -102,13 +100,17 @@ class FrameTransformerEncoder(nn.Module):
         return torch.cat((x, h), dim=1), h, prev_qk
         
 class FrameTransformerDecoder(nn.Module):
-    def __init__(self, channels, out_channels, features, dropout=0.1, expansion=4, num_heads=8):
+    def __init__(self, channels, out_channels, features, dropout=0.1, expansion=4, num_heads=8, dual_skip=False):
         super(FrameTransformerDecoder, self).__init__()
 
         self.activate = SquaredReLU()
         self.dropout = nn.Dropout(dropout)
 
         self.embed = ResBlock(channels, out_channels, features)
+
+        self.skip_embed = None
+        if dual_skip:
+            self.skip_embed = ResBlock(out_channels * 2, out_channels, features)
 
         self.norm1 = MultichannelLayerNorm(out_channels, features)
         self.attn1 = MultichannelMultiheadAttention(out_channels, num_heads, features, depthwise=True)
@@ -122,6 +124,9 @@ class FrameTransformerDecoder(nn.Module):
         
     def __call__(self, x, skip, prev_qk1=None, prev_qk2=None, skip_qk=None):      
         h = self.embed(x)
+
+        if self.skip_embed is not None:
+            skip = self.skip_embed(skip)
 
         z, prev_qk1 = self.attn1(self.norm1(h), prev_qk=prev_qk1)
         h = h + self.dropout(z)
