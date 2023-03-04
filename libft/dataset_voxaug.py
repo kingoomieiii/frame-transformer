@@ -36,8 +36,8 @@ class VoxAugDataset(torch.utils.data.Dataset):
 
         random.Random(seed+1).shuffle(self.curr_list)
 
-        if data_limit is not None:
-            self.curr_list = self.curr_list[:data_limit]
+        # # if data_limit is not None:
+        #self.curr_list = self.curr_list[:512]
 
     def set_epoch(self, epoch):
         self.epoch = epoch
@@ -50,45 +50,45 @@ class VoxAugDataset(torch.utils.data.Dataset):
         vdata = np.load(path)
         V, Vc = vdata['X'], vdata['c']
 
-        if V.shape[2] > self.cropsize:
-            if np.random.uniform() < 0.3:
-                curr_factor = self.cropsize / V.shape[2]
-                scale_factor = np.random.uniform(curr_factor, 1)
-                size = int(V.shape[2] * scale_factor)
-                start = np.random.randint(0, V.shape[2] - size)
-                cropped = V[:, :, start:start+size]
-                V = V[:,:,:self.cropsize]
-                V.real = F.interpolate(torch.from_numpy(cropped.real).unsqueeze(0), size=(V.shape[1], self.cropsize), mode='bilinear', align_corners=True).squeeze(0).numpy()
-                V.imag = F.interpolate(torch.from_numpy(cropped.imag).unsqueeze(0), size=(V.shape[1], self.cropsize), mode='bilinear', align_corners=True).squeeze(0).numpy()
-            else:
-                if np.random.uniform() < 0.2:
-                    scale_factor = np.random.uniform(0.33, 1)
-                    size = int(V.shape[2] * scale_factor)
+        if np.random.uniform() < 0.5:
+            if V.shape[2] > self.cropsize:
+                if np.random.uniform() < 0.5:
+                    size = np.random.randint(self.cropsize, V.shape[2])
                     start = np.random.randint(0, V.shape[2] - size)
                     cropped = V[:, :, start:start+size]
-                    V.real = F.interpolate(torch.from_numpy(cropped.real).unsqueeze(0), size=(V.shape[1], V.shape[2]), mode='bilinear', align_corners=True).squeeze(0).numpy()
-                    V.imag = F.interpolate(torch.from_numpy(cropped.imag).unsqueeze(0), size=(V.shape[1], V.shape[2]), mode='bilinear', align_corners=True).squeeze(0).numpy()
-
-                start = np.random.randint(0, V.shape[2] - self.cropsize + 1)
-                stop = start + self.cropsize
-                V = V[:,:,start:stop]
-        else:
-            if np.random.uniform() < 0.2:
-                scale_factor = np.random.uniform(0.33, 1)
-                size = int(V.shape[2] * scale_factor)
+                    start2 = np.random.randint(0, V.shape[2] - self.cropsize)
+                    V = V[:, :, start2:start2+self.cropsize]
+                    V.real = F.interpolate(torch.from_numpy(cropped.real).unsqueeze(0), size=(V.shape[1], self.cropsize), mode='bilinear', align_corners=True).squeeze(0).numpy()
+                    V.imag = F.interpolate(torch.from_numpy(cropped.imag).unsqueeze(0), size=(V.shape[1], self.cropsize), mode='bilinear', align_corners=True).squeeze(0).numpy()
+                else:
+                    size = np.random.randint(self.cropsize // 8, self.cropsize)
+                    start = np.random.randint(0, V.shape[2] - size)
+                    cropped = V[:, :, start:start+size]
+                    start2 = np.random.randint(0, V.shape[2] - self.cropsize)
+                    V = V[:, :, start2:start2+self.cropsize]
+                    V.real = F.interpolate(torch.from_numpy(cropped.real).unsqueeze(0), size=(V.shape[1], self.cropsize), mode='bilinear', align_corners=True).squeeze(0).numpy()
+                    V.imag = F.interpolate(torch.from_numpy(cropped.imag).unsqueeze(0), size=(V.shape[1], self.cropsize), mode='bilinear', align_corners=True).squeeze(0).numpy()
+            elif V.shape[2] <= self.cropsize:
+                size = np.random.randint(self.cropsize // 8, self.cropsize)
                 start = np.random.randint(0, V.shape[2] - size)
                 cropped = V[:, :, start:start+size]
-                V.real = F.interpolate(torch.from_numpy(cropped.real).unsqueeze(0), size=(V.shape[1], V.shape[2]), mode='bilinear', align_corners=True).squeeze(0).numpy()
-                V.imag = F.interpolate(torch.from_numpy(cropped.imag).unsqueeze(0), size=(V.shape[1], V.shape[2]), mode='bilinear', align_corners=True).squeeze(0).numpy()
+                V.real = F.interpolate(torch.from_numpy(cropped.real).unsqueeze(0), size=(V.shape[1], self.cropsize), mode='bilinear', align_corners=True).squeeze(0).numpy()
+                V.imag = F.interpolate(torch.from_numpy(cropped.imag).unsqueeze(0), size=(V.shape[1], self.cropsize), mode='bilinear', align_corners=True).squeeze(0).numpy()  
+        else:
+            start = np.random.randint(0, V.shape[2] - self.cropsize)
+            V = V[:, :, start:start+self.cropsize]
 
-        if np.random.uniform() < 0.2:
-            arr1 = F.interpolate(torch.rand((1, 1, 512,)) + 0.5, size=(1025), mode='linear', align_corners=True).squeeze(0).squeeze(0).numpy() * np.random.uniform(0.75, 1.5)
-            arr2 = F.interpolate(torch.rand((1, 1, 256,)) + 0.5, size=(1025), mode='linear', align_corners=True).squeeze(0).squeeze(0).numpy() * np.random.uniform(0.75, 1.5)
-            arr3 = F.interpolate(torch.rand((1, 1, 128,)) + 0.5, size=(1025), mode='linear', align_corners=True).squeeze(0).squeeze(0).numpy() * np.random.uniform(0.75, 1.5)
-            arr4 = F.interpolate(torch.rand((1, 1, 64,)) + 0.5, size=(1025), mode='linear', align_corners=True).squeeze(0).squeeze(0).numpy() * np.random.uniform(0.75, 1.5)
-            arr5 = F.interpolate(torch.rand((1, 1, 32,)) + 0.5, size=(1025), mode='linear', align_corners=True).squeeze(0).squeeze(0).numpy() * np.random.uniform(0.75, 1.5)
-            eq = (arr1 + arr2 + arr3 + arr4 + arr5) * (1.0 / 5.0)
-            eq = scipy.ndimage.gaussian_filter1d(eq, sigma=1)
+        if np.random.uniform() < 0.5:
+            arr1 = F.interpolate(torch.randn((1, 1, 512,)), size=(1025), mode='linear', align_corners=True).squeeze(0).squeeze(0).numpy()
+            arr2 = F.interpolate(torch.randn((1, 1, 256,)), size=(1025), mode='linear', align_corners=True).squeeze(0).squeeze(0).numpy()
+            arr3 = F.interpolate(torch.randn((1, 1, 128,)), size=(1025), mode='linear', align_corners=True).squeeze(0).squeeze(0).numpy()
+            arr4 = F.interpolate(torch.randn((1, 1, 64,)), size=(1025), mode='linear', align_corners=True).squeeze(0).squeeze(0).numpy()
+            arr5 = F.interpolate(torch.randn((1, 1, 32,)), size=(1025), mode='linear', align_corners=True).squeeze(0).squeeze(0).numpy()
+            arr6 = F.interpolate(torch.randn((1, 1, 16,)), size=(1025), mode='linear', align_corners=True).squeeze(0).squeeze(0).numpy()
+            arr7 = F.interpolate(torch.randn((1, 1, 8,)), size=(1025), mode='linear', align_corners=True).squeeze(0).squeeze(0).numpy()
+            arr8 = F.interpolate(torch.randn((1, 1, 4,)), size=(1025), mode='linear', align_corners=True).squeeze(0).squeeze(0).numpy()
+            eq = arr1 + arr2 + arr3 + arr4 + arr5 + arr6 + arr7 + arr8
+            eq = np.clip((eq + 1) * 0.5, 0, 1.5)
             eq = np.expand_dims(eq, (0, 2))
             Vs = np.abs(V) / Vc
             V = (Vs * eq) * Vc * np.exp(1.j * np.angle(V))
@@ -102,7 +102,7 @@ class VoxAugDataset(torch.utils.data.Dataset):
             else:
                 V[1] = 0
 
-        return V
+        return V, path
 
     def __getitem__(self, idx):
         path = str(self.curr_list[idx % len(self.curr_list)])
@@ -112,6 +112,7 @@ class VoxAugDataset(torch.utils.data.Dataset):
         X, c = data['X'], data['c']
         Y = X if aug else data['Y']
         V = None
+        Vp = None
         
         if not self.is_validation:
             if Y.shape[2] > self.cropsize:
@@ -119,7 +120,7 @@ class VoxAugDataset(torch.utils.data.Dataset):
                 stop = start + self.cropsize
                 Y = Y[:,:,start:stop]
 
-            V = self._get_vocals(idx)
+            V, Vp = self._get_vocals(idx)
             X = Y + V
             c = np.max([c, np.abs(X).max()])
 
@@ -138,16 +139,5 @@ class VoxAugDataset(torch.utils.data.Dataset):
 
         X = np.clip(np.abs(X) / c, 0, 1)
         Y = np.clip(np.abs(Y) / c, 0, 1)
-
-        if V is None:
-            V = np.zeros_like(X)
-
-            if self.predict_vocals:
-                Y = V
-        else:
-            V = np.clip(np.abs(V) / c, 0, 1)
-
-            if self.predict_vocals:
-                Y = V
         
         return X, Y

@@ -36,7 +36,8 @@ class FrameTransformer(nn.Module):
         self.enc6 = FrameEncoder(channels * 8 + transformer_channels, channels * 10, self.max_bin // 16)
 
         self.enc6_transformer = FrameTransformerEncoder(channels * 10, transformer_channels, self.max_bin // 32, dropout=dropout, expansion=expansion, num_heads=num_heads)
-        self.dec5 = FrameDecoder(channels * 10 + 2 * transformer_channels, channels * 8, self.max_bin // 16)
+        self.bridge = FrameTransformerEncoder(channels * 10 + transformer_channels, transformer_channels, self.max_bin // 32, dropout=dropout, expansion=expansion, num_heads=num_heads)
+        self.dec5 = FrameDecoder(channels * 10 + 3 * transformer_channels, channels * 8, self.max_bin // 16)
 
         self.dec5_transformer = FrameTransformerDecoder(channels * 8, transformer_channels, self.max_bin // 16, dropout=dropout, expansion=expansion, num_heads=num_heads)
         self.dec4 = FrameDecoder(channels * 8 + 2 * transformer_channels, channels * 6, self.max_bin // 8)
@@ -50,7 +51,7 @@ class FrameTransformer(nn.Module):
         self.dec2_transformer = FrameTransformerDecoder(channels * 2, transformer_channels, self.max_bin // 2, dropout=dropout, expansion=expansion, num_heads=num_heads)
         self.dec1 = FrameDecoder(channels * 2 + 2 * transformer_channels, channels * 1, self.max_bin)
 
-        self.dec1_transformer = FrameTransformerDecoder(channels, transformer_channels, self.max_bin, dropout=dropout, expansion=expansion, num_heads=num_heads, dual_skip=True)
+        self.dec1_transformer = FrameTransformerDecoder(channels, transformer_channels, self.max_bin, dropout=dropout, expansion=expansion, num_heads=num_heads)
         self.out = nn.Parameter(torch.empty(out_channels, channels + transformer_channels))
         nn.init.uniform_(self.out, a=-1/math.sqrt(channels+1), b=1/math.sqrt(channels+1))
 
@@ -63,11 +64,12 @@ class FrameTransformer(nn.Module):
         e4, a4, eqk4 = self.enc4_transformer(self.enc4(e3), prev_qk=eqk3)
         e5, a5, eqk5 = self.enc5_transformer(self.enc5(e4), prev_qk=eqk4)
         e6, _, eqk6 = self.enc6_transformer(self.enc6(e5), prev_qk=eqk5)
+        e6, _, eqk6 = self.bridge(e6, prev_qk=eqk6)
         d5, pqk1, pqk2 = self.dec5_transformer(self.dec5(e6, e5), skip=a5, prev_qk1=eqk6, prev_qk2=None, skip_qk=eqk5)
         d4, pqk1, pqk2 = self.dec4_transformer(self.dec4(d5, e4), skip=a4, prev_qk1=pqk1, prev_qk2=pqk2, skip_qk=eqk4)
         d3, pqk1, pqk2 = self.dec3_transformer(self.dec3(d4, e3), skip=a3, prev_qk1=pqk1, prev_qk2=pqk2, skip_qk=eqk3)
         d2, pqk1, pqk2 = self.dec2_transformer(self.dec2(d3, e2), skip=a2, prev_qk1=pqk1, prev_qk2=pqk2, skip_qk=eqk2)
-        d1, pqk1, pqk2 = self.dec1_transformer(self.dec1(d2, e1), skip=torch.cat((a0, a1), dim=1), prev_qk1=pqk1, prev_qk2=pqk2, skip_qk=(eqk0 + eqk1))
+        d1, pqk1, pqk2 = self.dec1_transformer(self.dec1(d2, e1), skip=(a0 + a1), prev_qk1=pqk1, prev_qk2=pqk2, skip_qk=(eqk0 + eqk1))
         out = torch.matmul(d1.transpose(1,3), self.out.t()).transpose(1,3)
 
         return out
@@ -100,17 +102,13 @@ class FrameTransformerEncoder(nn.Module):
         return torch.cat((x, h), dim=1), h, prev_qk
         
 class FrameTransformerDecoder(nn.Module):
-    def __init__(self, channels, out_channels, features, dropout=0.1, expansion=4, num_heads=8, dual_skip=False):
+    def __init__(self, channels, out_channels, features, dropout=0.1, expansion=4, num_heads=8):
         super(FrameTransformerDecoder, self).__init__()
 
         self.activate = SquaredReLU()
         self.dropout = nn.Dropout(dropout)
 
         self.embed = ResBlock(channels, out_channels, features)
-
-        self.skip_embed = None
-        if dual_skip:
-            self.skip_embed = ResBlock(out_channels * 2, out_channels, features)
 
         self.norm1 = MultichannelLayerNorm(out_channels, features)
         self.attn1 = MultichannelMultiheadAttention(out_channels, num_heads, features, depthwise=True)
@@ -124,9 +122,6 @@ class FrameTransformerDecoder(nn.Module):
         
     def __call__(self, x, skip, prev_qk1=None, prev_qk2=None, skip_qk=None):      
         h = self.embed(x)
-
-        if self.skip_embed is not None:
-            skip = self.skip_embed(skip)
 
         z, prev_qk1 = self.attn1(self.norm1(h), prev_qk=prev_qk1)
         h = h + self.dropout(z)
