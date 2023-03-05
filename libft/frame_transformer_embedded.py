@@ -84,7 +84,7 @@ class FrameTransformerEncoder(nn.Module):
         self.embed = ResBlock(channels, out_channels, features)
 
         self.norm1 = MultichannelLayerNorm(out_channels, features)
-        self.attn = MultichannelMultiheadAttention(out_channels, num_heads, features, depthwise=True)
+        self.attn = MultichannelMultiheadAttention(out_channels, num_heads, features, kernel_size=7, padding=3)
 
         self.norm2 = MultichannelLayerNorm(out_channels, features)
         self.conv1 = MultichannelLinear(out_channels, out_channels, features, features * expansion)
@@ -111,10 +111,10 @@ class FrameTransformerDecoder(nn.Module):
         self.embed = ResBlock(channels, out_channels, features)
 
         self.norm1 = MultichannelLayerNorm(out_channels, features)
-        self.attn1 = MultichannelMultiheadAttention(out_channels, num_heads, features, depthwise=True)
+        self.attn1 = MultichannelMultiheadAttention(out_channels, num_heads, features, kernel_size=7, padding=3)
 
         self.norm2 = MultichannelLayerNorm(out_channels, features)
-        self.attn2 = MultichannelMultiheadAttention(out_channels, num_heads, features, depthwise=True)
+        self.attn2 = MultichannelMultiheadAttention(out_channels, num_heads, features, kernel_size=7, padding=3)
 
         self.norm3 = MultichannelLayerNorm(out_channels, features)
         self.conv1 = MultichannelLinear(out_channels, out_channels, features, features * expansion)
