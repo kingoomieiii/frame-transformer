@@ -137,7 +137,7 @@ def main():
     p.add_argument('--sr', '-r', type=int, default=44100)
     p.add_argument('--hop_length', '-H', type=int, default=1024)
     p.add_argument('--n_fft', '-f', type=int, default=2048)
-    p.add_argument('--checkpoint', '-P', type=str, default="H://models/local.3.v3model.pth")
+    p.add_argument('--checkpoint', '-P', type=str, default=None)
     p.add_argument('--codebook', type=str, default=None)
     p.add_argument('--mixed_precision', type=str, default='true')
 
@@ -157,8 +157,8 @@ def main():
     p.add_argument('--learning_rate', '-l', type=float, default=1e-4)
     p.add_argument('--learning_rate_bert', type=float, default=3.5e-6)
 
-    p.add_argument('--curr_step', type=int, default=37067)
-    p.add_argument('--curr_epoch', type=int, default=4)
+    p.add_argument('--curr_step', type=int, default=0)
+    p.add_argument('--curr_epoch', type=int, default=0)
     p.add_argument('--warmup_steps', type=int, default=8000)
     p.add_argument('--decay_steps', type=int, default=1008000)
     p.add_argument('--lr_scheduler_decay_target', type=int, default=1e-12)
