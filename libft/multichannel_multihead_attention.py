@@ -7,20 +7,20 @@ from libft.rotary_embedding_torch import RotaryEmbedding
 from libft.multichannel_linear import MultichannelLinear
 
 class MultichannelMultiheadAttention(nn.Module):
-    def __init__(self, channels, num_heads, features, depthwise=False, include_conv=True, kernel_size=3, padding=1):
+    def __init__(self, channels, num_heads, features, kernel_size=3, padding=1):
         super().__init__()
 
         self.num_heads = num_heads
         self.q_proj = nn.Sequential(
-            nn.Conv2d(channels, channels, kernel_size=7, padding=3, groups=channels),
+            nn.Conv2d(channels, channels, kernel_size=kernel_size, padding=padding, groups=channels),
             MultichannelLinear(channels, channels, features, features))
         
         self.k_proj = nn.Sequential(
-            nn.Conv2d(channels, channels, kernel_size=7, padding=3, groups=channels),
+            nn.Conv2d(channels, channels, kernel_size=kernel_size, padding=padding, groups=channels),
             MultichannelLinear(channels, channels, features, features))
         
         self.v_proj = nn.Sequential(
-            nn.Conv2d(channels, channels, kernel_size=7, padding=3, groups=channels),
+            nn.Conv2d(channels, channels, kernel_size=kernel_size, padding=padding, groups=channels),
             MultichannelLinear(channels, channels, features, features))
         
         self.o_proj = MultichannelLinear(channels, channels, features, features)
