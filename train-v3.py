@@ -53,7 +53,7 @@ def train_epoch(dataloader, model, device, optimizer, accumulation_steps, progre
         
         snr = sdr_loss(pred, Y) / accumulation_steps
         mae = F.l1_loss(pred, Y) / accumulation_steps
-        accum_loss = (mae + snr) * 0.5
+        accum_loss = mae + snr * 0.0001
         batch_mag_loss = batch_mag_loss + mae
         batch_mag2_loss = batch_mag2_loss + snr
         
