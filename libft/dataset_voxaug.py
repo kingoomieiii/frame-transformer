@@ -35,7 +35,7 @@ class VoxAugDataset(torch.utils.data.Dataset):
         random.Random(seed+1).shuffle(self.curr_list)
 
         # # if data_limit is not None:
-        #self.curr_list = self.curr_list[:512]
+        #self.curr_list = self.curr_list[:320]
 
     def set_epoch(self, epoch):
         self.epoch = epoch
@@ -77,19 +77,19 @@ class VoxAugDataset(torch.utils.data.Dataset):
             V = V[:, :, start:start+self.cropsize]
 
         if np.random.uniform() < 0.5:
-            arr1 = F.interpolate(torch.randn((1, 1, 512,)), size=(1025), mode='linear', align_corners=True).squeeze(0).squeeze(0).numpy()
-            arr2 = F.interpolate(torch.randn((1, 1, 256,)), size=(1025), mode='linear', align_corners=True).squeeze(0).squeeze(0).numpy()
-            arr3 = F.interpolate(torch.randn((1, 1, 128,)), size=(1025), mode='linear', align_corners=True).squeeze(0).squeeze(0).numpy()
-            arr4 = F.interpolate(torch.randn((1, 1, 64,)), size=(1025), mode='linear', align_corners=True).squeeze(0).squeeze(0).numpy()
-            arr5 = F.interpolate(torch.randn((1, 1, 32,)), size=(1025), mode='linear', align_corners=True).squeeze(0).squeeze(0).numpy()
-            arr6 = F.interpolate(torch.randn((1, 1, 16,)), size=(1025), mode='linear', align_corners=True).squeeze(0).squeeze(0).numpy()
-            arr7 = F.interpolate(torch.randn((1, 1, 8,)), size=(1025), mode='linear', align_corners=True).squeeze(0).squeeze(0).numpy()
-            arr8 = F.interpolate(torch.randn((1, 1, 4,)), size=(1025), mode='linear', align_corners=True).squeeze(0).squeeze(0).numpy()
-            eq = arr1 + arr2 + arr3 + arr4 + arr5 + arr6 + arr7 + arr8
-            eq = np.clip((eq + 1) * 0.5, 0, 1.5)
+            arr1 = F.interpolate(torch.rand((1, 1, 512,)) * 1.25 + 0.25, size=(1025), mode='linear', align_corners=True).squeeze(0).squeeze(0).numpy()
+            arr2 = F.interpolate(torch.rand((1, 1, 256,)) * 1.25 + 0.25, size=(1025), mode='linear', align_corners=True).squeeze(0).squeeze(0).numpy()
+            arr3 = F.interpolate(torch.rand((1, 1, 128,)) * 1.25 + 0.25, size=(1025), mode='linear', align_corners=True).squeeze(0).squeeze(0).numpy()
+            arr4 = F.interpolate(torch.rand((1, 1, 64,)) * 1.25 + 0.25, size=(1025), mode='linear', align_corners=True).squeeze(0).squeeze(0).numpy()
+            arr5 = F.interpolate(torch.rand((1, 1, 32,)) * 1.25 + 0.25, size=(1025), mode='linear', align_corners=True).squeeze(0).squeeze(0).numpy()
+            arr6 = F.interpolate(torch.rand((1, 1, 16,)) * 1.25 + 0.25, size=(1025), mode='linear', align_corners=True).squeeze(0).squeeze(0).numpy()
+            arr7 = F.interpolate(torch.rand((1, 1, 8,)) * 1.25 + 0.25, size=(1025), mode='linear', align_corners=True).squeeze(0).squeeze(0).numpy()
+            arr8 = F.interpolate(torch.rand((1, 1, 4,)) * 1.25 + 0.25, size=(1025), mode='linear', align_corners=True).squeeze(0).squeeze(0).numpy()
+            eq = (arr1 + arr2 + arr3 + arr4 + arr5 + arr6 + arr7 + arr8) / 8.0
+            eq = np.clip(eq, 0, 1.5)
             eq = np.expand_dims(eq, (0, 2))
-            Vs = np.abs(V) / Vc
-            V = (Vs * eq) * Vc * np.exp(1.j * np.angle(V))
+            Vs = np.abs(V) * eq
+            V = Vs * np.exp(1.j * np.angle(V))
 
         if np.random.uniform() < 0.5:
             V = V[::-1]

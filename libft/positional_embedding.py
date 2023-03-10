@@ -43,14 +43,7 @@ class PositionalEmbedding(nn.Module):
         self.encoder7 = ResBlock(channels * 12, channels * 14, features // 64, kernel_size=3, padding=1, downsample=True)
         self.encoder8 = ResBlock(channels * 14, channels * 16, features // 128, kernel_size=3, padding=1, downsample=True)
 
-        position = torch.arange(max_seq_length).unsqueeze(1)
-        div_term = torch.exp(torch.arange(0, features, 2) * (-math.log(10000.0) / features))
-        pe = torch.zeros(max_seq_length, 1, features)
-        pe[:, 0, 0::2] = torch.sin(position * div_term)
-        pe[:, 0, 1::2] = torch.cos(position * div_term)
-        self.register_buffer('pe', pe)
-
-        self.out = ResBlock(10, 1, features, kernel_size=1, padding=0)
+        self.out = ResBlock(9, 1, features, kernel_size=1, padding=0)
 
     def __call__(self, x):
         e1 = self.extract1(x)
@@ -79,6 +72,4 @@ class PositionalEmbedding(nn.Module):
 
         e9 = F.interpolate(self.extract9(h), size=x.shape[2:], mode='bilinear', align_corners=True)
 
-        sinusoidal = self.pe[:x.shape[3]].transpose(0,1).unsqueeze(0).transpose(2,3).expand((x.shape[0], -1, -1, -1))
-
-        return self.out(torch.cat((e1, e2, e3, e4, e5, e6, e7, e8, e9, sinusoidal), dim=1))
+        return self.out(torch.cat((e1, e2, e3, e4, e5, e6, e7, e8, e9), dim=1))
