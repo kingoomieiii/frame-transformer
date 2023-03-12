@@ -76,11 +76,11 @@ def train_epoch(dataloader, pafnet, model, device, optimizer, accumulation_steps
         PY = PY.to(device)[:, :, :model.max_bin]
 
         with torch.cuda.amp.autocast_mode.autocast(enabled=grad_scaler is not None):
-            PH, PS = pafnet(torch.cat((X, PX), dim=1))
-            PH = PS * PX * torch.sigmoid(PH)
-
-            H, HS = model(torch.cat((X, PH), dim=1))
-            H = HS * X * torch.sigmoid(H)
+            pred = torch.sigmoid(pafnet(torch.cat((X, PX), dim=1))) * 2 - 1
+            pred = torch.complex(pred[:, :2].float(), pred[:, 2:].float())
+            X2 = torch.abs(torch.complex(X, PX)) * torch.exp(1.j * torch.angle(pred))
+            pred = model(torch.cat((X2.real, X2.imag), dim=1))
+            H = X * torch.sigmoid(pred)
             
         l1_mag = crit(H, Y) / accumulation_steps
 
@@ -144,9 +144,11 @@ def validate_epoch(dataloader, pafnet, model, device):
             PY = PY.to(device)[:, :, :model.max_bin]
 
             with torch.cuda.amp.autocast_mode.autocast():
-                PH = torch.sigmoid(pafnet(torch.cat((X, PX), dim=1)))
-                pred = model(torch.cat((X, PH), dim=1))
-                pred = X * torch.sigmoid(pred[:, :2])
+                pred = torch.sigmoid(pafnet(torch.cat((X, PX), dim=1))) * 2 - 1
+                pred = torch.complex(pred[:, :2].float(), pred[:, 2:].float())
+                X2 = torch.abs(torch.complex(X, PX)) * torch.exp(1.j * torch.angle(pred))
+                pred = model(torch.cat((X2.real, X2.imag), dim=1))
+                pred = X * torch.sigmoid(pred)
 
             l1_mag = crit(pred, Y)
             loss = l1_mag

@@ -6,8 +6,6 @@ import torch.utils.data
 import torch.nn.functional as F
 import scipy.ndimage
 
-import opensimplex
-
 class VoxAugDataset(torch.utils.data.Dataset):
     def __init__(self, path=[], vocal_path=[], is_validation=False, cropsize=256, seed=0, inst_rate=0.025, data_limit=None, predict_vocals=False, time_scaling=True):
         self.is_validation = is_validation

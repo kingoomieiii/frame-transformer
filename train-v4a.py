@@ -42,7 +42,7 @@ def train_epoch(dataloader, model, device, optimizer, accumulation_steps, progre
         Y = Y.to(device)[:, :, :model.max_bin]
 
         with torch.cuda.amp.autocast_mode.autocast(enabled=grad_scaler is not None):
-            pred = model(torch.cat((X, PX), dim=1))
+            pred = torch.sigmoid(model(torch.cat((X, PX), dim=1))) * 2 - 1
             pred = torch.complex(pred[:, :2].float(), pred[:, 2:].float())
 
         l1_mag = F.l1_loss(torch.abs(pred), Y) / accumulation_steps
@@ -106,7 +106,7 @@ def validate_epoch(dataloader, model, device):
             Y = Y.to(device)[:, :, :model.max_bin]
 
             with torch.cuda.amp.autocast_mode.autocast():
-                pred = model(torch.cat((X, PX), dim=1))
+                pred = torch.sigmoid(model(torch.cat((X, PX), dim=1))) * 2 - 1
                 pred = torch.complex(pred[:, :2].float(), pred[:, 2:].float())
 
             l1_mag = F.l1_loss(torch.abs(pred), Y)
