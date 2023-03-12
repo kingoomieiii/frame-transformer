@@ -13,7 +13,7 @@ import os
 from tqdm import tqdm
 
 from libft.dataset_voxaug import VoxAugDataset
-from libft.frame_transformer import FrameTransformer
+from libft.frame_transformer_embedded import FrameTransformer
 from torch.nn import functional as F
 
 from lib.lr_scheduler_linear_warmup import LinearWarmupScheduler
@@ -178,10 +178,10 @@ def main():
     # p.add_argument('--vocal_lib', type=str, default="/home/ben/cs2048_sr44100_hl1024_nf2048_of0_VOCALS|/media/ben/internal-nvme-b/cs2048_sr44100_hl1024_nf2048_of0_VOCALS")
     # p.add_argument('--validation_lib', type=str, default="/media/ben/internal-nvme-b/cs2048_sr44100_hl1024_nf2048_of0_VALIDATION")
     
-    p.add_argument('--model_dir', type=str, default='H://')
-    p.add_argument('--instrumental_lib', type=str, default="C://cs2048_sr44100_hl1024_nf2048_of0|D://cs2048_sr44100_hl1024_nf2048_of0|F://cs2048_sr44100_hl1024_nf2048_of0|H://cs2048_sr44100_hl1024_nf2048_of0")
-    p.add_argument('--vocal_lib', type=str, default="C://cs2048_sr44100_hl1024_nf2048_of0_VOCALS|D://cs2048_sr44100_hl1024_nf2048_of0_VOCALS")
-    p.add_argument('--validation_lib', type=str, default="C://cs2048_sr44100_hl1024_nf2048_of0_VALIDATION")
+    p.add_argument('--model_dir', type=str, default='/media/ben/internal-nvme-b')
+    p.add_argument('--instrumental_lib', type=str, default="/home/ben/cs2048_sr44100_hl1024_nf2048_of0|/media/ben/internal-nvme-b/cs2048_sr44100_hl1024_nf2048_of0")
+    p.add_argument('--vocal_lib', type=str, default="/home/ben/cs2048_sr44100_hl1024_nf2048_of0_VOCALS")
+    p.add_argument('--validation_lib', type=str, default="/media/ben/internal-nvme-b/cs2048_sr44100_hl1024_nf2048_of0_VALIDATION")
 
     p.add_argument('--learning_rate', '-l', type=float, default=1e-4)
     p.add_argument('--learning_rate_bert', type=float, default=3.5e-6)
@@ -261,7 +261,7 @@ def main():
     torch.manual_seed(args.seed)
 
     device = torch.device('cpu')
-    pafnet = FrameTransformer(in_channels=4, out_channels=2, channels=args.channels, dropout=args.dropout, n_fft=args.n_fft, num_heads=args.num_heads, expansion=args.expansion)
+    pafnet = FrameTransformer(in_channels=4, out_channels=4, channels=args.channels, dropout=args.dropout, n_fft=args.n_fft, num_heads=args.num_heads, expansion=args.expansion)
     model = FrameTransformer(in_channels=4, out_channels=2, channels=args.channels, dropout=args.dropout, n_fft=args.n_fft, num_heads=args.num_heads, expansion=args.expansion)
 
     val_dataset = None
