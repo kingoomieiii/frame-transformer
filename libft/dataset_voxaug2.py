@@ -50,48 +50,48 @@ class VoxAugDataset(torch.utils.data.Dataset):
         vdata = np.load(path)
         V, Vc = vdata['X'], vdata['c']
 
-        if V.shape[2] > self.cropsize:
-            if np.random.uniform() < 0.3:
-                curr_factor = self.cropsize / V.shape[2]
-                scale_factor = np.random.uniform(curr_factor, 1)
-                size = int(V.shape[2] * scale_factor)
-                start = np.random.randint(0, V.shape[2] - size)
-                cropped = V[:, :, start:start+size]
-                V = V[:,:,:self.cropsize]
-                V.real = F.interpolate(torch.from_numpy(cropped.real).unsqueeze(0), size=(V.shape[1], self.cropsize), mode='bilinear', align_corners=True).squeeze(0).numpy()
-                V.imag = F.interpolate(torch.from_numpy(cropped.imag).unsqueeze(0), size=(V.shape[1], self.cropsize), mode='bilinear', align_corners=True).squeeze(0).numpy()
-            else:
-                if np.random.uniform() < 0.2:
-                    scale_factor = np.random.uniform(0.33, 1)
-                    size = int(V.shape[2] * scale_factor)
+        if np.random.uniform() < 0.5:
+            if V.shape[2] > self.cropsize:
+                if np.random.uniform() < 0.5:
+                    size = np.random.randint(self.cropsize, V.shape[2])
                     start = np.random.randint(0, V.shape[2] - size)
                     cropped = V[:, :, start:start+size]
-                    V.real = F.interpolate(torch.from_numpy(cropped.real).unsqueeze(0), size=(V.shape[1], V.shape[2]), mode='bilinear', align_corners=True).squeeze(0).numpy()
-                    V.imag = F.interpolate(torch.from_numpy(cropped.imag).unsqueeze(0), size=(V.shape[1], V.shape[2]), mode='bilinear', align_corners=True).squeeze(0).numpy()
-
-                start = np.random.randint(0, V.shape[2] - self.cropsize + 1)
-                stop = start + self.cropsize
-                V = V[:,:,start:stop]
-        else:
-            if np.random.uniform() < 0.2:
-                scale_factor = np.random.uniform(0.33, 1)
-                size = int(V.shape[2] * scale_factor)
+                    start2 = np.random.randint(0, V.shape[2] - self.cropsize)
+                    V = V[:, :, start2:start2+self.cropsize]
+                    V.real = F.interpolate(torch.from_numpy(cropped.real).unsqueeze(0), size=(V.shape[1], self.cropsize), mode='bilinear', align_corners=True).squeeze(0).numpy()
+                    V.imag = F.interpolate(torch.from_numpy(cropped.imag).unsqueeze(0), size=(V.shape[1], self.cropsize), mode='bilinear', align_corners=True).squeeze(0).numpy()
+                else:
+                    size = np.random.randint(self.cropsize // 8, self.cropsize)
+                    start = np.random.randint(0, V.shape[2] - size)
+                    cropped = V[:, :, start:start+size]
+                    start2 = np.random.randint(0, V.shape[2] - self.cropsize)
+                    V = V[:, :, start2:start2+self.cropsize]
+                    V.real = F.interpolate(torch.from_numpy(cropped.real).unsqueeze(0), size=(V.shape[1], self.cropsize), mode='bilinear', align_corners=True).squeeze(0).numpy()
+                    V.imag = F.interpolate(torch.from_numpy(cropped.imag).unsqueeze(0), size=(V.shape[1], self.cropsize), mode='bilinear', align_corners=True).squeeze(0).numpy()
+            elif V.shape[2] <= self.cropsize:
+                size = np.random.randint(self.cropsize // 8, self.cropsize)
                 start = np.random.randint(0, V.shape[2] - size)
                 cropped = V[:, :, start:start+size]
-                V.real = F.interpolate(torch.from_numpy(cropped.real).unsqueeze(0), size=(V.shape[1], V.shape[2]), mode='bilinear', align_corners=True).squeeze(0).numpy()
-                V.imag = F.interpolate(torch.from_numpy(cropped.imag).unsqueeze(0), size=(V.shape[1], V.shape[2]), mode='bilinear', align_corners=True).squeeze(0).numpy()
+                V.real = F.interpolate(torch.from_numpy(cropped.real).unsqueeze(0), size=(V.shape[1], self.cropsize), mode='bilinear', align_corners=True).squeeze(0).numpy()
+                V.imag = F.interpolate(torch.from_numpy(cropped.imag).unsqueeze(0), size=(V.shape[1], self.cropsize), mode='bilinear', align_corners=True).squeeze(0).numpy()  
+        else:
+            start = np.random.randint(0, V.shape[2] - self.cropsize)
+            V = V[:, :, start:start+self.cropsize]
 
-        if np.random.uniform() < 0.2:
-            arr1 = F.interpolate(torch.rand((1, 1, 512,)) + 0.5, size=(1025), mode='linear', align_corners=True).squeeze(0).squeeze(0).numpy() * np.random.uniform(0.75, 1.5)
-            arr2 = F.interpolate(torch.rand((1, 1, 256,)) + 0.5, size=(1025), mode='linear', align_corners=True).squeeze(0).squeeze(0).numpy() * np.random.uniform(0.75, 1.5)
-            arr3 = F.interpolate(torch.rand((1, 1, 128,)) + 0.5, size=(1025), mode='linear', align_corners=True).squeeze(0).squeeze(0).numpy() * np.random.uniform(0.75, 1.5)
-            arr4 = F.interpolate(torch.rand((1, 1, 64,)) + 0.5, size=(1025), mode='linear', align_corners=True).squeeze(0).squeeze(0).numpy() * np.random.uniform(0.75, 1.5)
-            arr5 = F.interpolate(torch.rand((1, 1, 32,)) + 0.5, size=(1025), mode='linear', align_corners=True).squeeze(0).squeeze(0).numpy() * np.random.uniform(0.75, 1.5)
-            eq = (arr1 + arr2 + arr3 + arr4 + arr5) * (1.0 / 5.0)
-            eq = scipy.ndimage.gaussian_filter1d(eq, sigma=1)
+        if np.random.uniform() < 0.5:
+            arr1 = F.interpolate(torch.rand((1, 1, 512,)) * 1.25 + 0.25, size=(1025), mode='linear', align_corners=True).squeeze(0).squeeze(0).numpy()
+            arr2 = F.interpolate(torch.rand((1, 1, 256,)) * 1.25 + 0.25, size=(1025), mode='linear', align_corners=True).squeeze(0).squeeze(0).numpy()
+            arr3 = F.interpolate(torch.rand((1, 1, 128,)) * 1.25 + 0.25, size=(1025), mode='linear', align_corners=True).squeeze(0).squeeze(0).numpy()
+            arr4 = F.interpolate(torch.rand((1, 1, 64,)) * 1.25 + 0.25, size=(1025), mode='linear', align_corners=True).squeeze(0).squeeze(0).numpy()
+            arr5 = F.interpolate(torch.rand((1, 1, 32,)) * 1.25 + 0.25, size=(1025), mode='linear', align_corners=True).squeeze(0).squeeze(0).numpy()
+            arr6 = F.interpolate(torch.rand((1, 1, 16,)) * 1.25 + 0.25, size=(1025), mode='linear', align_corners=True).squeeze(0).squeeze(0).numpy()
+            arr7 = F.interpolate(torch.rand((1, 1, 8,)) * 1.25 + 0.25, size=(1025), mode='linear', align_corners=True).squeeze(0).squeeze(0).numpy()
+            arr8 = F.interpolate(torch.rand((1, 1, 4,)) * 1.25 + 0.25, size=(1025), mode='linear', align_corners=True).squeeze(0).squeeze(0).numpy()
+            eq = (arr1 + arr2 + arr3 + arr4 + arr5 + arr6 + arr7 + arr8) / 8.0
+            eq = np.clip(eq, 0, 1.5)
             eq = np.expand_dims(eq, (0, 2))
-            Vs = np.abs(V) / Vc
-            V = (Vs * eq) * Vc * np.exp(1.j * np.angle(V))
+            Vs = np.abs(V) * eq
+            V = Vs * np.exp(1.j * np.angle(V))
 
         if np.random.uniform() < 0.5:
             V = V[::-1]
@@ -135,21 +135,11 @@ class VoxAugDataset(torch.utils.data.Dataset):
                 vdata = np.load(str(vpath))
                 V = vdata['X']
                 X = Y + V
-        
-        PX = (np.angle(X) * np.pi) / (2 * np.pi)
-        PY = (np.angle(Y) * np.pi) / (2 * np.pi)
-        X = np.clip(np.abs(X) / c, 0, 1)
-        Y = np.clip(np.abs(Y) / c, 0, 1)
 
-        if V is None:
-            V = np.zeros_like(X)
+        Xm = np.abs(X) / c
+        Ym = np.abs(Y) / c
 
-            if self.predict_vocals:
-                Y = V
-        else:
-            V = np.clip(np.abs(V) / c, 0, 1)
+        X = Xm * np.exp(1.j * np.angle(X))
+        Y = Ym * np.exp(1.j * np.angle(Y))
 
-            if self.predict_vocals:
-                Y = V
-        
-        return X, PX, Y, PY
+        return X.real, X.imag, Ym
