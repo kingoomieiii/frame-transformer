@@ -36,16 +36,16 @@ def train_epoch(dataloader, model, device, optimizer, accumulation_steps, progre
     torch.cuda.empty_cache()
 
     pbar = tqdm(dataloader) if progress_bar else dataloader
-    for itr, (X, PX, Y) in enumerate(pbar):
+    for itr, (X, PX, YR, YI) in enumerate(pbar):
         X = X.to(device)[:, :, :model.max_bin]
         PX = PX.to(device)[:, :, :model.max_bin]
-        Y = Y.to(device)[:, :, :model.max_bin]
+        Y = torch.complex(YR, YI).to(device)[:, :, :model.max_bin]
 
         with torch.cuda.amp.autocast_mode.autocast(enabled=grad_scaler is not None):
             pred = torch.sigmoid(model(torch.cat((X, PX), dim=1))) * 2 - 1
             pred = torch.complex(pred[:, :2].float(), pred[:, 2:].float())
 
-        l1_mag = F.l1_loss(torch.abs(pred), Y) / accumulation_steps
+        l1_mag = F.l1_loss(pred, Y) / accumulation_steps
 
         batch_mag_loss = batch_mag_loss + l1_mag
         accum_loss = l1_mag

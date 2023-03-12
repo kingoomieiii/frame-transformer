@@ -140,4 +140,4 @@ class VoxAugDataset(torch.utils.data.Dataset):
         X = Xm * np.exp(1.j * np.angle(X))
         Y = Ym * np.exp(1.j * np.angle(Y))
 
-        return X.real, X.imag, Ym
+        return X.real, X.imag, Y.real, Y.imag
