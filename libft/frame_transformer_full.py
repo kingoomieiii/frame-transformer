@@ -15,7 +15,7 @@ class FrameTransformer(nn.Module):
 
         self.positional_embedding = PositionalEmbedding(in_channels, self.max_bin)
 
-        self.enc1 = FrameEncoder(in_channels, channels, self.max_bin, downsample=False)
+        self.enc1 = FrameEncoder(in_channels + 1, channels, self.max_bin, downsample=False)
         self.enc1_transformer = FrameTransformerEncoder(channels, self.max_bin, dropout=dropout, expansion=expansion, num_heads=num_heads)
 
         self.enc2 = FrameEncoder(channels, channels * 2, self.max_bin)
@@ -33,7 +33,7 @@ class FrameTransformer(nn.Module):
         self.enc6 = FrameEncoder(channels * 16, channels * 32, self.max_bin // 16)
         self.enc6_transformer = FrameTransformerEncoder(channels * 32, self.max_bin // 32, dropout=dropout, expansion=expansion, num_heads=num_heads)
         
-        self.bridge = nn.Sequential(*[FrameTransformerBridge(channels * 32, self.max_bin // 32, dropout=dropout, expansion=expansion, num_heads=num_heads) for _ in range(11)])
+        self.bridge = nn.Sequential(*[FrameTransformerBridge(channels * 32, self.max_bin // 32, dropout=dropout, expansion=expansion, num_heads=num_heads) for _ in range(2)])
         
         self.dec5 = FrameDecoder(channels * 32, channels * 16, self.max_bin // 16)
         self.dec5_transformer = FrameTransformerDecoder(channels * 16, self.max_bin // 16, dropout=dropout, expansion=expansion, num_heads=num_heads)
@@ -53,7 +53,7 @@ class FrameTransformer(nn.Module):
         self.out = nn.Conv2d(channels, out_channels, kernel_size=1, padding=0, groups=1)
 
     def __call__(self, x):
-        x = x + self.positional_embedding(x)
+        x = torch.cat((x, self.positional_embedding(x)), dim=1)
 
         e1 = self.enc1(x)
         e1, e1qk = self.enc1_transformer(e1)
@@ -68,9 +68,8 @@ class FrameTransformer(nn.Module):
         e6 = self.enc6(e5)
         e6, _ = self.enc6_transformer(e6)
 
-        prev_qk = None
         for module in self.bridge:
-            e6, prev_qk = module(e6, prev_qk)
+            e6, _ = module(e6)
 
         d5 = self.dec5(e6, e5)
         d5 = self.dec5_transformer(d5, skip=e5, skip_qk=e5qk)
@@ -98,22 +97,16 @@ class FrameTransformerEncoder(nn.Module):
         self.activate = SquaredReLU()
         self.dropout = nn.Dropout(dropout)
 
-        self.norm0 = MultichannelLayerNorm(channels, features)
-        self.attn0 = MultiheadChannelAttention(channels, num_heads)
-
         self.norm1 = MultichannelLayerNorm(channels, features)
-        self.attn = MultichannelMultiheadAttention(channels, num_heads, features, depthwise=True)
+        self.attn = MultichannelMultiheadAttention(channels, num_heads, features)
 
         self.norm2 = MultichannelLayerNorm(channels, features)
-        self.conv1 = MultichannelLinear(channels, channels, features, features * expansion, depthwise=True)
+        self.conv1 = MultichannelLinear(channels, channels, features, features * expansion)
         self.conv2 = MultichannelLinear(channels, channels, features * expansion, features)
 
     def __call__(self, x):
-        z = self.attn0(self.norm0(x))
+        z, prev_qk = self.attn(self.norm1(x))
         h = x + self.dropout(z)
-
-        z, prev_qk = self.attn(self.norm1(h))
-        h = h + self.dropout(z)
 
         z = self.conv2(self.activate(self.conv1(self.norm2(h))))
         h = h + self.dropout(z)
@@ -127,22 +120,16 @@ class FrameTransformerBridge(nn.Module):
         self.activate = SquaredReLU()
         self.dropout = nn.Dropout(dropout)
 
-        self.norm0 = MultichannelLayerNorm(channels, features)
-        self.attn0 = MultiheadChannelAttention(channels, num_heads)
-
         self.norm1 = MultichannelLayerNorm(channels, features)
-        self.attn = MultichannelMultiheadAttention(channels, num_heads, features, depthwise=True)
+        self.attn = MultichannelMultiheadAttention(channels, num_heads, features)
 
         self.norm2 = MultichannelLayerNorm(channels, features)
         self.conv1 = MultichannelLinear(channels, channels, features, features * expansion, depthwise=True)
         self.conv2 = MultichannelLinear(channels, channels, features * expansion, features)
 
     def __call__(self, x, prev_qk=None):
-        z = self.attn0(self.norm0(x))
+        z, prev_qk = self.attn(self.norm1(x), prev_qk=prev_qk)
         h = x + self.dropout(z)
-
-        z, prev_qk = self.attn(self.norm1(h), prev_qk=prev_qk)
-        h = h + self.dropout(z)
 
         z = self.conv2(self.activate(self.conv1(self.norm2(h))))
         h = h + self.dropout(z)
@@ -156,28 +143,22 @@ class FrameTransformerDecoder(nn.Module):
         self.activate = SquaredReLU()
         self.dropout = nn.Dropout(dropout)
 
-        self.norm0a = MultichannelLayerNorm(channels, features)
-        self.attn0a = MultiheadChannelAttention(channels, num_heads)
-
         self.norm0b = MultichannelLayerNorm(channels, features)
         self.attn0b = MultiheadChannelAttention(channels, num_heads)
 
         self.norm1 = MultichannelLayerNorm(channels, features)
-        self.attn1 = MultichannelMultiheadAttention(channels, num_heads, features, depthwise=True)
+        self.attn1 = MultichannelMultiheadAttention(channels, num_heads, features)
 
         self.norm2 = MultichannelLayerNorm(channels, features)
-        self.attn2 = MultichannelMultiheadAttention(channels, num_heads, features, depthwise=True)
+        self.attn2 = MultichannelMultiheadAttention(channels, num_heads, features)
 
         self.norm3 = MultichannelLayerNorm(channels, features)
         self.conv1 = MultichannelLinear(channels, channels, features, features * expansion, depthwise=True)
         self.conv2 = MultichannelLinear(channels, channels, features * expansion, features)
         
     def __call__(self, x, skip, skip_qk=None):
-        z = self.attn0a(self.norm0a(x))
+        z, _ = self.attn1(self.norm1(x), prev_qk=skip_qk)
         h = x + self.dropout(z)
-
-        z, _ = self.attn1(self.norm1(h), prev_qk=skip_qk)
-        h = h + self.dropout(z)
 
         z = self.attn0b(self.norm0b(skip))
         skip = skip + self.dropout(z)
@@ -230,7 +211,7 @@ class FrameDecoder(nn.Module):
     def __init__(self, in_channels, out_channels, features):
         super(FrameDecoder, self).__init__()
 
-        self.upsample = nn.ConvTranspose2d(out_channels * 2, out_channels * 2, kernel_size=(4,3), padding=1, stride=(2,1))
+        self.upsample = MultichannelLinear(out_channels * 2, out_channels * 2, features // 2, features) # nn.ConvTranspose2d(out_channels * 2, out_channels * 2, kernel_size=(4,3), padding=1, stride=(2,1))
         self.body = ResBlock(out_channels * 4, out_channels * 2, features)
 
     def __call__(self, x, skip):
