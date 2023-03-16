@@ -82,7 +82,7 @@ class VoxAugDataset(torch.utils.data.Dataset):
         return V
 
     def _augment_instruments(self, X, c):
-        if np.random.uniform() < 0.5:
+        if np.random.uniform() < 0.1:
             X = apply_time_stretch(X, self.cropsize)
         elif X.shape[2] > self.cropsize:
             start = np.random.randint(0, X.shape[2] - self.cropsize)
