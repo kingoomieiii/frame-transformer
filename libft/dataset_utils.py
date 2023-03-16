@@ -59,6 +59,10 @@ def apply_noise(X, gamma=0.95, sigma=0.4):
     eps = np.random.normal(scale=sigma, size=X.shape)
     return np.sqrt(gamma) * X + np.sqrt(1 - gamma) * eps
 
+def apply_multiplicative_noise(X, mu=1, sigma=0.1):
+    eps = np.random.normal(mu, sigma, size=X.shape)
+    return X * eps
+
 def apply_dynamic_range_mod(X, threshold=0.5, ratio=4):
     if np.random.uniform() < 0.5:
         clipped = np.clip(X - threshold, 0, None)

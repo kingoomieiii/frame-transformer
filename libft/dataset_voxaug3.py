@@ -6,7 +6,7 @@ import torch.utils.data
 import torch.nn.functional as F
 import scipy.ndimage
 
-from libft.dataset_utils import apply_channel_drop, apply_channel_swap, apply_dynamic_range_mod, apply_harmonic_distortion, apply_noise, apply_random_eq, apply_stereo_spatialization, apply_time_stretch
+from libft.dataset_utils import apply_channel_drop, apply_channel_swap, apply_dynamic_range_mod, apply_harmonic_distortion, apply_noise, apply_multiplicative_noise, apply_random_eq, apply_stereo_spatialization, apply_time_stretch
 
 class VoxAugDataset(torch.utils.data.Dataset):
     def __init__(self, path=[], vocal_path=[], is_validation=False, n_fft=2048, hop_length=1024, cropsize=256, seed=0, inst_rate=0.025, data_limit=None, predict_vocals=False, time_scaling=True):
@@ -63,7 +63,7 @@ class VoxAugDataset(torch.utils.data.Dataset):
             (0.025, apply_channel_drop, {}),
             (0.5, apply_dynamic_range_mod, { "threshold": np.random.uniform(0, 0.5), "ratio": np.random.randint(2,8) }),
             (0.1, apply_harmonic_distortion, { "P": P, "num_harmonics": np.random.randint(1, 5), "gain": np.random.uniform(0.05, 0.5), "n_fft": self.n_fft, "hop_length": self.hop_length }),
-            (0.5, apply_noise, { "gamma": np.random.uniform(0.75, 1), "sigma": np.random.uniform(0.1,0.5) }),
+            (0.5, apply_multiplicative_noise, { "mu": 1, "sigma": np.random.uniform(0, 0.4) }),
             (0.5, apply_random_eq, { "min": np.random.uniform(0,0.75), "max": np.random.uniform(1, 2) }),
             (0.5, apply_stereo_spatialization, { "c": Vc, "alpha": np.random.uniform(0, 2) })
         ]
@@ -92,12 +92,10 @@ class VoxAugDataset(torch.utils.data.Dataset):
         M = np.abs(X)
 
         augmentations = [
-            (0.025, apply_channel_drop, {}),
+            (0.01, apply_channel_drop, {}),
             (0.5, apply_dynamic_range_mod, { "threshold": np.random.uniform(0, 0.5), "ratio": np.random.randint(2,8) }),
-            (0.1, apply_harmonic_distortion, { "P": P, "num_harmonics": np.random.randint(1, 5), "gain": np.random.uniform(0.05, 0.5), "n_fft": self.n_fft, "hop_length": self.hop_length }),
-            (0.5, apply_noise, { "gamma": np.random.uniform(0.75, 1), "sigma": np.random.uniform(0.1,0.5) }),
-            (0.5, apply_random_eq, { "min": np.random.uniform(0,0.75), "max": np.random.uniform(1, 2) }),
-            (0.5, apply_stereo_spatialization, { "c": c, "alpha": np.random.uniform(0, 2) })
+            (0.5, apply_random_eq, { "min": np.random.uniform(0.75,1), "max": np.random.uniform(1, 1.25) }),
+            (0.5, apply_stereo_spatialization, { "c": c, "alpha": np.random.uniform(0.5, 1.5) })
         ]
 
         random.shuffle(augmentations)
