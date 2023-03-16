@@ -81,35 +81,39 @@ class VoxAugDataset(torch.utils.data.Dataset):
             V = V[::-1]
 
         return V
-    
+
     def _augment_instruments(self, X, c):
-        if np.random.uniform() < 0.0125:
-            if np.random.uniform() < 0.5:
-                X[0] = 0
-            else:
-                X[1] = 0
-                
+        if np.random.uniform() < 0.5:
+            X = apply_time_stretch(X, self.cropsize)
+        elif X.shape[2] > self.cropsize:
+            start = np.random.randint(0, X.shape[2] - self.cropsize)
+            X = X[:, :, start:start+self.cropsize]
+
         P = np.angle(X)
         M = np.abs(X)
-        
-        if np.random.uniform() < 0.5:
-            M = apply_random_eq(M)
 
-        if np.random.uniform() < 0.5:
-            M = apply_noise(M)
+        augmentations = [
+            (0.025, apply_channel_drop, {}),
+            (0.5, apply_channel_swap, {}),
+            (0.5, apply_dynamic_range_mod, { "threshold": np.random.uniform(0, 0.5), "ratio": np.random.randint(2,8) }),
+            (0.1, apply_harmonic_distortion, { "P": P, "num_harmonics": np.random.randint(1, 4), "gain": np.random.uniform(0.05, 0.5), "n_fft": self.n_fft, "hop_length": self.hop_length }),
+            (0.5, apply_noise, { "gamma": np.random.uniform(0.75, 1), "sigma": np.random.uniform(0.1,0.5) }),
+            (0.5, apply_random_eq, { "min": np.random.uniform(0,0.25), "max": np.random.uniform(1, 2) }),
+            (0.5, apply_stereo_spatialization, { "c": c, "alpha": np.random.uniform(0, 2) })
+        ]
 
-        if np.random.uniform() < 0.5:
-            if np.random.uniform() < 0.5:
-                M = apply_compression(M)
-            else:
-                M = apply_expansion(M)
+        random.shuffle(augmentations)
 
-        if np.random.uniform() < 0.5:
-            M = M / c
-            alpha = np.random.uniform(0, 2)
-            M = np.clip(apply_stereo_spatialization(M, alpha), 0, 1) * c
+        for p, aug, args in augmentations:
+            if np.random.uniform() < p:
+                M = aug(M, **args)
 
         X = M * np.exp(1.j * P)
+
+        if np.random.uniform() < 0.5:
+            X = X[::-1]
+
+        return X
 
     def __getitem__(self, idx):
         path = str(self.curr_list[idx % len(self.curr_list)])
@@ -121,11 +125,7 @@ class VoxAugDataset(torch.utils.data.Dataset):
         V = None
         
         if not self.is_validation:
-            if Y.shape[2] > self.cropsize:
-                start = np.random.randint(0, Y.shape[2] - self.cropsize + 1)
-                stop = start + self.cropsize
-                Y = Y[:,:,start:stop]
-
+            Y = self._augment_instruments(Y, c)
             V = self._get_vocals(idx)
             X = Y + V
             c = np.max([c, np.abs(X).max()])
@@ -133,17 +133,7 @@ class VoxAugDataset(torch.utils.data.Dataset):
             if np.random.uniform() < self.inst_rate:
                 X = Y
 
-            if np.random.uniform() < 0.5:
-                X = X[::-1]
-                Y = Y[::-1]
-        else:
-            if len(self.vocal_list) > 0:
-                vpath = self.vocal_list[idx % len(self.vocal_list)]
-                vdata = np.load(str(vpath))
-                V = vdata['X']
-                X = Y + V
-
         X = np.clip(np.abs(X) / c, 0, 1)
         Y = np.clip(np.abs(Y) / c, 0, 1)
         
-        return X, Y
+        return X.astype(np.float32), Y.astype(np.float32)

@@ -83,8 +83,8 @@ def apply_channel_swap(X):
 def apply_time_stretch(X, target_size):
     if X.shape[2] > target_size:
         size = np.random.randint(target_size // 16, X.shape[2])
-        start = np.random.randint(0, X.shape[0] - size)
-        cropped = X[:, :, start+size]
+        start = np.random.randint(0, X.shape[2] - size)
+        cropped = X[:, :, start:start+size]
         H = X[:, :, :target_size]
         H.real = F.interpolate(torch.from_numpy(cropped.real).unsqueeze(0), size=(X.shape[1], target_size), mode='bilinear', align_corners=True).squeeze(0).numpy()
         H.imag = F.interpolate(torch.from_numpy(cropped.imag).unsqueeze(0), size=(X.shape[1], target_size), mode='bilinear', align_corners=True).squeeze(0).numpy()
