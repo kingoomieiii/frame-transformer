@@ -1,5 +1,6 @@
 import argparse
 import logging
+import os
 import random
 import numpy as np
 import torch
@@ -11,12 +12,14 @@ from torch.optim.swa_utils import AveragedModel, SWALR
 
 from tqdm import tqdm
 
-from dataset_voxaug2 import VoxAugDataset
+from libft.dataset_voxaug3 import VoxAugDataset
 from libft.frame_transformer_thin import FrameTransformer
 from torch.nn import functional as F
 
 from lib.lr_scheduler_linear_warmup import LinearWarmupScheduler
 from lib.lr_scheduler_polynomial_decay import PolynomialDecayScheduler
+
+from libft.signal_loss import sdr_loss
 
 def setup_logger(name, logfile='LOGFILENAME.log', out_dir='logs'):
     logger = logging.getLogger(name)
@@ -73,14 +76,15 @@ def train_epoch(dataloader, model, device, optimizer, accumulation_steps, progre
         Y = Y.to(device)[:, :, :model.max_bin]
 
         with torch.cuda.amp.autocast_mode.autocast(enabled=grad_scaler is not None):
-            pred = torch.sigmoid(model(X))
+            pred = X * torch.sigmoid(model(X))
             
-        l1_mag = crit(X[:, :2] * pred[:, :2], Y[:, :2]) / accumulation_steps
-        l1_phase = crit(pred[:, 2:], Y[:, 2:]) / accumulation_steps if include_phase else torch.zeros_like(l1_mag)
+        l1_mag = crit(pred, Y) / accumulation_steps
+        snr_mag = sdr_loss(pred, Y) / accumulation_steps
+        l1_phase = torch.zeros_like(l1_mag)
 
         batch_mag_loss = batch_mag_loss + l1_mag
         batch_phase_loss = batch_phase_loss + l1_phase
-        accum_loss = l1_mag + l1_phase
+        accum_loss = snr_mag
 
         if torch.logical_or(accum_loss.isnan(), accum_loss.isinf()):
             print('nan training loss; aborting')
@@ -141,9 +145,7 @@ def validate_epoch(dataloader, model, swa_model, device, include_phase=False):
             X = X.to(device)[:, :, :model.max_bin]
             Y = Y.to(device)[:, :, :model.max_bin]
 
-            if swa_model is not None:
-                pred = torch.sigmoid(swa_model(X))
-            else:
+            with torch.cuda.amp.autocast_mode.autocast():
                 pred = torch.sigmoid(model(X))
 
             l1_mag = crit(X[:, :2] * pred[:, :2], Y[:, :2])
@@ -172,14 +174,14 @@ def main():
     p.add_argument('--learning_rate', '-l', type=float, default=1e-4)
     p.add_argument('--learning_rate_swa', type=float, default=1e-4)
     
-    p.add_argument('--model_dir', type=str, default='H://')
-    p.add_argument('--instrumental_lib', type=str, default="C://cs2048_sr44100_hl1024_nf2048_of0|D://cs2048_sr44100_hl1024_nf2048_of0|F://cs2048_sr44100_hl1024_nf2048_of0|H://cs2048_sr44100_hl1024_nf2048_of0")
-    p.add_argument('--vocal_lib', type=str, default="C://cs2048_sr44100_hl1024_nf2048_of0_VOCALS|D://cs2048_sr44100_hl1024_nf2048_of0_VOCALS")
-    p.add_argument('--validation_lib', type=str, default="C://cs2048_sr44100_hl1024_nf2048_of0_VALIDATION")
+    p.add_argument('--model_dir', type=str, default='/media/ben/internal-nvme-b')
+    p.add_argument('--instrumental_lib', type=str, default="/home/ben/cs2048_sr44100_hl1024_nf2048_of0|/media/ben/internal-nvme-b/cs2048_sr44100_hl1024_nf2048_of0")
+    p.add_argument('--vocal_lib', type=str, default="/home/ben/cs2048_sr44100_hl1024_nf2048_of0_VOCALS")
+    p.add_argument('--validation_lib', type=str, default="/media/ben/internal-nvme-b/cs2048_sr44100_hl1024_nf2048_of0_VALIDATION")
 
     p.add_argument('--curr_step', type=int, default=0)
     p.add_argument('--curr_epoch', type=int, default=0)
-    p.add_argument('--warmup_steps', type=int, default=2)
+    p.add_argument('--warmup_steps', type=int, default=8000)
     p.add_argument('--decay_steps', type=int, default=1000000)
     p.add_argument('--lr_scheduler_decay_target', type=int, default=1e-12)
     p.add_argument('--lr_scheduler_decay_power', type=float, default=0.1)
@@ -191,14 +193,14 @@ def main():
     p.add_argument('--num_heads', type=int, default=8)
     p.add_argument('--dropout', type=float, default=0.1)
     
-    p.add_argument('--stages', type=str, default='1108000')
-    p.add_argument('--cropsizes', type=str, default='256')
-    p.add_argument('--batch_sizes', type=str, default='8')
-    p.add_argument('--accumulation_steps', '-A', type=str, default='1')
+    p.add_argument('--stages', type=str, default='600000,800000,900000,1108000')
+    p.add_argument('--cropsizes', type=str, default='256,512,1024,2048')
+    p.add_argument('--batch_sizes', type=str, default='8,4,2,1')
+    p.add_argument('--accumulation_steps', '-A', type=str, default='1,2,4,8')
     p.add_argument('--gpu', '-g', type=int, default=-1)
     p.add_argument('--optimizer', type=str.lower, choices=['adam', 'adamw', 'sgd', 'radam', 'rmsprop'], default='adam')
     p.add_argument('--amsgrad', type=str, default='false')
-    p.add_argument('--weight_decay', type=float, default=0)
+    p.add_argument('--weight_decay', type=float, default=1e-3)
     p.add_argument('--prefetch_factor', type=int, default=3)
     p.add_argument('--num_workers', '-w', type=int, default=6)
     p.add_argument('--epoch', '-E', type=int, default=40)
@@ -230,6 +232,8 @@ def main():
     args.instrumental_lib = [p for p in args.instrumental_lib.split('|')]
     args.vocal_lib = [p for p in args.vocal_lib.split('|')]
 
+    args.model_dir = os.path.join(args.model_dir, "")
+
     if args.wandb:
         wandb.init(project=args.wandb_project, entity=args.wandb_entity, config=args, id=args.wandb_run_id, resume="must" if args.wandb_run_id is not None else None)
 
@@ -242,7 +246,23 @@ def main():
     train_dataset = VoxAugDataset(
         path=args.instrumental_lib,
         vocal_path=args.vocal_lib,
-        is_validation=False
+        is_validation=False,
+        n_fft=args.n_fft,
+        hop_length=args.hop_length
+    )
+
+    val_dataset = VoxAugDataset(
+        path=[args.validation_lib],
+        vocal_path=None,
+        cropsize=2048,
+        is_validation=True
+    )
+
+    val_dataloader = torch.utils.data.DataLoader(
+        dataset=val_dataset,
+        batch_size=1,
+        shuffle=False,
+        num_workers=args.num_workers
     )
     
     random.seed(args.seed)
@@ -271,7 +291,7 @@ def main():
     params = sum([np.prod(p.size()) for p in model_parameters])
     print(f'# {wandb.run.name if args.wandb else ""}; num params: {params}')    
     
-    optimizer = torch.optim.Adam(
+    optimizer = torch.optim.AdamW(
         groups,
         lr=args.learning_rate,
         weight_decay=args.weight_decay
@@ -284,13 +304,10 @@ def main():
     step = args.curr_step
     epoch = args.curr_epoch
 
-    if args.use_swa:
-        scheduler = SWALR(optimizer, swa_lr=args.learning_rate_swa)
-    else:
-        scheduler = torch.optim.lr_scheduler.ChainedScheduler([
-            LinearWarmupScheduler(optimizer, target_lr=args.learning_rate, num_steps=args.warmup_steps, current_step=step, verbose_skip_steps=args.lr_verbosity),
-            PolynomialDecayScheduler(optimizer, target=args.lr_scheduler_decay_target, power=args.lr_scheduler_decay_power, num_decay_steps=args.decay_steps, start_step=args.warmup_steps, current_step=step, verbose_skip_steps=args.lr_verbosity)
-        ])
+    scheduler = torch.optim.lr_scheduler.ChainedScheduler([
+        LinearWarmupScheduler(optimizer, target_lr=args.learning_rate, num_steps=args.warmup_steps, current_step=step, verbose_skip_steps=args.lr_verbosity),
+        PolynomialDecayScheduler(optimizer, target=args.lr_scheduler_decay_target, power=args.lr_scheduler_decay_power, num_decay_steps=args.decay_steps, start_step=args.warmup_steps, current_step=step, verbose_skip_steps=args.lr_verbosity)
+    ])
 
     best_loss = float('inf')
     while step < args.stages[-1]:
@@ -311,20 +328,6 @@ def main():
                 shuffle=True,
                 num_workers=args.num_workers,
                 prefetch_factor=args.prefetch_factor
-            )
-
-            val_dataset = VoxAugDataset(
-                path=[args.validation_lib],
-                vocal_path=None,
-                cropsize=2048,
-                is_validation=True
-            )
-
-            val_dataloader = torch.utils.data.DataLoader(
-                dataset=val_dataset,
-                batch_size=1,
-                shuffle=False,
-                num_workers=args.num_workers
             )
 
         print('# epoch {}'.format(epoch))

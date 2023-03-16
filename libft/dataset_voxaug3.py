@@ -61,11 +61,10 @@ class VoxAugDataset(torch.utils.data.Dataset):
 
         augmentations = [
             (0.025, apply_channel_drop, {}),
-            (0.5, apply_channel_swap, {}),
             (0.5, apply_dynamic_range_mod, { "threshold": np.random.uniform(0, 0.5), "ratio": np.random.randint(2,8) }),
-            (0.1, apply_harmonic_distortion, { "P": P, "num_harmonics": np.random.randint(1, 4), "gain": np.random.uniform(0.05, 0.5), "n_fft": self.n_fft, "hop_length": self.hop_length }),
+            (0.1, apply_harmonic_distortion, { "P": P, "num_harmonics": np.random.randint(1, 5), "gain": np.random.uniform(0.05, 0.5), "n_fft": self.n_fft, "hop_length": self.hop_length }),
             (0.5, apply_noise, { "gamma": np.random.uniform(0.75, 1), "sigma": np.random.uniform(0.1,0.5) }),
-            (0.5, apply_random_eq, { "min": np.random.uniform(0,0.25), "max": np.random.uniform(1, 2) }),
+            (0.5, apply_random_eq, { "min": np.random.uniform(0,0.75), "max": np.random.uniform(1, 2) }),
             (0.5, apply_stereo_spatialization, { "c": Vc, "alpha": np.random.uniform(0, 2) })
         ]
 
@@ -94,11 +93,10 @@ class VoxAugDataset(torch.utils.data.Dataset):
 
         augmentations = [
             (0.025, apply_channel_drop, {}),
-            (0.5, apply_channel_swap, {}),
             (0.5, apply_dynamic_range_mod, { "threshold": np.random.uniform(0, 0.5), "ratio": np.random.randint(2,8) }),
-            (0.1, apply_harmonic_distortion, { "P": P, "num_harmonics": np.random.randint(1, 4), "gain": np.random.uniform(0.05, 0.5), "n_fft": self.n_fft, "hop_length": self.hop_length }),
+            (0.1, apply_harmonic_distortion, { "P": P, "num_harmonics": np.random.randint(1, 5), "gain": np.random.uniform(0.05, 0.5), "n_fft": self.n_fft, "hop_length": self.hop_length }),
             (0.5, apply_noise, { "gamma": np.random.uniform(0.75, 1), "sigma": np.random.uniform(0.1,0.5) }),
-            (0.5, apply_random_eq, { "min": np.random.uniform(0,0.25), "max": np.random.uniform(1, 2) }),
+            (0.5, apply_random_eq, { "min": np.random.uniform(0,0.75), "max": np.random.uniform(1, 2) }),
             (0.5, apply_stereo_spatialization, { "c": c, "alpha": np.random.uniform(0, 2) })
         ]
 
