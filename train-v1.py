@@ -19,7 +19,7 @@ from torch.nn import functional as F
 from lib.lr_scheduler_linear_warmup import LinearWarmupScheduler
 from lib.lr_scheduler_polynomial_decay import PolynomialDecayScheduler
 
-from libft.signal_loss import sdr_loss
+import libft.signal_loss as sigloss
 
 def setup_logger(name, logfile='LOGFILENAME.log', out_dir='logs'):
     logger = logging.getLogger(name)
@@ -54,14 +54,11 @@ def init_epoch(dataloader, model, device):
 
         break
 
-def train_epoch(dataloader, model, device, optimizer, accumulation_steps, progress_bar, lr_warmup=None, swa_model=None, grad_scaler=None, use_wandb=True, step=0, include_phase=False, model_dir="", save_every=20000):
+def train_epoch(dataloader, model, device, optimizer, accumulation_steps, progress_bar, lr_warmup=None, swa_model=None, grad_scaler=None, use_wandb=True, step=0, model_dir="", save_every=20000):
     model.train()
 
     mag_loss = 0
     batch_mag_loss = 0
-    
-    phase_loss = 0
-    batch_phase_loss = 0
 
     sum_loss = 0
     crit = nn.L1Loss()
@@ -76,15 +73,24 @@ def train_epoch(dataloader, model, device, optimizer, accumulation_steps, progre
         Y = Y.to(device)[:, :, :model.max_bin]
 
         with torch.cuda.amp.autocast_mode.autocast(enabled=grad_scaler is not None):
-            pred = X * torch.sigmoid(model(X))
-            
-        l1_mag = crit(pred, Y) / accumulation_steps
-        snr_mag = sdr_loss(pred, Y) / accumulation_steps
-        l1_phase = torch.zeros_like(l1_mag)
+            pred = model(X)
+            pred = torch.sigmoid(pred)
+            pmax = torch.max(pred)
+            pavg = torch.mean(pred)
+            pmin = torch.min(pred)
+            pred = X * pred
 
-        batch_mag_loss = batch_mag_loss + l1_mag
-        batch_phase_loss = batch_phase_loss + l1_phase
-        accum_loss = snr_mag
+        lsd_weight = 0.1
+        sdr_weight = 0.5
+        mae_weight = 0.4
+            
+        lsd_loss = sigloss.lsd_loss(pred, Y) / accumulation_steps
+        sdr_loss = sigloss.sdr_loss(pred, Y) / accumulation_steps
+        mae_loss = F.l1_loss(pred, Y) / accumulation_steps
+        
+        accum_loss = lsd_loss * lsd_weight + sdr_loss * sdr_weight + mae_loss * mae_weight
+        batch_mag_loss = batch_mag_loss + mae_loss
+        accum_loss = lsd_loss
 
         if torch.logical_or(accum_loss.isnan(), accum_loss.isinf()):
             print('nan training loss; aborting')
@@ -97,7 +103,7 @@ def train_epoch(dataloader, model, device, optimizer, accumulation_steps, progre
 
         if (itr + 1) % accumulation_steps == 0:
             if progress_bar:
-                pbar.set_description(f'{step}: {str(batch_mag_loss.item())}|{str(batch_phase_loss.item())}')
+                pbar.set_description(f'{step}: {str(batch_mag_loss.item())}|{pavg.item()}|{pmin.item()}')
 
             if use_wandb:
                 wandb.log({
@@ -123,22 +129,19 @@ def train_epoch(dataloader, model, device, optimizer, accumulation_steps, progre
             model.zero_grad()
             batches = batches + 1
             mag_loss = mag_loss + batch_mag_loss.item()
-            phase_loss = phase_loss + batch_phase_loss.item()
             batch_mag_loss = 0
-            batch_phase_loss = 0
 
             if batches % save_every == 0:
                 model_path = f'{model_dir}models/remover.{step}.tmp.pth'
                 torch.save(model.state_dict(), model_path)
 
-    return mag_loss / batches, phase_loss / batches, step
+    return mag_loss / batches, step
 
-def validate_epoch(dataloader, model, swa_model, device, include_phase=False):
+def validate_epoch(dataloader, model, swa_model, device):
     model.eval()
     crit = nn.L1Loss()
 
     mag_loss = 0
-    phase_loss = 0
 
     with torch.no_grad():
         for X, Y in dataloader:
@@ -149,17 +152,15 @@ def validate_epoch(dataloader, model, swa_model, device, include_phase=False):
                 pred = torch.sigmoid(model(X))
 
             l1_mag = crit(X[:, :2] * pred[:, :2], Y[:, :2])
-            l1_phase = crit(pred[:, 2:], Y[:, 2:]) if include_phase else torch.zeros_like(l1_mag)
-            loss = l1_mag + l1_phase
+            loss = l1_mag
 
             if torch.logical_or(loss.isnan(), loss.isinf()):
                 print('nan validation loss; aborting')
                 quit()
             else:
                 mag_loss += l1_mag.item() * len(X)
-                phase_loss += l1_phase.item() * len(X)
 
-    return mag_loss / len(dataloader.dataset), phase_loss / len(dataloader.dataset)
+    return mag_loss / len(dataloader.dataset)
 
 def main():
     p = argparse.ArgumentParser()
@@ -187,7 +188,6 @@ def main():
     p.add_argument('--lr_scheduler_decay_power', type=float, default=0.1)
     p.add_argument('--lr_verbosity', type=int, default=1000)
     
-    p.add_argument('--include_phase', type=str, default='false')
     p.add_argument('--channels', type=int, default=8)
     p.add_argument('--feedforward_expansion', type=int, default=24)
     p.add_argument('--num_heads', type=int, default=8)
@@ -216,7 +216,6 @@ def main():
     p.add_argument('--cropsize', type=int, default=0)
     args = p.parse_args()
 
-    args.include_phase = str.lower(args.include_phase) == 'true'
     args.amsgrad = str.lower(args.amsgrad) == 'true'
     args.progress_bar = str.lower(args.progress_bar) == 'true'
     args.mixed_precision = str.lower(args.mixed_precision) == 'true'
@@ -270,7 +269,7 @@ def main():
     torch.manual_seed(args.seed)
 
     device = torch.device('cpu')
-    model = FrameTransformer(in_channels=4 if args.include_phase else 2, out_channels=4 if args.include_phase else 2, channels=args.channels, expansion=args.feedforward_expansion, n_fft=args.n_fft, dropout=args.dropout, num_heads=args.num_heads)
+    model = FrameTransformer(in_channels=2, out_channels=2, channels=args.channels, expansion=args.feedforward_expansion, n_fft=args.n_fft, dropout=args.dropout, num_heads=args.num_heads)
     
     if torch.cuda.is_available() and args.gpu >= 0:
         device = torch.device('cuda:{}'.format(args.gpu))
@@ -332,20 +331,18 @@ def main():
 
         print('# epoch {}'.format(epoch))
         train_dataloader.dataset.set_epoch(epoch)
-        train_loss_mag, train_loss_phase, step = train_epoch(train_dataloader, model, device, optimizer, accum_steps, args.progress_bar, lr_warmup=scheduler, swa_model=swa_model, grad_scaler=grad_scaler, use_wandb=args.wandb, step=step, include_phase=args.include_phase, model_dir=args.model_dir)
-        val_loss_mag, val_loss_phase = validate_epoch(val_dataloader, model, swa_model, device, include_phase=args.include_phase)
+        train_loss_mag, step = train_epoch(train_dataloader, model, device, optimizer, accum_steps, args.progress_bar, lr_warmup=scheduler, swa_model=swa_model, grad_scaler=grad_scaler, use_wandb=args.wandb, step=step, model_dir=args.model_dir)
+        val_loss_mag = validate_epoch(val_dataloader, model, swa_model, device)
 
         if args.wandb:
             wandb.log({
                 'train_loss_mag': train_loss_mag,
-                'train_loss_phase': train_loss_phase,
                 'val_loss_mag': val_loss_mag,
-                'val_loss_phase': val_loss_phase
             })
 
         print(
-            '  * training loss = {:.6f}, validation loss = {:.6f}, phase = {:.6f}'
-            .format(train_loss_mag, val_loss_mag, val_loss_phase)
+            '  * training loss = {:.6f}, validation loss = {:.6f}'
+            .format(train_loss_mag, val_loss_mag)
         )
 
         if val_loss_mag < best_loss:
