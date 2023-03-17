@@ -205,16 +205,23 @@ class MultichannelMultiheadAttention(nn.Module):
         return x, qk
     
 class MultichannelLinear(nn.Module):
-    def __init__(self, in_channels, out_channels, in_features, out_features, bias=False, kernel_size=3, padding=1, groups=1):
+    def __init__(self, in_channels, out_channels, in_features, out_features, bias=False, kernel_size=3, padding=1, groups=1, init='kaiming'):
         super(MultichannelLinear, self).__init__()
 
         self.conv = nn.Conv2d(in_channels, out_channels, kernel_size=kernel_size, padding=padding, groups=groups)
 
-        self.weight_pw = None
         self.bias_pw = None
         self.weight_pw = nn.Parameter(torch.empty(out_channels, out_features, in_features))
-        nn.init.uniform_(self.weight_pw, a=-1/math.sqrt(in_features), b=1/math.sqrt(in_features))
 
+        if init == 'xavier':
+            bound = math.sqrt(6 / (in_features + out_features))
+            nn.init.xavier_uniform_(self.conv.weight)
+        else:
+            bound = 1 / math.sqrt(in_features)
+            nn.init.kaiming_uniform_(self.conv.weight, a=math.sqrt(5))
+
+        nn.init.uniform_(self.weight_pw, a=-bound, b=bound)
+        
         if bias:
             self.bias_pw = nn.Parameter(torch.empty(out_channels, out_features, 1))
             bound = 1 / math.sqrt(in_features)
