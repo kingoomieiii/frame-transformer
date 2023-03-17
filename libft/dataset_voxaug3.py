@@ -62,9 +62,9 @@ class VoxAugDataset(torch.utils.data.Dataset):
         augmentations = [
             (0.025, apply_channel_drop, {}),
             (0.5, apply_dynamic_range_mod, { "threshold": np.random.uniform(0, 0.5), "ratio": np.random.randint(2,8) }),
-            (0.1, apply_harmonic_distortion, { "P": P, "num_harmonics": np.random.randint(1, 5), "gain": np.random.uniform(0.05, 0.5), "n_fft": self.n_fft, "hop_length": self.hop_length }),
-            (0.5, apply_multiplicative_noise, { "mu": 1, "sigma": np.random.uniform(0, 0.4) }),
-            (0.5, apply_random_eq, { "min": np.random.uniform(0,0.75), "max": np.random.uniform(1.25, 2) }),
+            (0.25, apply_harmonic_distortion, { "P": P, "num_harmonics": np.random.randint(1, 7), "gain": np.random.uniform(0, 0.5), "n_fft": self.n_fft, "hop_length": self.hop_length }),
+            (0.5, apply_multiplicative_noise, { "mu": 1, "sigma": np.random.uniform(0, 0.5) }),
+            (0.5, apply_random_eq, { "min": np.random.uniform(0, 1), "max": np.random.uniform(1, 2) }),
             (0.5, apply_stereo_spatialization, { "c": Vc, "alpha": np.random.uniform(0, 2) })
         ]
 
