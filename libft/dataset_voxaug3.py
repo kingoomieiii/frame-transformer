@@ -82,9 +82,7 @@ class VoxAugDataset(torch.utils.data.Dataset):
         return V
 
     def _augment_instruments(self, X, c):
-        if np.random.uniform() < 0.1:
-            X = apply_time_stretch(X, self.cropsize)
-        elif X.shape[2] > self.cropsize:
+        if X.shape[2] > self.cropsize:
             start = np.random.randint(0, X.shape[2] - self.cropsize)
             X = X[:, :, start:start+self.cropsize]
 
@@ -93,9 +91,8 @@ class VoxAugDataset(torch.utils.data.Dataset):
 
         augmentations = [
             (0.01, apply_channel_drop, {}),
-            (0.5, apply_dynamic_range_mod, { "threshold": np.random.uniform(0, 0.5), "ratio": np.random.randint(2,8) }),
-            (0.5, apply_random_eq, { "min": np.random.uniform(0.7,1), "max": np.random.uniform(1, 1.3) }),
-            (0.5, apply_stereo_spatialization, { "c": c, "alpha": np.random.uniform(0.5, 1.5) })
+            (0.5, apply_random_eq, { "min": np.random.uniform(0.8,1), "max": np.random.uniform(1, 1.2) }),
+            (0.5, apply_stereo_spatialization, { "c": c, "alpha": np.random.uniform(0.8, 1.2) })
         ]
 
         random.shuffle(augmentations)
