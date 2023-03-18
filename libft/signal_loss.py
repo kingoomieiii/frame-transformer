@@ -17,3 +17,6 @@ def sdr_loss(X, Y, eps=1e-10):
     signal = alpha * Y
     distortion = X - signal
     return -(10 * torch.log10(((torch.sum(signal ** 2) + eps) / torch.sum(distortion ** 2) + eps)))
+
+def kl_divergence(mu, logvar):
+    return -0.5 * torch.sum(1 + logvar - mu.pow(2) - logvar.exp())
