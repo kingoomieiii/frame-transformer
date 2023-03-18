@@ -33,11 +33,11 @@ class FrameTransformer(nn.Module):
 
         self.mu = nn.Sequential(
             *[FrameTransformerBridge(channels * 8 + num_attention_maps[4] * i, num_attention_maps[4], self.max_bin // 16, dropout=dropout, expansion=expansion, num_heads=num_heads) for i in range(num_bridge_layers)],
-            nn.Conv2d(channels * 8 + num_attention_maps[4] * num_bridge_layers, channels * 8, 1))
+            ResBlock(channels * 8 + num_attention_maps[4] * num_bridge_layers, channels * 8, self.max_bin // 16))
 
         self.std = nn.Sequential(
             *[FrameTransformerBridge(channels * 8 + num_attention_maps[4] * i, num_attention_maps[4], self.max_bin // 16, dropout=dropout, expansion=expansion, num_heads=num_heads) for i in range(num_bridge_layers)],
-            nn.Conv2d(channels * 8 + num_attention_maps[4] * num_bridge_layers, channels * 8, 1))
+            ResBlock(channels * 8 + num_attention_maps[4] * num_bridge_layers, channels * 8, self.max_bin // 16))
 
         self.dec4 = FrameDecoder(channels * 8 + num_attention_maps[3], channels * 6, self.max_bin // 8)
         self.dec4_transformer = FrameTransformerDecoder(channels * 6, num_attention_maps[3], self.max_bin // 8, dropout=dropout, expansion=expansion, num_heads=num_heads)
