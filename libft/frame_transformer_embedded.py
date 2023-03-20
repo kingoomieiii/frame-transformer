@@ -3,10 +3,8 @@ import torch
 from torch import nn
 import torch.nn.functional as F
 
-from libft.multichannel_multihead_attention import MultichannelMultiheadAttention
-from libft.multichannel_layernorm import MultichannelLayerNorm
-from libft.multichannel_linear import MultichannelLinear
 from libft.positional_embedding import PositionalEmbedding
+from libft.rotary_embedding_torch import RotaryEmbedding
 
 class FrameTransformer(nn.Module):
     def __init__(self, in_channels=2, out_channels=2, channels=2, dropout=0.1, n_fft=2048, num_heads=4, expansion=4, transformer_channels=[12,12,12,12,12,12,12]):
@@ -175,4 +173,124 @@ class FrameDecoder(nn.Module):
         x = torch.cat((self.upsample(x), skip), dim=1)
         x = self.body(x)
 
+        return x
+
+class MultichannelMultiheadAttention(nn.Module):
+    def __init__(self, channels, num_heads, features, kernel_size=3, padding=1):
+        super().__init__()
+
+        self.num_heads = num_heads
+        self.embedding = RotaryEmbedding(features // num_heads)
+
+        self.q_proj = nn.Sequential(
+            nn.Conv2d(channels, channels, kernel_size=kernel_size, padding=padding, groups=channels, bias=False),
+            MultichannelLinear(channels, channels, features, features))
+        
+        self.k_proj = nn.Sequential(
+            nn.Conv2d(channels, channels, kernel_size=kernel_size, padding=padding, groups=channels, bias=False),
+            MultichannelLinear(channels, channels, features, features))
+        
+        self.v_proj = nn.Sequential(
+            nn.Conv2d(channels, channels, kernel_size=kernel_size, padding=padding, groups=channels, bias=False),
+            MultichannelLinear(channels, channels, features, features))
+        
+        self.o_proj = MultichannelLinear(channels, channels, features, features)
+
+    def __call__(self, x, mem=None, prev_qk=None):
+        b,c,h,w = x.shape
+        q = self.embedding.rotate_queries_or_keys(self.q_proj(x).transpose(2,3).reshape(b,c,w,self.num_heads,-1).permute(0,1,3,2,4))
+        k = self.embedding.rotate_queries_or_keys(self.k_proj(x if mem is None else mem).transpose(2,3).reshape(b,c,w,self.num_heads,-1).permute(0,1,3,2,4)).transpose(3,4)
+        v = self.v_proj(x if mem is None else mem).transpose(2,3).reshape(b,c,w,self.num_heads,-1).permute(0,1,3,2,4)
+
+        with torch.cuda.amp.autocast_mode.autocast(enabled=True):
+            qk = torch.matmul(q,k) / math.sqrt(h)
+
+            if prev_qk is not None:
+                qk = qk + prev_qk
+
+            a = torch.matmul(F.softmax(qk, dim=-1),v).transpose(2,3).reshape(b,c,w,-1).transpose(2,3)
+
+        x = self.o_proj(a)
+
+        return x, qk
+
+class MultichannelLayerNorm(nn.Module):
+    def __init__(self, channels, features, eps=1e-8, trainable=True):
+        super(MultichannelLayerNorm, self).__init__()
+        
+        self.eps = eps
+
+        if trainable:
+            self.weight = nn.Parameter(torch.empty(channels, 1, features))
+            self.bias = nn.Parameter(torch.empty(channels, 1, features))
+            nn.init.ones_(self.weight)
+            nn.init.zeros_(self.bias)
+        else:
+            self.register_buffer('weight', torch.ones(channels, 1, features))
+            self.register_buffer('bias', torch.zeros(channels, 1, features))
+
+    def __call__(self, x):
+        d = len(x.shape)
+
+        if d == 2:
+            x = x.unsqueeze(-1).unsqueeze(1)
+        elif d == 3:
+            x = x.unsqueeze(-1)
+
+        x = (torch.layer_norm(x.transpose(2,3), (self.weight.shape[-1],), eps=self.eps) * self.weight + self.bias).transpose(2,3)
+
+        if d == 2 or d == 3:
+            x = x.squeeze(-1)
+
+        return x   
+
+class MultichannelLinear(nn.Module):
+    def __init__(self, in_channels, out_channels, in_features, out_features, positionwise=True, depthwise=False, bias=False, include_position=False):
+        super(MultichannelLinear, self).__init__()
+
+        self.weight_pw = None
+        self.bias_pw = None
+        if in_features != out_features or positionwise:
+            self.weight_pw = nn.Parameter(torch.empty(in_channels, out_features, in_features))
+            nn.init.uniform_(self.weight_pw, a=-1/math.sqrt(in_features), b=1/math.sqrt(in_features))
+
+            if bias:
+                self.bias_pw = nn.Parameter(torch.empty(in_channels, out_features, 1))
+                bound = 1 / math.sqrt(in_features)
+                nn.init.uniform_(self.bias_pw, -bound, bound)
+
+        self.weight_dw = None
+        self.bias_dw = None
+        if in_channels != out_channels or depthwise:
+            self.weight_dw = nn.Parameter(torch.empty(out_channels, in_channels))
+            nn.init.uniform_(self.weight_dw, a=-1/math.sqrt(in_channels), b=1/math.sqrt(in_channels))
+
+            if bias:
+                self.bias_dw = nn.Parameter(torch.empty(out_channels, 1, 1))
+                bound = 1 / math.sqrt(in_channels)
+                nn.init.uniform_(self.bias_dw, -bound, bound)
+
+    def __call__(self, x):
+        d = len(x.shape)
+
+        if d == 2:
+            x = x.unsqueeze(-1).unsqueeze(1)
+        elif d == 3:
+            x = x.unsqueeze(-1)
+
+        if self.weight_pw is not None:
+            x = torch.matmul(x.transpose(2,3), self.weight_pw.transpose(1,2)).transpose(2,3)
+
+            if self.bias_pw is not None:
+                x = x + self.bias_pw
+
+        if self.weight_dw is not None:
+            x = torch.matmul(x.transpose(1,3), self.weight_dw.t()).transpose(1,3)
+
+            if self.bias_dw is not None:
+                x = x + self.bias_dw
+
+        if d == 2 or d == 3:
+            x = x.squeeze(-1)
+        
         return x
