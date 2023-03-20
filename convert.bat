@@ -1,0 +1,4 @@
+python inference_v2b.py --gpu 0 --input "G://input/Dir en Grey - Phalaris" --output "output_v2b.3.19.23.v61f" --cropsize 1024 --padding 512 --create_webm
+python inference_v2b.py --gpu 0 --input "G://input/Cryptopsy - None So Vile" --output "output_v2b.3.19.23.v61f" --cropsize 1024 --padding 512 --create_webm
+python inference_v2b.py --gpu 0 --input "G://input/Ad Nauseam - Imperative Imperceptible Impulse" --output "output_v2b.3.19.23.v61f" --cropsize 1024 --padding 512 --create_webm
+python inference_v2b.py --gpu 0 --input "G://input/Defeated Sanity - Dharmata" --output "output_v2b.3.19.23.v61f" --cropsize 1024 --padding 512 --create_webm
