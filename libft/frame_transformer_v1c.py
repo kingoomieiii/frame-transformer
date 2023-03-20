@@ -10,7 +10,7 @@ from libft.positional_embedding import PositionalEmbedding
 from libft.rotary_embedding_torch import RotaryEmbedding
 
 class FrameTransformer(nn.Module):
-    def __init__(self, in_channels=2, out_channels=2, channels=2, dropout=0.1, n_fft=2048, num_heads=4, expansion=4, num_bridge_layers=16, num_attention_maps=[1,1,1,1,1,1,1,1]):
+    def __init__(self, in_channels=2, out_channels=2, channels=2, dropout=0.1, n_fft=2048, num_heads=4, expansion=4, num_bridge_layers=16, num_attention_maps=[4,4,4,4,4,4,4,4,4]):
         super(FrameTransformer, self).__init__(),
         
         self.max_bin = n_fft // 2
@@ -41,6 +41,12 @@ class FrameTransformer(nn.Module):
 
         self.enc8 = FrameEncoder(channels * 12 + num_attention_maps[6], channels * 14, self.max_bin // 64)
         self.enc8_transformer = FrameTransformerEncoder(channels * 14, num_attention_maps[7], self.max_bin // 128, dropout=dropout, expansion=expansion, num_heads=num_heads)
+
+        self.enc9 = FrameEncoder(channels * 14 + num_attention_maps[7], channels * 16, self.max_bin // 128)
+        self.enc9_transformer = FrameTransformerEncoder(channels * 16, num_attention_maps[8], self.max_bin // 256, dropout=dropout, expansion=expansion, num_heads=num_heads // 2)
+
+        self.dec8 = FrameDecoder(channels * 16 + num_attention_maps[7] + num_attention_maps[8], channels * 14, self.max_bin // 128)
+        self.dec8_transformer = FrameTransformerDecoder(channels * 14, num_attention_maps[7], self.max_bin // 128, dropout=dropout, expansion=expansion, num_heads=num_heads)
 
         self.dec7 = FrameDecoder(channels * 14 + num_attention_maps[6] + num_attention_maps[7], channels * 12, self.max_bin // 64)
         self.dec7_transformer = FrameTransformerDecoder(channels * 12, num_attention_maps[6], self.max_bin // 64, dropout=dropout, expansion=expansion, num_heads=num_heads)
@@ -90,9 +96,15 @@ class FrameTransformer(nn.Module):
         e7, a7 = self.enc7_transformer(e7)
 
         e8 = self.enc8(e7)
-        e8, _ = self.enc8_transformer(e8)
+        e8, a8 = self.enc8_transformer(e8)
 
-        h = self.dec7(e8, e7)
+        e9 = self.enc9(e8)
+        e9, _ = self.enc9_transformer(e9)
+
+        h = self.dec8(e9, e8)
+        h = self.dec8_transformer(h, a8)
+
+        h = self.dec7(h, e7)
         h = self.dec7_transformer(h, a7)
 
         h = self.dec6(h, e6)
