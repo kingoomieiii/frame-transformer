@@ -191,13 +191,13 @@ class FrameTransformerDecoder(nn.Module):
         self.gate1 = None if not has_prev_skip else nn.Sequential(
             nn.Conv3d(out_channels * 2, out_channels, kernel_size=3, padding=1),
             SquaredReLU(),
-            nn.Conv3d(out_channels, 1, kernel_size=1, padding=0),
+            nn.Conv3d(out_channels, 1, kernel_size=3, padding=1),
             nn.Sigmoid())
 
         self.gate2 = nn.Sequential(
             nn.Conv3d(out_channels * 2, out_channels, kernel_size=3, padding=1),
             SquaredReLU(),
-            nn.Conv3d(out_channels, 1, kernel_size=1, padding=0),
+            nn.Conv3d(out_channels, 1, kernel_size=3, padding=1),
             nn.Sigmoid())
 
         self.embed = nn.Conv2d(channels, out_channels, 1) if channels != out_channels else nn.Identity()
