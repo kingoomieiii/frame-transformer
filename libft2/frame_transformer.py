@@ -50,7 +50,7 @@ class FrameTransformer(nn.Module):
         self.enc9_transformer = nn.Sequential(*[ConvolutionalTransformerEncoder(channels * 16, dropout=dropout, expansion=4, num_heads=num_heads) for _ in range(num_bridge_layers)])
 
         self.dec8 = FrameDecoder(channels * 16 + num_attention_maps, channels * 14, self.max_bin // 128)
-        self.dec8_transformer = FrameTransformerDecoder(channels * 14, num_attention_maps, self.max_bin // 128, dropout=dropout, expansion=expansion, num_heads=num_heads, gate=False)
+        self.dec8_transformer = FrameTransformerDecoder(channels * 14, num_attention_maps, self.max_bin // 128, dropout=dropout, expansion=expansion, num_heads=num_heads, has_prev_skip=False)
 
         self.dec7 = FrameDecoder(channels * 14 + num_attention_maps + num_attention_maps, channels * 12, self.max_bin // 64)
         self.dec7_transformer = FrameTransformerDecoder(channels * 12, num_attention_maps, self.max_bin // 64, dropout=dropout, expansion=expansion, num_heads=num_heads)
@@ -183,13 +183,13 @@ class FrameTransformerEncoder(nn.Module):
         return torch.cat((x, h), dim=1), h, prev_qk
         
 class FrameTransformerDecoder(nn.Module):
-    def __init__(self, channels, out_channels, features, dropout=0.1, expansion=4, num_heads=8, gate=True):
+    def __init__(self, channels, out_channels, features, dropout=0.1, expansion=4, num_heads=8, has_prev_skip=True):
         super(FrameTransformerDecoder, self).__init__()
 
         self.activate = SquaredReLU()
         self.dropout = nn.Dropout(dropout)
 
-        self.gate1 = None if not gate else nn.Sequential(
+        self.gate1 = None if not has_prev_skip else nn.Sequential(
             nn.Conv3d(out_channels * 2, out_channels, kernel_size=3, padding=1),
             SquaredReLU(),
             nn.Conv3d(out_channels, 1, kernel_size=1, padding=0),
