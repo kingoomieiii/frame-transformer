@@ -6,7 +6,7 @@ import torch.nn.functional as F
 from libft.multichannel_layernorm import FrameNorm, MultichannelLayerNorm
 from libft.multichannel_linear import MultichannelLinear
 from libft.frame_conv import FrameConv
-from libft.positional_embedding import PositionalEmbedding
+from libft.convolutional_embedding import ConvolutionalEmbedding
 from libft.rotary_embedding_torch import RotaryEmbedding
 
 class FrameTransformer(nn.Module):
@@ -16,7 +16,7 @@ class FrameTransformer(nn.Module):
         self.max_bin = n_fft // 2
         self.output_bin = n_fft // 2 + 1
 
-        self.positional_embedding = PositionalEmbedding(in_channels, self.max_bin)
+        self.positional_embedding = ConvolutionalEmbedding(in_channels, self.max_bin)
 
         self.enc1 = FrameEncoder(in_channels + 1, channels, self.max_bin, downsample=False)
         self.enc1_transformer = FrameTransformerEncoder(channels, num_attention_maps, self.max_bin, dropout=dropout, expansion=expansion, num_heads=num_heads)
