@@ -13,8 +13,8 @@ from torch.optim.swa_utils import AveragedModel
 
 from tqdm import tqdm
 
-from libft2.dataset_voxaug3 import VoxAugDataset
-from libft2.frame_transformer_v1c import FrameTransformer
+from libft2.dataset_voxaug import VoxAugDataset
+from libft2.frame_transformer import FrameTransformer
 
 from torch.nn import functional as F
 from lib.lr_scheduler_linear_warmup import LinearWarmupScheduler
@@ -44,10 +44,10 @@ def train_epoch(dataloader, model, device, optimizer, accumulation_steps, progre
             pmin = torch.min(pred)
             pred = X * pred
             
-        lsd_loss = signal_loss.lsd_loss(pred, Y) / accumulation_steps
-        sdr_loss = signal_loss.sdr_loss(pred, Y) / accumulation_steps
+        # lsd_loss = signal_loss.lsd_loss(pred, Y) / accumulation_steps
+        # sdr_loss = signal_loss.sdr_loss(pred, Y) / accumulation_steps
         mae_loss = F.l1_loss(pred, Y) / accumulation_steps        
-        accum_loss = mae_loss * 0.4 + lsd_loss * 0.1 + sdr_loss * 0.5
+        accum_loss = mae_loss# * 0.4 + lsd_loss * 0.1 + sdr_loss * 0.5
         batch_mag_loss = batch_mag_loss + mae_loss
 
         if torch.logical_or(accum_loss.isnan(), accum_loss.isinf()):
@@ -146,15 +146,15 @@ def main():
     p.add_argument('--lr_scheduler_decay_power', type=float, default=0.1)
     p.add_argument('--lr_verbosity', type=int, default=1000)
     
-    p.add_argument('--channels', type=int, default=8)
-    p.add_argument('--expansion', type=int, default=24)
+    p.add_argument('--channels', type=int, default=16)
+    p.add_argument('--expansion', type=int, default=10240)
     p.add_argument('--num_heads', type=int, default=8)
     p.add_argument('--dropout', type=float, default=0.1)
     
-    p.add_argument('--stages', type=str, default='600000,800000,900000,1108000')
-    p.add_argument('--cropsizes', type=str, default='256,512,1024,2048')
-    p.add_argument('--batch_sizes', type=str, default='8,4,2,1')
-    p.add_argument('--accumulation_steps', '-A', type=str, default='1,2,4,8')
+    p.add_argument('--stages', type=str, default='900000,1108000')
+    p.add_argument('--cropsizes', type=str, default='256,512')
+    p.add_argument('--batch_sizes', type=str, default='2,1')
+    p.add_argument('--accumulation_steps', '-A', type=str, default='4,8')
     p.add_argument('--gpu', '-g', type=int, default=-1)
     p.add_argument('--optimizer', type=str.lower, choices=['adam', 'adamw', 'sgd', 'radam', 'rmsprop'], default='adam')
     p.add_argument('--amsgrad', type=str, default='false')

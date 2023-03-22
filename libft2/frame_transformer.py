@@ -2,15 +2,14 @@ import math
 import torch
 from torch import nn
 import torch.nn.functional as F
-from libft2.convolutional_multihead_attention import ConvolutionalMultiheadAttention
 
+from libft2.convolutional_multihead_attention import ConvolutionalMultiheadAttention
 from libft2.multichannel_multihead_attention import MultichannelMultiheadAttention
 from libft2.multichannel_layernorm import MultichannelLayerNorm
 from libft2.multichannel_linear import MultichannelLinear
 from libft2.frame_conv import FrameConv
 from libft2.convolutional_embedding import ConvolutionalEmbedding
 from libft2.res_block import ResBlock
-from libft2.rotary_embedding_torch import RotaryEmbedding
 from libft2.squared_relu import SquaredReLU
 
 class FrameTransformer(nn.Module):

@@ -14,7 +14,7 @@ def apply_random_eq(X, min=0, max=2):
     arr8 = F.interpolate(torch.rand((1, 1, 4,)) * (max - min) + min, size=(X.shape[1]), mode='linear', align_corners=True).squeeze(0).squeeze(0).numpy()
     arr9 = F.interpolate(torch.rand((1, 1, 2,)) * (max - min) + min, size=(X.shape[1]), mode='linear', align_corners=True).squeeze(0).squeeze(0).numpy()
     eq = (arr1 + arr2 + arr3 + arr4 + arr5 + arr6 + arr7 + arr8 + arr9) / 9.0
-    eq = np.clip(eq, 0, 1.5)
+    eq = np.clip(eq, min, max)
     eq = np.expand_dims(eq, (0, 2))
     return X * eq
 
