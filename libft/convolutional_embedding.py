@@ -27,7 +27,7 @@ class ConvolutionalEmbedding(nn.Module):
     def __init__(self, channels, features, max_seq_len=4096):
         super(ConvolutionalEmbedding, self).__init__()
 
-        self.extract1 = ResBlock(channels, 1, features, kernel_size=11, padding=5)
+        self.extract1 = ResBlock(channels + 1, 1, features, kernel_size=11, padding=5)
         self.extract2 = ResBlock(channels * 2, 1, features // 2, kernel_size=11, padding=5)
         self.extract3 = ResBlock(channels * 4, 1, features // 4, kernel_size=11, padding=5)
         self.extract4 = ResBlock(channels * 6, 1, features // 8, kernel_size=11, padding=5)
@@ -37,7 +37,7 @@ class ConvolutionalEmbedding(nn.Module):
         self.extract8 = ResBlock(channels * 14, 1, features // 128, kernel_size=11, padding=5)
         self.extract9 = ResBlock(channels * 16, 1, features // 256, kernel_size=11, padding=5)
 
-        self.encoder1 = ResBlock(channels, channels * 2, features, kernel_size=3, padding=1, downsample=True)
+        self.encoder1 = ResBlock(channels + 1, channels * 2, features, kernel_size=3, padding=1, downsample=True)
         self.encoder2 = ResBlock(channels * 2, channels * 4, features // 2, kernel_size=3, padding=1, downsample=True)
         self.encoder3 = ResBlock(channels * 4, channels * 6, features // 4, kernel_size=3, padding=1, downsample=True)
         self.encoder4 = ResBlock(channels * 6, channels * 8, features // 8, kernel_size=3, padding=1, downsample=True)
@@ -46,7 +46,7 @@ class ConvolutionalEmbedding(nn.Module):
         self.encoder7 = ResBlock(channels * 12, channels * 14, features // 64, kernel_size=3, padding=1, downsample=True)
         self.encoder8 = ResBlock(channels * 14, channels * 16, features // 128, kernel_size=3, padding=1, downsample=True)
 
-        self.out = ResBlock(10, 1, features, kernel_size=1, padding=0)
+        self.out = ResBlock(9, 1, features, kernel_size=1, padding=0)
 
         position = torch.arange(0, max_seq_len, dtype=torch.float).unsqueeze(1)
         div_term = torch.exp(torch.arange(0, features, 2).float() * -(math.log(10000.0) / features))
@@ -56,6 +56,8 @@ class ConvolutionalEmbedding(nn.Module):
         self.register_buffer('pe', pe.unsqueeze(0).unsqueeze(0).transpose(2,3))
 
     def __call__(self, x):
+        x = torch.cat((x, self.pe[:, :, :, :x.shape[3]].expand((x.shape[0], -1, -1, -1))), dim=1)
+
         e1 = self.extract1(x)
         h = self.encoder1(x)
 
@@ -82,4 +84,4 @@ class ConvolutionalEmbedding(nn.Module):
 
         e9 = F.interpolate(self.extract9(h), size=x.shape[2:], mode='bilinear', align_corners=True)
 
-        return self.out(torch.cat((e1, e2, e3, e4, e5, e6, e7, e8, e9, self.pe[:, :, :, :x.shape[3]].expand((x.shape[0], -1, -1, -1))), dim=1))
+        return self.out(torch.cat((e1, e2, e3, e4, e5, e6, e7, e8, e9), dim=1))
