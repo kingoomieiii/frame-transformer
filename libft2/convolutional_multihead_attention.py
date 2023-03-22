@@ -19,15 +19,15 @@ class ConvolutionalMultiheadAttention(nn.Module):
     def forward(self, x, mem=None, prev_qk=None):
         b,c,h,w = x.shape
 
-        q = self.embedding.rotate_queries_or_keys(self.q_proj(x).reshape(b,c,h*w).transpose(1,2).reshape(b,1,h*w,self.num_heads,-1).permute(0,1,3,2,4))
-        k = self.embedding.rotate_queries_or_keys(self.k_proj(x if mem is None else mem).reshape(b,c,h*w).transpose(1,2).reshape(b,1,h*w,self.num_heads,-1).permute(0,1,3,2,4)).transpose(3,4)
-        v = self.v_proj(x if mem is None else mem).reshape(b,c,h*w).transpose(1,2).reshape(b,1,h*w,self.num_heads,-1).permute(0,1,3,2,4)
+        q = self.embedding.rotate_queries_or_keys(self.q_proj(x).reshape(b,c,h*w).transpose(1,2).reshape(b,h*w,self.num_heads,-1).permute(0,2,1,3))
+        k = self.embedding.rotate_queries_or_keys(self.k_proj(x if mem is None else mem).reshape(b,c,h*w).transpose(1,2).reshape(b,h*w,self.num_heads,-1).permute(0,2,1,3)).transpose(2,3)
+        v = self.v_proj(x if mem is None else mem).reshape(b,c,h*w).transpose(1,2).reshape(b,h*w,self.num_heads,-1).permute(0,2,1,3)
         qk = torch.matmul(q,k) / math.sqrt(c)
 
         if prev_qk is not None:
             qk = qk + prev_qk
 
-        a = torch.matmul(F.softmax(qk, dim=-1),v).transpose(2,3).reshape(b,h,w,c).permute(0,3,1,2)
+        a = torch.matmul(F.softmax(qk, dim=-1),v).transpose(1,2).reshape(b,h,w,c).permute(0,3,1,2)
         x = self.o_proj(a)
 
         return x
