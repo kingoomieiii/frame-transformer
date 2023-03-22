@@ -263,26 +263,26 @@ class ConvolutionalTransformerEncoder(nn.Module):
         self.activate = SquaredReLU()
         self.dropout = nn.Dropout2d(dropout)
 
-        self.norm1 = nn.InstanceNorm2d(channels)
+        self.norm1 = ChannelNorm(channels)
         self.glu = nn.Sequential(
             nn.Conv2d(channels, channels * 2, kernel_size=1, padding=0),
             nn.GLU(dim=1))
         
-        self.norm2 = nn.InstanceNorm2d(channels)
+        self.norm2 = ChannelNorm(channels)
         self.conv1a = nn.Conv2d(channels, channels, kernel_size=1, padding=0)
         self.conv1b = nn.Sequential(
             nn.Conv2d(channels, channels, kernel_size=3, padding=1, groups=channels),
             nn.Conv2d(channels, channels, kernel_size=1, padding=0))
 
-        self.norm3 = nn.InstanceNorm2d(channels)
+        self.norm3 = ChannelNorm(channels)
         self.conv2 = nn.Sequential(
             nn.Conv2d(channels, channels, kernel_size=9, padding=4, groups=channels),
             nn.Conv2d(channels, channels, kernel_size=1, padding=0))
 
-        self.norm4 = nn.InstanceNorm2d(channels)
+        self.norm4 = ChannelNorm(channels)
         self.attn = ConvolutionalMultiheadAttention(channels, num_heads, kernel_size=3, padding=1)
 
-        self.norm5 = nn.InstanceNorm2d(channels)
+        self.norm5 = ChannelNorm(channels)
         self.conv3 = nn.Conv2d(channels, channels * expansion, kernel_size=3, padding=1)
         self.conv4 = nn.Conv2d(channels * expansion, channels, kernel_size=3, padding=1)
         
@@ -305,6 +305,15 @@ class ConvolutionalTransformerEncoder(nn.Module):
         h = h + self.dropout(z)
 
         return h
+
+class ChannelNorm(nn.Module):
+    def __init__(self, channels):
+        super(ChannelNorm, self).__init__()
+
+        self.norm = nn.LayerNorm(channels)
+
+    def forward(self, x):
+        return self.norm(x.transpose(1,3)).transpose(1,3)
 
 class FrameEncoder(nn.Module):
     def __init__(self, in_channels, out_channels, features, downsample=True):
@@ -329,6 +338,3 @@ class FrameDecoder(nn.Module):
         x = self.body(x)
 
         return x
-
-def kl_divergence(mu, logvar):
-    return -0.5 * torch.sum(1 + logvar - mu.pow(2) - logvar.exp())
