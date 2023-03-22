@@ -20,3 +20,4 @@ V3 - This neural network is currently being trained and is doing significantly b
 - [7] Su et al., "RoFormer: Enhanced Transformer with Rotary Position Embedding", https://arxiv.org/abs/2104.09864
 - [9] Asiedu et all., "Decoder Denoising Pretraining for Semantic Segmentation", https://arxiv.org/abs/2205.11423
 - [10] He et al., "RealFormer: Transformer Likes Residual Attention", https://arxiv.org/abs/2012.11747
+- [11] Islam et al., "How Much Position Information Do Convolutional Neural Networks Encode?", https://arxiv.org/abs/2001.08248

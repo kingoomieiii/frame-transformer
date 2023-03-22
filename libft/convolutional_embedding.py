@@ -5,24 +5,27 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from libft.multichannel_layernorm import MultichannelLayerNorm
+from libft.multichannel_linear import SquaredReLU
            
 class ResBlock(nn.Module):
     def __init__(self, in_channels, out_channels, features, kernel_size=3, padding=1, downsample=False):
         super(ResBlock, self).__init__()
+
+        self.activate = SquaredReLU()
         self.norm = MultichannelLayerNorm(in_channels, features)
         self.conv1 = nn.Conv2d(in_channels, out_channels, kernel_size=kernel_size, padding=padding, bias=False)
         self.conv2 = nn.Conv2d(out_channels, out_channels, kernel_size=kernel_size, padding=padding, stride=2 if downsample else 1, bias=False)
         self.identity = nn.Conv2d(in_channels, out_channels, kernel_size=1, padding=0, stride=2 if downsample else 1, bias=False) if in_channels != out_channels or downsample else nn.Identity()
 
     def __call__(self, x):
-        h = self.conv2(torch.relu(self.conv1(self.norm(x))) ** 2)
+        h = self.conv2(self.activate(self.conv1(self.norm(x))))
         x = self.identity(x) + h
 
         return x
 
-class PositionalEmbedding(nn.Module):
-    def __init__(self, channels, features, max_seq_length=4096):
-        super(PositionalEmbedding, self).__init__()
+class ConvolutionalEmbedding(nn.Module):
+    def __init__(self, channels, features, max_seq_len=4096):
+        super(ConvolutionalEmbedding, self).__init__()
 
         self.extract1 = ResBlock(channels, 1, features, kernel_size=11, padding=5)
         self.extract2 = ResBlock(channels * 2, 1, features // 2, kernel_size=11, padding=5)
@@ -43,7 +46,14 @@ class PositionalEmbedding(nn.Module):
         self.encoder7 = ResBlock(channels * 12, channels * 14, features // 64, kernel_size=3, padding=1, downsample=True)
         self.encoder8 = ResBlock(channels * 14, channels * 16, features // 128, kernel_size=3, padding=1, downsample=True)
 
-        self.out = ResBlock(9, 1, features, kernel_size=1, padding=0)
+        self.out = ResBlock(10, 1, features, kernel_size=1, padding=0)
+
+        position = torch.arange(0, max_seq_len, dtype=torch.float).unsqueeze(1)
+        div_term = torch.exp(torch.arange(0, features, 2).float() * -(math.log(10000.0) / features))
+        pe = torch.zeros(max_seq_len, features)
+        pe[:, 0::2] = torch.sin(position * div_term)
+        pe[:, 1::2] = torch.cos(position * div_term)
+        self.register_buffer('pe', pe.unsqueeze(0).unsqueeze(0).transpose(2,3))
 
     def __call__(self, x):
         e1 = self.extract1(x)
@@ -72,4 +82,4 @@ class PositionalEmbedding(nn.Module):
 
         e9 = F.interpolate(self.extract9(h), size=x.shape[2:], mode='bilinear', align_corners=True)
 
-        return self.out(torch.cat((e1, e2, e3, e4, e5, e6, e7, e8, e9), dim=1))
+        return self.out(torch.cat((e1, e2, e3, e4, e5, e6, e7, e8, e9, self.pe[:, :, :, :x.shape[3]].expand((x.shape[0], -1, -1, -1))), dim=1))
