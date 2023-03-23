@@ -30,4 +30,4 @@ class ConvolutionalMultiheadAttention(nn.Module):
         a = torch.matmul(F.softmax(qk, dim=-1),v).transpose(1,2).reshape(b,h,w,c).permute(0,3,1,2)
         x = self.o_proj(a)
 
-        return x
+        return x, qk

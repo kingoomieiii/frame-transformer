@@ -102,8 +102,10 @@ class FrameTransformer(nn.Module):
         e8 = self.enc8(e7)
         e8, a8, qk8 = self.enc8_transformer(e8, prev_qk=qk7)
 
-        e9 = self.enc9_transformer(self.enc9(e8))
-
+        e9, pqk = self.enc9(e8), None
+        for encoder in self.enc9_transformer:
+            e9, pqk = encoder(e9, prev_qk=pqk)
+            
         h = self.dec8(e9, e8)
         h, pqk1, pqk2 = self.dec8_transformer(h, a8, prev_qk1=None, prev_qk2=None, skip_qk=qk8)
 
@@ -287,7 +289,7 @@ class ConvolutionalTransformerEncoder(nn.Module):
         self.conv3 = nn.Conv2d(channels, channels * expansion, kernel_size=3, padding=1)
         self.conv4 = nn.Conv2d(channels * expansion, channels, kernel_size=3, padding=1)
         
-    def forward(self, x):
+    def forward(self, x, prev_qk=None):
         z = self.glu(self.norm1(x))
         h = x + self.dropout(z)
 
@@ -299,13 +301,13 @@ class ConvolutionalTransformerEncoder(nn.Module):
         z = self.conv2(self.norm3(h))
         h = h + self.dropout(z)
 
-        z = self.attn(self.norm4(h))
+        z, prev_qk = self.attn(self.norm4(h), prev_qk=prev_qk)
         h = x + self.dropout(z)
 
         z = self.conv4(self.activate(self.conv3(self.norm5(h))))
         h = h + self.dropout(z)
 
-        return h
+        return h, prev_qk
 
 class FrameEncoder(nn.Module):
     def __init__(self, in_channels, out_channels, features, downsample=True):
