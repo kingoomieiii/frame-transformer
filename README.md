@@ -1,6 +1,6 @@
-# AsymUNetMCT / FrameTransformer
+# FrameTransformer / AsymUNetMCT
 
-This fork is beginning to grow out of the research phase, changes will likely start slowing down. I have one more step I would like to take as far as a new type of GAN, but for now my focus will be on finishing the new frame transformer's training. The new architecture (and really V1 as well) I am now calling an AsymUNetMCT, or **A**symmetrically down-sampled **UNet** **M**ulti-**C**hannel **T**ransformer. I have started working in a new folder and will finalize the older frame transformer models along with checkpoints so people can make use of those (haven't tried using them as an ensemble but that would probably work well honestly, they do have slightly different behavior).
+This fork is beginning to grow out of the research phase, changes will likely start slowing down. I have one more step I would like to take as far as a new type of GAN, but for now my focus will be on finishing the new frame transformer's training; experiments are showing very strong results with the newer version. The new architecture (and really V1 as well) I am now calling an AsymUNetMCT, or **Asym**metrically down-sampled **UNet** **M**ulti-**C**hannel **T**ransformer. I have started working in a new folder and will finalize the older frame transformer models along with checkpoints so people can make use of those (haven't tried using them as an ensemble but that would probably work well honestly, they do have slightly different behavior).
 
 Asymmetrically down-sampled U-Net refers to a U-Net that down-samples with a stride of (2,1) rather than the conventional stride of 2. Multichannel transformers are an extension of transformers that I created for use with multichannel audio data.
 
