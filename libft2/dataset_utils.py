@@ -46,6 +46,54 @@ def apply_harmonic_distortion(M, P, num_harmonics=2, gain=0.1, n_fft=2048, hop_l
 
     return np.array([np.abs(left_X), np.abs(right_X)])
 
+def apply_pitch_shift(M, P, n_fft=2048, hop_length=1024, sr=44100, n_steps=1):
+    left_M = M[0]
+    right_M = M[1]
+    left_P = P[0]
+    right_P = P[1]
+    
+    left_X = left_M * np.exp(1.j * left_P)
+    right_X = right_M * np.exp(1.j * right_P)
+
+    left_s = librosa.istft(left_X, hop_length=hop_length)
+    right_s = librosa.istft(right_X, hop_length=hop_length)
+
+    left_s = librosa.effects.pitch_shift(left_s, sr=sr, n_steps=n_steps)
+    right_s = librosa.effects.pitch_shift(right_s, sr=sr, n_steps=n_steps)
+
+    left_X = librosa.stft(left_s, n_fft=n_fft, hop_length=hop_length)
+    right_X = librosa.stft(right_s, n_fft=n_fft, hop_length=hop_length)
+
+    return np.array([np.abs(left_X), np.abs(right_X)])
+
+def apply_emphasis(M, P, coef, n_fft=2048, hop_length=1024):
+    left_M = M[0]
+    right_M = M[1]
+    left_P = P[0]
+    right_P = P[1]
+    
+    left_X = left_M * np.exp(1.j * left_P)
+    right_X = right_M * np.exp(1.j * right_P)
+
+    left_s = librosa.istft(left_X, hop_length=hop_length)
+    right_s = librosa.istft(right_X, hop_length=hop_length)
+    
+    if np.random.uniform() < 0.5:
+        left_s = librosa.effects.preemphasis(left_s, coef=coef)
+        right_s = librosa.effects.preemphasis(right_s, coef=coef)
+    else:
+        left_s = librosa.effects.deemphasis(left_s, coef=coef)
+        right_s = librosa.effects.deemphasis(right_s, coef=coef)
+
+    left_X = librosa.stft(left_s, n_fft=n_fft, hop_length=hop_length)
+    right_X = librosa.stft(right_s, n_fft=n_fft, hop_length=hop_length)
+
+    return np.array([np.abs(left_X), np.abs(right_X)])
+
+def apply_random_phase_noise(P, strength=0.1):
+    random_phase = np.random.uniform(-np.pi, np.pi, size=P.shape)
+    return P + strength * random_phase
+
 def apply_stereo_spatialization(X, c, alpha=1):
     X = X / c
     left, right = X[0], X[1]
@@ -53,10 +101,6 @@ def apply_stereo_spatialization(X, c, alpha=1):
     left = alpha * left + (1 - alpha) * avg 
     right = alpha * right + (1 - alpha) * avg
     return np.clip(np.stack([left, right], axis=0), 0, 1) * c
-
-def apply_noise(X, gamma=0.95, sigma=0.4):
-    eps = np.random.normal(scale=sigma, size=X.shape)
-    return np.sqrt(gamma) * X + np.sqrt(1 - gamma) * eps
 
 def apply_multiplicative_noise(X, loc=1, scale=0.1):
     eps = np.random.normal(loc, scale, size=X.shape)
@@ -79,9 +123,6 @@ def apply_channel_drop(X):
         X[1] = 0
 
     return X
-    
-def apply_channel_swap(X):
-    return X[::-1]
 
 def apply_time_stretch(X, target_size):
     if X.shape[2] > target_size:
@@ -110,3 +151,17 @@ def apply_time_stretch(X, target_size):
             H.real = F.interpolate(torch.from_numpy(cropped.real).unsqueeze(0), size=(X.shape[1], target_size), mode='bilinear', align_corners=True).squeeze(0).numpy()
             H.imag = F.interpolate(torch.from_numpy(cropped.imag).unsqueeze(0), size=(X.shape[1], target_size), mode='bilinear', align_corners=True).squeeze(0).numpy()
             return H
+        
+def apply_time_masking(X, max_mask_percentage=0.2):
+    mask_percentage = np.random.uniform(0, max_mask_percentage)
+    mask_width = int(X.shape[2] * mask_percentage)
+    mask_start = np.random.randint(0, X.shape[2] - mask_width)
+    X[:, :, mask_start:mask_start+mask_width] = 0
+    return X
+        
+def apply_frequency_masking(X, max_mask_percentage=0.2):
+    mask_percentage = np.random.uniform(0, max_mask_percentage)
+    mask_height = int(X.shape[1] * mask_percentage)
+    mask_start = np.random.randint(0, X.shape[1] - mask_height)
+    X[:, mask_start:mask_start+mask_height, :] = 0
+    return X

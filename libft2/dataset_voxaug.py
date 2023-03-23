@@ -4,10 +4,10 @@ import numpy as np
 import torch
 import torch.utils.data
 import torch.nn.functional as F
-from libft2.dataset_utils import apply_channel_drop, apply_dynamic_range_mod, apply_harmonic_distortion, apply_multiplicative_noise, apply_random_eq, apply_stereo_spatialization, apply_time_stretch
+from libft2.dataset_utils import apply_channel_drop, apply_dynamic_range_mod, apply_harmonic_distortion, apply_multiplicative_noise, apply_random_eq, apply_stereo_spatialization, apply_time_stretch, apply_pitch_shift, apply_random_phase_noise, apply_time_masking, apply_frequency_masking, apply_emphasis
 
 class VoxAugDataset(torch.utils.data.Dataset):
-    def __init__(self, path=[], vocal_path=[], is_validation=False, n_fft=2048, hop_length=1024, cropsize=256, seed=0, inst_rate=0.01, data_limit=None, predict_vocals=False, time_scaling=True):
+    def __init__(self, path=[], vocal_path=[], is_validation=False, n_fft=2048, hop_length=1024, cropsize=256, sr=44100, seed=0, inst_rate=0.01, data_limit=None, predict_vocals=False, time_scaling=True):
         self.is_validation = is_validation
         self.vocal_list = []
         self.curr_list = []
@@ -16,6 +16,7 @@ class VoxAugDataset(torch.utils.data.Dataset):
         self.predict_vocals = predict_vocals
         self.time_scaling = time_scaling
 
+        self.sr = sr
         self.n_fft = n_fft
         self.hop_length = hop_length
         self.cropsize = cropsize
@@ -60,10 +61,14 @@ class VoxAugDataset(torch.utils.data.Dataset):
         augmentations = [
             (0.025, apply_channel_drop, {}),
             (0.5, apply_dynamic_range_mod, { "threshold": np.random.uniform(0, 0.5), "ratio": np.random.randint(2,8) }),
-            (0.25, apply_harmonic_distortion, { "P": P, "num_harmonics": np.random.randint(1, 5), "gain": np.random.uniform(0, 0.5), "n_fft": self.n_fft, "hop_length": self.hop_length }),
+            (0.2, apply_harmonic_distortion, { "P": P, "num_harmonics": np.random.randint(1, 5), "gain": np.random.uniform(0, 0.5), "n_fft": self.n_fft, "hop_length": self.hop_length }),
             (0.5, apply_multiplicative_noise, { "loc": 1, "scale": np.random.uniform(0, 0.25) }),
             (0.5, apply_random_eq, { "min": np.random.uniform(0, 1), "max": np.random.uniform(1, 2) }),
-            (0.5, apply_stereo_spatialization, { "c": Vc, "alpha": np.random.uniform(0, 2) })
+            (0.5, apply_stereo_spatialization, { "c": Vc, "alpha": np.random.uniform(0, 2) }),
+            (0.2, apply_pitch_shift, { "P": P, "n_fft": self.n_fft, "hop_length": self.hop_length, "sr": self.sr, "n_steps": np.random.uniform(-5, 5) }),
+            (0.2, apply_time_masking, { "max_mask_percentage": np.random.uniform(0, 0.3) }),
+            (0.2, apply_frequency_masking, { "max_mask_percentage": np.random.uniform(0, 0.3) }),
+            (0.2, apply_emphasis, { "P": P, "coef": np.random.uniform(0, 0.3), "n_fft": self.n_fft, "hop_length": self.hop_length })
         ]
 
         random.shuffle(augmentations)
@@ -71,6 +76,9 @@ class VoxAugDataset(torch.utils.data.Dataset):
         for p, aug, args in augmentations:
             if np.random.uniform() < p:
                 M = aug(M, **args)
+
+        if np.random.uniform() < 0.5:
+            P = apply_random_phase_noise(P, np.random.uniform(0, 0.3))
 
         V = M * np.exp(1.j * P)
 

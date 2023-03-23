@@ -10,7 +10,8 @@ class MultichannelLinear(nn.Module):
         self.bias_pw = None
         if in_features != out_features or positionwise:
             self.weight_pw = nn.Parameter(torch.empty(in_channels, out_features, in_features))
-            nn.init.uniform_(self.weight_pw, a=-1/math.sqrt(in_features), b=1/math.sqrt(in_features))
+            bound = 1 / math.sqrt(in_features)
+            nn.init.uniform_(self.weight_pw, -bound, bound)
 
             if bias:
                 self.bias_pw = nn.Parameter(torch.empty(in_channels, out_features, 1))
@@ -21,7 +22,8 @@ class MultichannelLinear(nn.Module):
         self.bias_dw = None
         if in_channels != out_channels or depthwise:
             self.weight_dw = nn.Parameter(torch.empty(out_channels, in_channels))
-            nn.init.uniform_(self.weight_dw, a=-1/math.sqrt(in_channels), b=1/math.sqrt(in_channels))
+            bound = 1 / math.sqrt(in_channels)
+            nn.init.uniform_(self.weight_dw, -bound, bound)
 
             if bias:
                 self.bias_dw = nn.Parameter(torch.empty(out_channels, 1, 1))
