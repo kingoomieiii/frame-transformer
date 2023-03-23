@@ -20,7 +20,6 @@ from lib import spec_utils
 from lib import utils
 from lib import nets
 
-import ffmpeg
 
 class Separator(object):
 
@@ -122,7 +121,7 @@ class Separator(object):
 def main():
     p = argparse.ArgumentParser()
     p.add_argument('--gpu', '-g', type=int, default=-1)
-    p.add_argument('--pretrained_model', '-P', type=str, default='H://models/local.60.v2b.model.pth')
+    p.add_argument('--pretrained_model', '-P', type=str, default='local.57.v2b.model.pth')
     p.add_argument('--input', '-i', required=True)
     p.add_argument('--output', '-o', type=str, default="")
     p.add_argument('--num_res_encoders', type=int, default=4)
@@ -174,7 +173,7 @@ def main():
     queue = []
 
     if os.path.isdir(args.input):
-        args.input = os.path.join(args.input, '').replace("/", "\\")
+        args.input = os.path.join(args.input, '')
         d = os.path.basename(os.path.dirname(args.input))
         output_folder = os.path.join(output_folder, d)
         print(output_folder)
@@ -223,7 +222,8 @@ def main():
             print('done')
             inst_file = '{}/{}_Instruments.wav'.format(output_folder, basename)
             sf.write(inst_file, wave.T, sr)
-            vid_file = '{}/{}.webm'.format(output_folder, basename)
+            vid_file = '{}/{}.mp4'.format(output_folder, basename)
+
 
             if args.create_webm:
                 os.system(f'ffmpeg -y -framerate 1 -loop 1 -i "{cover}" -i "{inst_file}" -t {librosa.get_duration(wave, sr=args.sr)} "{vid_file}"')

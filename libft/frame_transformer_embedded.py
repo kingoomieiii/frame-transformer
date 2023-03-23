@@ -3,7 +3,7 @@ import torch
 from torch import nn
 import torch.nn.functional as F
 
-from libft.positional_embedding import PositionalEmbedding
+from libft.convolutional_embedding import ConvolutionalEmbedding
 from libft.rotary_embedding_torch import RotaryEmbedding
 
 class FrameTransformer(nn.Module):
@@ -13,7 +13,7 @@ class FrameTransformer(nn.Module):
         self.max_bin = n_fft // 2
         self.output_bin = n_fft // 2 + 1
 
-        self.positional_embedding = PositionalEmbedding(in_channels, self.max_bin)
+        self.positional_embedding = ConvolutionalEmbedding(in_channels, self.max_bin)
 
         self.enc0_transformer = FrameTransformerEncoder(in_channels + 1, transformer_channels[0], self.max_bin, dropout=dropout, expansion=expansion, num_heads=num_heads)
         self.enc1 = FrameEncoder(in_channels + transformer_channels[0] + 1, channels, self.max_bin, downsample=False)

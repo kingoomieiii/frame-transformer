@@ -11,6 +11,7 @@ from libft2.frame_conv import FrameConv
 from libft2.convolutional_embedding import ConvolutionalEmbedding
 from libft2.res_block import ResBlock
 from libft2.squared_relu import SquaredReLU
+from libft2.channel_norm import ChannelNorm
 
 class FrameTransformer(nn.Module):
     def __init__(self, in_channels=2, out_channels=2, channels=2, dropout=0.1, n_fft=2048, num_heads=4, expansion=4, num_bridge_layers=4, num_attention_maps=4):
@@ -305,15 +306,6 @@ class ConvolutionalTransformerEncoder(nn.Module):
         h = h + self.dropout(z)
 
         return h
-
-class ChannelNorm(nn.Module):
-    def __init__(self, channels):
-        super(ChannelNorm, self).__init__()
-
-        self.norm = nn.LayerNorm(channels)
-
-    def forward(self, x):
-        return self.norm(x.transpose(1,3)).transpose(1,3)
 
 class FrameEncoder(nn.Module):
     def __init__(self, in_channels, out_channels, features, downsample=True):

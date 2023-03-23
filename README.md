@@ -1,6 +1,28 @@
-# frame-transformer
+# AsymUNetMCT / FrameTransformer
 
-This fork is mainly a research fork and will change frequently and there is like zeo focus on being user friendly. I am happy to answer any and all questions however.
+This fork is beginning to grow out of the research phase, changes will likely start slowing down. I have one more step I would like to take as far as a new type of GAN, but for now my focus will be on finishing the new frame transformer's training. The new architecture (and really V1 as well) I am now calling an AsymUNetMCT, or **A**symmetrically down-sampled **UNet** **M**ulti-**C**hannel **T**ransformer.
+
+Asymmetrically down-sampled U-Net refers to a U-Net that down-samples with a stride of (2,1) rather than the conventional stride of 2. Multichannel transformers are an extension of transformers that I created for use with multichannel audio data.
+
+ConvolutionalEmbedding - This module was inspired by [11] below. This makes use of an encoding branch that consists of residual blocks with symmetrical stride, as well as residual blocks for extracting positional information from that scale. The down-sampling blocks utilize a kernel size of 3 while the position extraction layers utilize kernel sizes of 11, as more padding is shown to help with positional information in the paper. This also includes sinusoidal positional encoding in the form of an extra channel that is appended to the input before being down-sampled.
+
+FrameConv - This module is focused on being a layer that utilizes locality information along with the fully connected linear layers in order to contextualize the fully connected features. It makes use of a symmetrical kernel convolution followed by batched-matrix multiplication to carry out parallel linear layers on the GPU in an efficient manner.
+
+MultichannelLinear - This module is focused on being a layer that processes parallel linear layers and then shares information between those layers. It makes use of batched-matrix multiplication to process parallel linear layers on the GPU and then utilizes matrix multiplication again to carry out a depth-wise transformation that is equivalent to a 1x1 convolution in order to share information between frames and to modify number of channels.
+
+MultichannelLayerNorm - This module applies LayerNorm in parallel across multiple channels, allowing each channel to learn its own element-wise affine parameters.
+
+ChannelNorm - This module applies LayerNorm across the channel dimension, module is included for ease of use.
+
+ConvolutionalMultiheadAttention - This module is a variant of multihead attention that I created to use within the latent space of the U-Net. This is similar to other approaches that are in use elsewhere, I opted to include a symmetrical kernel size > 1 and use multi-head attention. This includes an optional residual attention connection as well.
+
+MultichannelMultiheadAttention - This module was created to utilize parallel attention mechanisms. It uses rotary positional embedding as seen in the RoFormer architecture to better contextualize positional information. After this, the query, key, and value projections utilize MultichannelLinear layers with no depth-wise component which is then followed by 1xN kernel convolutions that utilize only a single group so as to share information across the attention mechanisms. This includes a residual attention connection and is ended with a final output projection that utilizes a multichannel linear layer.
+
+
+
+
+
+I have started on a new package now and will finalize the older frame transformer models along with checkpoints so people can make use of those (haven't tried using them as an ensemble but that would probably work well honestly, they do have slightly different behavior).
 
 I am currently working on training a V4 architecture. This new architecture is a mix of the V3 nad V2 architectures with some residual attention tweaks thrown in. It uses a fixed number of parallel attention mechanisms per layer and uses resdiaul attention connections between successive layers as well as using a skip attention connection between the encoder and decoder in the u-net. I have also added new vocal augmentations (timestretching as well as an approximation of an eq using varying levels of noise that are interpolated and averaged together). This experiment is in train-v2b.py.
 
