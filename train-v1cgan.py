@@ -57,9 +57,10 @@ def train_epoch(dataloader, generator, discriminator, device, optimizer_gen, opt
             disc_fake = discriminator(torch.cat((X, Z.detach()), dim=1))
             disc_real = discriminator(torch.cat((X, Y), dim=1))
             
-        d_real_loss = bce_loss(disc_real, torch.zeros_like(disc_real))
-        d_fake_loss = bce_loss(disc_fake, torch.ones_like(disc_fake))
-        d_loss = ((d_real_loss + d_fake_loss) * 0.5)
+            d_real_loss = bce_loss(disc_real, torch.zeros_like(disc_real))
+            d_fake_loss = bce_loss(disc_fake, torch.ones_like(disc_fake))
+            d_loss = ((d_real_loss + d_fake_loss) * 0.5)
+            
         batch_disc_fake_loss = batch_disc_fake_loss + d_fake_loss
         batch_disc_real_loss = batch_disc_real_loss + d_real_loss
         batch_disc_loss = batch_disc_loss + d_loss
@@ -74,19 +75,18 @@ def train_epoch(dataloader, generator, discriminator, device, optimizer_gen, opt
             optimizer_gen.zero_grad()
 
         with torch.cuda.amp.autocast_mode.autocast():
-            disc_fake = discriminator(torch.cat((X, Z), dim=1))
-        
-        g_gan_loss = bce_loss(disc_fake, torch.ones_like(disc_fake))
-        g_l1_loss = F.l1_loss(Z, Y)
-        g_loss = g_gan_loss + 100 * g_l1_loss
-        grad_scaler_gen.scale(g_loss).backward()
+            g_gan_loss = bce_loss(disc_fake, torch.ones_like(disc_fake))
+            g_l1_loss = F.l1_loss(Z, Y)
+            g_loss = g_gan_loss + 100 * g_l1_loss
+            grad_scaler_gen.scale(g_loss).backward()
+
         batch_gen_loss_l1 = batch_gen_loss_l1 + g_l1_loss
         batch_gen_loss_gan = batch_gen_loss_gan + g_gan_loss
         batch_gen_loss = batch_gen_loss + g_loss
 
         if (itr + 1) % accumulation_steps == 0:
             if progress_bar:
-                pbar.set_description(f'{step}: {str((batch_gen_loss_l1 / accumulation_steps).item())}||{str((batch_gen_loss_gan / accumulation_steps).item())}||{str((batch_disc_real_loss / accumulation_steps).item())}||{pavg.item()}||{pmin.item()}')
+                pbar.set_description(f'{step}: {str((batch_gen_loss_l1 / accumulation_steps).item())}||{str((batch_gen_loss_gan / accumulation_steps).item())}||{str((batch_disc_fake_loss / accumulation_steps).item())}||{str((batch_disc_real_loss / accumulation_steps).item())}||{pavg.item()}||{pmin.item()}')
 
             grad_scaler_gen.unscale_(optimizer_gen)
             torch.nn.utils.clip_grad.clip_grad_norm_(generator.parameters(), 0.5)
