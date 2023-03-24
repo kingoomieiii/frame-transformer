@@ -20,7 +20,7 @@ from torch.nn import functional as F
 from lib.lr_scheduler_linear_warmup import LinearWarmupScheduler
 from lib.lr_scheduler_polynomial_decay import PolynomialDecayScheduler
 
-def train_epoch(dataloader, generator, discriminator, device, optimizer_gen, optimizer_disc, accumulation_steps, progress_bar, scheduler_gen=None, scheduler_disc=None, grad_scaler_gen=None, grad_scaler_disc=None, use_wandb=True, step=0, model_dir="", save_every=20000):
+def train_epoch(dataloader, generator, discriminator, device, optimizer_gen, optimizer_disc, accumulation_steps, progress_bar, scheduler_gen=None, scheduler_disc=None, grad_scaler_gen=None, grad_scaler_disc=None, use_wandb=True, step=0, model_dir="", save_every=20000, lam=100):
     gen_loss = 0
     batch_gen_loss = 0
     batch_gen_loss_l1 = 0
@@ -79,7 +79,7 @@ def train_epoch(dataloader, generator, discriminator, device, optimizer_gen, opt
         g_gan_loss = bce_loss(disc_fake, torch.ones_like(disc_fake))
         g_l1_loss = F.l1_loss(Z, Y)
         g_loss = g_gan_loss + 100 * g_l1_loss
-        grad_scaler_gen.scale(g_loss).backward()        
+        grad_scaler_gen.scale(g_loss).backward()
         batch_gen_loss_l1 = batch_gen_loss_l1 + g_l1_loss
         batch_gen_loss_gan = batch_gen_loss_gan + g_gan_loss
         batch_gen_loss = batch_gen_loss + g_loss
@@ -92,8 +92,8 @@ def train_epoch(dataloader, generator, discriminator, device, optimizer_gen, opt
             torch.nn.utils.clip_grad.clip_grad_norm_(generator.parameters(), 0.5)
             grad_scaler_gen.step(optimizer_gen)
             grad_scaler_gen.update()
-            disc_loss = disc_loss + batch_disc_loss
-            gen_loss = gen_loss + batch_gen_loss_gan
+            disc_loss = disc_loss + batch_disc_loss.item()
+            gen_loss = gen_loss + batch_gen_loss_gan.item()
             batch_gen_loss = 0
             batch_gen_loss_l1 = 0
             batch_gen_loss_gan = 0
@@ -149,6 +149,7 @@ def main():
     p.add_argument('--use_swa', type=str, default="false")
     p.add_argument('--learning_rate', '-l', type=float, default=1e-4)
     p.add_argument('--learning_rate_swa', type=float, default=1e-4)
+    p.add_argument('--lam', type=float, default=100)
     
     p.add_argument('--model_dir', type=str, default='H://')
     p.add_argument('--instrumental_lib', type=str, default="C://cs2048_sr44100_hl1024_nf2048_of0|D://cs2048_sr44100_hl1024_nf2048_of0|F://cs2048_sr44100_hl1024_nf2048_of0|H://cs2048_sr44100_hl1024_nf2048_of0")
@@ -177,7 +178,7 @@ def main():
     p.add_argument('--amsgrad', type=str, default='false')
     p.add_argument('--weight_decay', type=float, default=1e-3)
     p.add_argument('--prefetch_factor', type=int, default=3)
-    p.add_argument('--num_workers', '-w', type=int, default=6)
+    p.add_argument('--num_workers', '-w', type=int, default=4)
     p.add_argument('--epoch', '-E', type=int, default=40)
     p.add_argument('--progress_bar', '-pb', type=str, default='true')
     p.add_argument('--save_all', type=str, default='true')
@@ -315,7 +316,7 @@ def main():
 
         print('# epoch {}'.format(epoch))
         train_dataloader.dataset.set_epoch(epoch)
-        train_loss_mag, step = train_epoch(train_dataloader, generator, discriminator, device, optimizer_gen=optimizer_gen, optimizer_disc=optimizer_disc, accumulation_steps=accum_steps, progress_bar=args.progress_bar, scheduler_gen=scheduler_gen, scheduler_disc=scheduler_disc, grad_scaler_gen=grad_scaler_gen, grad_scaler_disc=grad_scaler_disc, use_wandb=args.wandb, step=step, model_dir=args.model_dir)
+        train_loss_mag, step = train_epoch(train_dataloader, generator, discriminator, device, optimizer_gen=optimizer_gen, optimizer_disc=optimizer_disc, accumulation_steps=accum_steps, progress_bar=args.progress_bar, scheduler_gen=scheduler_gen, scheduler_disc=scheduler_disc, grad_scaler_gen=grad_scaler_gen, grad_scaler_disc=grad_scaler_disc, use_wandb=args.wandb, step=step, model_dir=args.model_dir, lam=args.lam)
         val_loss_mag = validate_epoch(val_dataloader, generator, device)
 
         if args.wandb:
@@ -334,11 +335,7 @@ def main():
             print('  * best validation loss')
 
         model_path = f'{args.model_dir}models/{wandb.run.name if args.wandb else "local"}.{epoch}'
-
-        if swa_model is not None:
-            torch.save(swa_model.state_dict(), f'{model_path}.modelt.pth')
-        else:
-            torch.save(generator.state_dict(), f'{model_path}.modelt.pth')
+        torch.save(generator.state_dict(), f'{model_path}.modelt.pth')
 
         epoch += 1
 
