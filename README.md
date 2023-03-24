@@ -47,3 +47,4 @@ V3 - Need to get this architectures checkpoint from my other machine, will updat
 - [9] Asiedu et all., "Decoder Denoising Pretraining for Semantic Segmentation", https://arxiv.org/abs/2205.11423
 - [10] He et al., "RealFormer: Transformer Likes Residual Attention", https://arxiv.org/abs/2012.11747
 - [11] Islam et al., "How Much Position Information Do Convolutional Neural Networks Encode?", https://arxiv.org/abs/2001.08248
+- [12] Isola et al., "Image-to-Image Translation with Conditional Adversarial Networks", https://arxiv.org/pdf/1611.07004.pdf
