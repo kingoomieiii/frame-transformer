@@ -47,7 +47,7 @@ def train_epoch(dataloader, model, device, optimizer, accumulation_steps, progre
         # lsd_loss = signal_loss.lsd_loss(pred, Y) / accumulation_steps
         # sdr_loss = signal_loss.sdr_loss(pred, Y) / accumulation_steps
         mae_loss = F.l1_loss(pred, Y) / accumulation_steps        
-        accum_loss = mae_loss# * 0.4 + lsd_loss * 0.1 + sdr_loss * 0.5
+        accum_loss = mae_loss# * 0.2 + lsd_loss * 0.3 + sdr_loss * 0.5
         batch_mag_loss = batch_mag_loss + mae_loss
 
         if torch.logical_or(accum_loss.isnan(), accum_loss.isinf()):

@@ -145,16 +145,20 @@ def apply_time_stretch(X, target_size):
 
     return H
         
-def apply_time_masking(X, P, max_mask_percentage=0.2):
-    mask_percentage = np.random.uniform(0, max_mask_percentage)
-    mask_width = int(X.shape[2] * mask_percentage)
-    mask_start = np.random.randint(0, X.shape[2] - mask_width)
-    X[:, :, mask_start:mask_start+mask_width] = 0
+def apply_time_masking(X, P, num_masks=1, max_mask_percentage=0.2):
+    for _ in range(num_masks):
+        mask_percentage = np.random.uniform(0, max_mask_percentage)
+        mask_width = int(X.shape[2] * mask_percentage)
+        mask_start = np.random.randint(0, X.shape[2] - mask_width)
+        X[:, :, mask_start:mask_start+mask_width] = 0
+
     return X, P
 
-def apply_frequency_masking(X, P, max_mask_percentage=0.2):
-    mask_percentage = np.random.uniform(0, max_mask_percentage)
-    mask_height = int(X.shape[1] * mask_percentage)
-    mask_start = np.random.randint(0, X.shape[1] - mask_height)
-    X[:, mask_start:mask_start+mask_height, :] = 0
+def apply_frequency_masking(X, P, num_masks=1, max_mask_percentage=0.2):
+    for _ in range(num_masks):
+        mask_percentage = np.random.uniform(0, max_mask_percentage)
+        mask_height = int(X.shape[1] * mask_percentage)
+        mask_start = np.random.randint(0, X.shape[1] - mask_height)
+        X[:, mask_start:mask_start+mask_height, :] = 0
+        
     return X, P

@@ -66,10 +66,10 @@ class VoxAugDataset(torch.utils.data.Dataset):
             (0.2, apply_random_eq, { "min": np.random.uniform(0.5, 1), "max": np.random.uniform(1, 1.5) }),
             (0.2, apply_stereo_spatialization, { "alpha": np.random.uniform(0.5, 1.5) }),
             (0.2, apply_pitch_shift, { "c": Vc, "n_fft": self.n_fft, "hop_length": self.hop_length, "sr": self.sr, "n_steps": np.random.uniform(-4, 4) }),
-            (0.2, apply_time_masking, { "max_mask_percentage": np.random.uniform(0, 0.3) }),
-            (0.2, apply_frequency_masking, { "max_mask_percentage": np.random.uniform(0, 0.3) }),
+            (0.5, apply_time_masking, { "num_masks": np.random.randint(1, 7), "max_mask_percentage": np.random.uniform(0, 0.2) }),
+            (0.5, apply_frequency_masking, { "num_masks": np.random.randint(1, 7), "max_mask_percentage": np.random.uniform(0, 0.2) }),
             (0.2, apply_emphasis, { "c": Vc, "emphasis_coef": np.random.uniform(0.8, 1), "n_fft": self.n_fft, "hop_length": self.hop_length }),
-            (0.2, apply_random_phase_noise, { "strength": np.random.uniform(0, 0.3)})
+            (0.2, apply_random_phase_noise, { "strength": np.random.uniform(0, 0.25)})
         ]
 
         random.shuffle(augmentations)
