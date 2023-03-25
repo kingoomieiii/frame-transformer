@@ -7,20 +7,17 @@ import torch
 import torch.nn as nn
 import torch.utils.data
 import wandb
-import libft2.signal_loss as signal_loss
-
-from torch.optim.swa_utils import AveragedModel
 
 from tqdm import tqdm
 
 from libft2gan.dataset_voxaug import VoxAugDataset
 from libft2gan.frame_transformer import FrameTransformerGenerator, FrameTransformerDiscriminator
+from libft2gan.lr_scheduler_linear_warmup import LinearWarmupScheduler
+from libft2gan.lr_scheduler_polynomial_decay import PolynomialDecayScheduler
 
 from torch.nn import functional as F
-from lib.lr_scheduler_linear_warmup import LinearWarmupScheduler
-from lib.lr_scheduler_polynomial_decay import PolynomialDecayScheduler
 
-def train_epoch(dataloader, generator, discriminator, device, optimizer_gen, optimizer_disc, accumulation_steps, progress_bar, scheduler_gen=None, scheduler_disc=None, grad_scaler_gen=None, grad_scaler_disc=None, use_wandb=True, step=0, model_dir="", save_every=20000, lam=100):
+def train_epoch(dataloader, generator, discriminator, device, optimizer_gen, optimizer_disc, accumulation_steps, progress_bar, scheduler_gen=None, scheduler_disc=None, grad_scaler_gen=None, grad_scaler_disc=None, step=0, lam=100):
     gen_loss = 0
     batch_gen_loss = 0
     batch_gen_loss_l1 = 0
@@ -55,17 +52,15 @@ def train_epoch(dataloader, generator, discriminator, device, optimizer_gen, opt
             pavg = torch.mean(M)
             pmin = torch.min(M)
             disc_fake = discriminator(torch.cat((X, Z.detach()), dim=1))
-            disc_real = discriminator(torch.cat((X, Y), dim=1))
-            
+            disc_real = discriminator(torch.cat((X, Y), dim=1))            
             d_real_loss = bce_loss(disc_real, torch.zeros_like(disc_real))
             d_fake_loss = bce_loss(disc_fake, torch.ones_like(disc_fake))
             d_loss = ((d_real_loss + d_fake_loss) * 0.5)
+            batch_disc_fake_loss = batch_disc_fake_loss + d_fake_loss
+            batch_disc_real_loss = batch_disc_real_loss + d_real_loss
+            batch_disc_loss = batch_disc_loss + d_loss
+            grad_scaler_disc.scale(d_loss).backward()
             
-        batch_disc_fake_loss = batch_disc_fake_loss + d_fake_loss
-        batch_disc_real_loss = batch_disc_real_loss + d_real_loss
-        batch_disc_loss = batch_disc_loss + d_loss
-
-        grad_scaler_disc.scale(d_loss).backward()
         grad_scaler_disc.unscale_(optimizer_disc)
         torch.nn.utils.clip_grad.clip_grad_norm_(discriminator.parameters(), 0.5)
         grad_scaler_disc.step(optimizer_disc)
@@ -75,9 +70,13 @@ def train_epoch(dataloader, generator, discriminator, device, optimizer_gen, opt
             optimizer_gen.zero_grad()
 
         with torch.cuda.amp.autocast_mode.autocast():
+            M = generator(X)
+            M = torch.sigmoid(M)
+            Z = X * M
+            disc_fake = discriminator(torch.cat((X, Z.detach()), dim=1))
             g_gan_loss = bce_loss(disc_fake, torch.ones_like(disc_fake))
             g_l1_loss = F.l1_loss(Z, Y)
-            g_loss = g_gan_loss + 100 * g_l1_loss
+            g_loss = g_gan_loss + lam * g_l1_loss
             grad_scaler_gen.scale(g_loss).backward()
 
         batch_gen_loss_l1 = batch_gen_loss_l1 + g_l1_loss
@@ -146,9 +145,7 @@ def main():
     p.add_argument('--checkpoint_gen', type=str, default=None)
     p.add_argument('--checkpoint_disc', type=str, default=None)
     p.add_argument('--mixed_precision', type=str, default='true')
-    p.add_argument('--use_swa', type=str, default="false")
     p.add_argument('--learning_rate', '-l', type=float, default=1e-4)
-    p.add_argument('--learning_rate_swa', type=float, default=1e-4)
     p.add_argument('--lam', type=float, default=100)
     
     p.add_argument('--model_dir', type=str, default='H://')
@@ -175,31 +172,17 @@ def main():
     p.add_argument('--accumulation_steps', '-A', type=str, default='4,8')
     p.add_argument('--gpu', '-g', type=int, default=-1)
     p.add_argument('--optimizer', type=str.lower, choices=['adam', 'adamw', 'sgd', 'radam', 'rmsprop'], default='adam')
-    p.add_argument('--amsgrad', type=str, default='false')
-    p.add_argument('--weight_decay', type=float, default=1e-3)
-    p.add_argument('--prefetch_factor', type=int, default=3)
-    p.add_argument('--num_workers', '-w', type=int, default=4)
+    p.add_argument('--prefetch_factor', type=int, default=4)
+    p.add_argument('--num_workers', '-w', type=int, default=2)
     p.add_argument('--epoch', '-E', type=int, default=40)
     p.add_argument('--progress_bar', '-pb', type=str, default='true')
     p.add_argument('--save_all', type=str, default='true')
-    p.add_argument('--llrd', type=str, default='false')
-    p.add_argument('--lock', type=str, default='false')
     p.add_argument('--debug', action='store_true')
-    p.add_argument('--wandb', type=str, default='false')
-    p.add_argument('--wandb_project', type=str, default='VOCAL-REMOVER')
-    p.add_argument('--wandb_entity', type=str, default='carperbr')
-    p.add_argument('--wandb_run_id', type=str, default=None)
-    p.add_argument('--cropsize', type=int, default=0)
     args = p.parse_args()
 
-    args.amsgrad = str.lower(args.amsgrad) == 'true'
     args.progress_bar = str.lower(args.progress_bar) == 'true'
     args.mixed_precision = str.lower(args.mixed_precision) == 'true'
     args.save_all = str.lower(args.save_all) == 'true'
-    args.llrd = str.lower(args.llrd) == 'true'
-    args.lock = str.lower(args.lock) == 'true'
-    args.wandb = str.lower(args.wandb) == 'true'
-    args.use_swa = str.lower(args.use_swa) == 'true'
     args.stages = [int(s) for i, s in enumerate(args.stages.split(','))]
     args.cropsizes = [int(cropsize) for cropsize in args.cropsizes.split(',')]
     args.batch_sizes = [int(batch_size) for batch_size in args.batch_sizes.split(',')]
@@ -208,9 +191,6 @@ def main():
     args.vocal_lib = [p for p in args.vocal_lib.split('|')]
 
     args.model_dir = os.path.join(args.model_dir, "")
-
-    if args.wandb:
-        wandb.init(project=args.wandb_project, entity=args.wandb_entity, config=args, id=args.wandb_run_id, resume="must" if args.wandb_run_id is not None else None)
 
     print(args)
 
@@ -254,7 +234,7 @@ def main():
         
     model_parameters = filter(lambda p: p.requires_grad, generator.parameters())
     params = sum([np.prod(p.size()) for p in model_parameters])
-    print(f'# {wandb.run.name if args.wandb else ""}; num params: {params}')    
+    print(f'# num params: {params}')    
     
     optimizer_gen = torch.optim.AdamW(
         filter(lambda p: p.requires_grad, generator.parameters()),
@@ -316,14 +296,8 @@ def main():
 
         print('# epoch {}'.format(epoch))
         train_dataloader.dataset.set_epoch(epoch)
-        train_loss_mag, step = train_epoch(train_dataloader, generator, discriminator, device, optimizer_gen=optimizer_gen, optimizer_disc=optimizer_disc, accumulation_steps=accum_steps, progress_bar=args.progress_bar, scheduler_gen=scheduler_gen, scheduler_disc=scheduler_disc, grad_scaler_gen=grad_scaler_gen, grad_scaler_disc=grad_scaler_disc, use_wandb=args.wandb, step=step, model_dir=args.model_dir, lam=args.lam)
+        train_loss_mag, step = train_epoch(train_dataloader, generator, discriminator, device, optimizer_gen=optimizer_gen, optimizer_disc=optimizer_disc, accumulation_steps=accum_steps, progress_bar=args.progress_bar, scheduler_gen=scheduler_gen, scheduler_disc=scheduler_disc, grad_scaler_gen=grad_scaler_gen, grad_scaler_disc=grad_scaler_disc, step=step, lam=args.lam)
         val_loss_mag = validate_epoch(val_dataloader, generator, device)
-
-        if args.wandb:
-            wandb.log({
-                'train_loss_mag': train_loss_mag,
-                'val_loss_mag': val_loss_mag,
-            })
 
         print(
             '  * training l1 loss = {:.6f}, training gan loss = {:6f}, training disc loss = {:6f}, validation loss = {:.6f}'
