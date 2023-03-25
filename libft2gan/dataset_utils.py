@@ -40,8 +40,11 @@ def apply_harmonic_distortion(M, P, c, num_harmonics=2, gain=0.1, n_fft=2048, ho
 
     left_X = librosa.stft(left_ds, n_fft=n_fft, hop_length=hop_length)
     right_X = librosa.stft(right_ds, n_fft=n_fft, hop_length=hop_length)
+    
+    clipped_left_M = np.clip(np.abs(left_X), 0, 1)
+    clipped_right_M = np.clip(np.abs(right_X), 0, 1)
 
-    return np.array([np.abs(left_X), np.abs(right_X)]) * c, np.array([np.angle(left_X), np.angle(right_X)])
+    return np.array([clipped_left_M, clipped_right_M]) * c, np.array([np.angle(left_X), np.angle(right_X)])
 
 def apply_pitch_shift(M, P, c, n_fft=2048, hop_length=1024, sr=44100, n_steps=1):
     left_M = M[0] / c
@@ -61,7 +64,10 @@ def apply_pitch_shift(M, P, c, n_fft=2048, hop_length=1024, sr=44100, n_steps=1)
     left_X = librosa.stft(left_s, n_fft=n_fft, hop_length=hop_length)
     right_X = librosa.stft(right_s, n_fft=n_fft, hop_length=hop_length)
 
-    return np.array([np.abs(left_X), np.abs(right_X)]) * c, np.array([np.angle(left_X), np.angle(right_X)])
+    clipped_left_M = np.clip(np.abs(left_X), 0, 1)
+    clipped_right_M = np.clip(np.abs(right_X), 0, 1)
+
+    return np.array([clipped_left_M, clipped_right_M]) * c, np.array([np.angle(left_X), np.angle(right_X)])
 
 def apply_emphasis(M, P, c, emphasis_coef, n_fft=2048, hop_length=1024):
     left_M = M[0] / c
@@ -84,8 +90,11 @@ def apply_emphasis(M, P, c, emphasis_coef, n_fft=2048, hop_length=1024):
 
     left_X = librosa.stft(left_s, n_fft=n_fft, hop_length=hop_length)
     right_X = librosa.stft(right_s, n_fft=n_fft, hop_length=hop_length)
+    
+    clipped_left_M = np.clip(np.abs(left_X), 0, 1)
+    clipped_right_M = np.clip(np.abs(right_X), 0, 1)
 
-    return np.array([np.abs(left_X), np.abs(right_X)]) * c, np.array([np.angle(left_X), np.angle(right_X)])
+    return np.array([clipped_left_M, clipped_right_M]) * c, np.array([np.angle(left_X), np.angle(right_X)])
 
 def apply_random_phase_noise(X, P, strength=0.1):
     random_phase = np.random.uniform(-np.pi, np.pi, size=P.shape)
