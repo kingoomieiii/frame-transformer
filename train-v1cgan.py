@@ -93,7 +93,7 @@ def train_epoch(dataloader, generator, discriminator, device, optimizer_gen, opt
             grad_scaler_gen.step(optimizer_gen)
             grad_scaler_gen.update()
             disc_loss = disc_loss + batch_disc_loss.item()
-            gen_loss = gen_loss + batch_gen_loss_gan.item()
+            gen_loss = gen_loss + batch_gen_loss_l1.item()
             batch_gen_loss = 0
             batch_gen_loss_l1 = 0
             batch_gen_loss_gan = 0
@@ -149,10 +149,10 @@ def main():
     p.add_argument('--learning_rate', '-l', type=float, default=1e-4)
     p.add_argument('--lam', type=float, default=100)
     
-    p.add_argument('--model_dir', type=str, default='H://')
-    p.add_argument('--instrumental_lib', type=str, default="C://cs2048_sr44100_hl1024_nf2048_of0|D://cs2048_sr44100_hl1024_nf2048_of0|F://cs2048_sr44100_hl1024_nf2048_of0|H://cs2048_sr44100_hl1024_nf2048_of0")
-    p.add_argument('--vocal_lib', type=str, default="C://cs2048_sr44100_hl1024_nf2048_of0_VOCALS|D://cs2048_sr44100_hl1024_nf2048_of0_VOCALS")
-    p.add_argument('--validation_lib', type=str, default="C://cs2048_sr44100_hl1024_nf2048_of0_VALIDATION")
+    p.add_argument('--model_dir', type=str, default='/media/ben/internal-nvme-b')
+    p.add_argument('--instrumental_lib', type=str, default="/home/ben/cs2048_sr44100_hl1024_nf2048_of0|/media/ben/internal-nvme-b/cs2048_sr44100_hl1024_nf2048_of0")
+    p.add_argument('--vocal_lib', type=str, default="/home/ben/cs2048_sr44100_hl1024_nf2048_of0_VOCALS")
+    p.add_argument('--validation_lib', type=str, default="/media/ben/internal-nvme-b/cs2048_sr44100_hl1024_nf2048_of0_VALIDATION")
 
     p.add_argument('--curr_step', type=int, default=0)
     p.add_argument('--curr_epoch', type=int, default=0)
@@ -210,8 +210,15 @@ def main():
     val_dataset = VoxAugDataset(
         path=[args.validation_lib],
         vocal_path=None,
-        cropsize=2048,
+        cropsize=args.cropsizes[0],
         is_validation=True
+    )
+
+    val_dataloader = torch.utils.data.DataLoader(
+        dataset=val_dataset,
+        batch_size=1,
+        shuffle=False,
+        num_workers=args.num_workers
     )
     
     random.seed(args.seed)
@@ -266,6 +273,8 @@ def main():
         PolynomialDecayScheduler(optimizer_disc, target=args.lr_scheduler_decay_target, power=args.lr_scheduler_decay_power, num_decay_steps=args.decay_steps, start_step=args.warmup_steps, current_step=step, verbose_skip_steps=args.lr_verbosity)
     ])
 
+    _ = validate_epoch(val_dataloader, generator, device)
+
     best_loss = float('inf')
     while step < args.stages[-1]:
         if best_loss == float('inf') or step >= args.stages[stage]:
@@ -285,6 +294,7 @@ def main():
                 shuffle=False,
                 num_workers=args.num_workers
             )
+            train_dataset.data_limit = 16
 
             train_dataset.cropsize = cropsize
             train_dataloader = torch.utils.data.DataLoader(
@@ -297,19 +307,19 @@ def main():
 
         print('# epoch {}'.format(epoch))
         train_dataloader.dataset.set_epoch(epoch)
-        train_loss_mag, step = train_epoch(train_dataloader, generator, discriminator, device, optimizer_gen=optimizer_gen, optimizer_disc=optimizer_disc, accumulation_steps=accum_steps, progress_bar=args.progress_bar, scheduler_gen=scheduler_gen, scheduler_disc=scheduler_disc, grad_scaler_gen=grad_scaler_gen, grad_scaler_disc=grad_scaler_disc, step=step, lam=args.lam)
+        train_loss_mag, disc_loss, step = train_epoch(train_dataloader, generator, discriminator, device, optimizer_gen=optimizer_gen, optimizer_disc=optimizer_disc, accumulation_steps=accum_steps, progress_bar=args.progress_bar, scheduler_gen=scheduler_gen, scheduler_disc=scheduler_disc, grad_scaler_gen=grad_scaler_gen, grad_scaler_disc=grad_scaler_disc, step=step, lam=args.lam)
         val_loss_mag = validate_epoch(val_dataloader, generator, device)
 
         print(
-            '  * training l1 loss = {:.6f}, training gan loss = {:6f}, training disc loss = {:6f}, validation loss = {:.6f}'
-            .format(train_loss_mag, val_loss_mag)
+            '  * training l1 loss = {:.6f}, training disc loss = {:6f}, validation loss = {:.6f}'
+            .format(train_loss_mag, disc_loss, val_loss_mag)
         )
 
         if val_loss_mag < best_loss:
             best_loss = val_loss_mag
             print('  * best validation loss')
 
-        model_path = f'{args.model_dir}models/{wandb.run.name if args.wandb else "local"}.{epoch}'
+        model_path = f'{args.model_dir}models/local.{epoch}'
         torch.save(generator.state_dict(), f'{model_path}.modelt.pth')
 
         epoch += 1

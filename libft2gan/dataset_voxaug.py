@@ -38,6 +38,9 @@ class VoxAugDataset(torch.utils.data.Dataset):
 
         random.Random(seed+1).shuffle(self.curr_list)
 
+        if data_limit is not None:
+            self.curr_list = self.curr_list[:data_limit]
+
     def set_epoch(self, epoch):
         self.epoch = epoch
 
