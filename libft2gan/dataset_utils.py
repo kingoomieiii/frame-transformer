@@ -102,17 +102,19 @@ def apply_multiplicative_noise(X, P, loc=1, scale=0.1):
     eps = np.random.normal(loc, scale, size=X.shape)
     return X * eps, P
 
-def apply_dynamic_range_mod(X, P, c, threshold=0.5, ratio=4):
+def apply_dynamic_range_mod(X, P, c, threshold=0.5, gain=0.1):
     X = X / c
-
+    
     if np.random.uniform() < 0.5:
-        clipped = np.clip(X - threshold, 0, None)
-        compressed = clipped / ratio
-        return np.where(X > threshold, compressed + threshold, X) * c, P
+        if np.random.uniform() < 0.5:
+            return np.clip(np.where(X > threshold, X - (X * gain), X), 0, 1) * c, P
+        else:
+            return np.clip(np.where(X < threshold, X + (X * gain), X), 0, 1) * c, P
     else:
-        clipped = np.clip(X - threshold, None, 0)
-        expanded = clipped * ratio
-        return np.where(X < threshold, expanded + threshold, X) * c, P
+        if np.random.uniform() < 0.5:
+            return np.clip(np.where(X > threshold, X + (X * gain), X), 0, 1) * c, P
+        else:
+            return np.clip(np.where(X < threshold, X - (X * gain), X), 0, 1) * c, P
     
 def apply_channel_drop(X, P, channel):
     X[channel] = 0

@@ -61,14 +61,15 @@ class VoxAugDataset(torch.utils.data.Dataset):
         augmentations = [
             (0.1, apply_channel_drop, { "channel": 0}),
             (0.1, apply_channel_drop, { "channel": 1}),
-            (0.2, apply_harmonic_distortion, { "c": Vc, "num_harmonics": np.random.randint(1, 8), "gain": np.random.uniform(0, 0.5), "n_fft": self.n_fft, "hop_length": self.hop_length }),
+            (0.2, apply_dynamic_range_mod, { "c": Vc, "threshold": np.random.uniform(0, 0.5), "gain": np.random.uniform(0, 0.5) }),
+            (0.2, apply_harmonic_distortion, { "c": Vc, "num_harmonics": np.random.randint(1, 9), "gain": np.random.uniform(0, 0.5), "n_fft": self.n_fft, "hop_length": self.hop_length }),
             (0.2, apply_multiplicative_noise, { "loc": 1, "scale": np.random.uniform(0, 0.25) }),
-            (0.2, apply_random_eq, { "min": np.random.uniform(0.5, 1), "max": np.random.uniform(1, 1.5) }),
-            (0.2, apply_stereo_spatialization, { "alpha": np.random.uniform(0.5, 1.5) }),
+            (0.2, apply_random_eq, { "min": np.random.uniform(0.25, 1), "max": np.random.uniform(1, 1.75) }),
+            (0.2, apply_stereo_spatialization, { "c": Vc, "alpha": np.random.uniform(0.25, 1.75) }),
             (0.2, apply_pitch_shift, { "c": Vc, "n_fft": self.n_fft, "hop_length": self.hop_length, "sr": self.sr, "n_steps": np.random.uniform(-4, 4) }),
-            (0.5, apply_time_masking, { "num_masks": np.random.randint(1, 7), "max_mask_percentage": np.random.uniform(0, 0.2) }),
-            (0.5, apply_frequency_masking, { "num_masks": np.random.randint(1, 7), "max_mask_percentage": np.random.uniform(0, 0.2) }),
-            (0.2, apply_emphasis, { "c": Vc, "emphasis_coef": np.random.uniform(0.8, 1), "n_fft": self.n_fft, "hop_length": self.hop_length }),
+            (0.2, apply_time_masking, { "num_masks": np.random.randint(1, 9), "max_mask_percentage": np.random.uniform(0, 0.2) }),
+            (0.2, apply_frequency_masking, { "num_masks": np.random.randint(1, 9), "max_mask_percentage": np.random.uniform(0, 0.2) }),
+            (0.2, apply_emphasis, { "c": Vc, "emphasis_coef": np.random.uniform(0.75, 1), "n_fft": self.n_fft, "hop_length": self.hop_length }),
             (0.2, apply_random_phase_noise, { "strength": np.random.uniform(0, 0.25)})
         ]
 
@@ -88,16 +89,24 @@ class VoxAugDataset(torch.utils.data.Dataset):
     def _augment_instruments(self, X, c):
         if X.shape[2] > self.cropsize:
             start = np.random.randint(0, X.shape[2] - self.cropsize)
-            X = X[:, :, start:start+self.cropsize]
-
+            X = X[:, :, start:start+self.cropsize]        
+            
         P = np.angle(X)
         M = np.abs(X)
 
         augmentations = [
             (0.1, apply_channel_drop, { "channel": 0}),
             (0.1, apply_channel_drop, { "channel": 1}),
-            (0.2, apply_random_eq, { "min": np.random.uniform(0.8,1), "max": np.random.uniform(1, 1.2) }),
-            (0.2, apply_stereo_spatialization, { "alpha": np.random.uniform(0.8, 1.2) })
+            (0.2, apply_dynamic_range_mod, { "c": c, "threshold": np.random.uniform(0, 0.5), "gain": np.random.uniform(0, 0.5) }),
+            (0.2, apply_harmonic_distortion, { "c": c, "num_harmonics": np.random.randint(1, 9), "gain": np.random.uniform(0, 0.5), "n_fft": self.n_fft, "hop_length": self.hop_length }),
+            (0.2, apply_multiplicative_noise, { "loc": 1, "scale": np.random.uniform(0, 0.25) }),
+            (0.2, apply_random_eq, { "min": np.random.uniform(0.25, 1), "max": np.random.uniform(1, 1.75) }),
+            (0.2, apply_stereo_spatialization, { "c": c, "alpha": np.random.uniform(0.25, 1.75) }),
+            (0.2, apply_pitch_shift, { "c": c, "n_fft": self.n_fft, "hop_length": self.hop_length, "sr": self.sr, "n_steps": np.random.uniform(-4, 4) }),
+            (0.2, apply_time_masking, { "num_masks": np.random.randint(1, 5), "max_mask_percentage": np.random.uniform(0, 0.2) }),
+            (0.2, apply_frequency_masking, { "num_masks": np.random.randint(1, 5), "max_mask_percentage": np.random.uniform(0, 0.2) }),
+            (0.2, apply_emphasis, { "c": c, "emphasis_coef": np.random.uniform(0.75, 1), "n_fft": self.n_fft, "hop_length": self.hop_length }),
+            (0.2, apply_random_phase_noise, { "strength": np.random.uniform(0, 0.25)})
         ]
 
         random.shuffle(augmentations)

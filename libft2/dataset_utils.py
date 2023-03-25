@@ -91,28 +91,30 @@ def apply_random_phase_noise(X, P, strength=0.1):
     random_phase = np.random.uniform(-np.pi, np.pi, size=P.shape)
     return X, P + strength * random_phase
 
-def apply_stereo_spatialization(X, P, alpha=1):
-    left, right = X[0], X[1]
-    avg = (left + right) * 0.5
-    left = alpha * left + (1 - alpha) * avg 
-    right = alpha * right + (1 - alpha) * avg
-    return np.clip(np.stack([left, right], axis=0), 0, 1), P
+def apply_stereo_spatialization(X, P, c, alpha=1):
+    left, right = X[0] / c, X[1] / c
+    mid = (left + right) * 0.5
+    left = alpha * left + (1 - alpha) * mid 
+    right = alpha * right + (1 - alpha) * mid
+    return np.clip(np.stack([left, right], axis=0), 0, 1) * c, P
 
 def apply_multiplicative_noise(X, P, loc=1, scale=0.1):
     eps = np.random.normal(loc, scale, size=X.shape)
     return X * eps, P
 
-def apply_dynamic_range_mod(X, P, c, threshold=0.5, ratio=4):
+def apply_dynamic_range_mod(X, P, c, threshold=0.5, gain=0.1):
     X = X / c
-
+    
     if np.random.uniform() < 0.5:
-        clipped = np.clip(X - threshold, 0, None)
-        compressed = clipped / ratio
-        return np.where(X > threshold, compressed + threshold, X) * c, P
+        if np.random.uniform() < 0.5:
+            return np.clip(np.where(X > threshold, X - (X * gain), X), 0, 1) * c, P
+        else:
+            return np.clip(np.where(X < threshold, X + (X * gain), X), 0, 1) * c, P
     else:
-        clipped = np.clip(X - threshold, None, 0)
-        expanded = clipped * ratio
-        return np.where(X < threshold, expanded + threshold, X) * c, P
+        if np.random.uniform() < 0.5:
+            return np.clip(np.where(X > threshold, X + (X * gain), X), 0, 1) * c, P
+        else:
+            return np.clip(np.where(X < threshold, X - (X * gain), X), 0, 1) * c, P
     
 def apply_channel_drop(X, P, channel):
     X[channel] = 0
