@@ -4,7 +4,8 @@ import numpy as np
 import torch
 import torch.utils.data
 import torch.nn.functional as F
-from libft2.dataset_utils import apply_channel_drop, apply_dynamic_range_mod, apply_harmonic_distortion, apply_multiplicative_noise, apply_random_eq, apply_stereo_spatialization, apply_time_stretch, apply_pitch_shift, apply_random_phase_noise, apply_time_masking, apply_frequency_masking, apply_emphasis
+from libft2.dataset_utils import apply_additive_noise, apply_channel_drop, apply_dynamic_range_mod, apply_harmonic_distortion, apply_multiplicative_noise, apply_random_eq, apply_stereo_spatialization, apply_time_stretch, apply_pitch_shift, apply_random_phase_noise, apply_time_masking, apply_frequency_masking, apply_emphasis
+import librosa
 
 class VoxAugDataset(torch.utils.data.Dataset):
     def __init__(self, path=[], vocal_path=[], is_validation=False, n_fft=2048, hop_length=1024, cropsize=256, sr=44100, seed=0, inst_rate=0.01, data_limit=None, predict_vocals=False, time_scaling=True):
@@ -16,6 +17,7 @@ class VoxAugDataset(torch.utils.data.Dataset):
         self.predict_vocals = predict_vocals
         self.time_scaling = time_scaling
 
+        self.max_bin = n_fft // 2
         self.sr = sr
         self.n_fft = n_fft
         self.hop_length = hop_length
@@ -38,9 +40,6 @@ class VoxAugDataset(torch.utils.data.Dataset):
 
         random.Random(seed+1).shuffle(self.curr_list)
 
-        if data_limit is not None:
-            self.curr_list = self.curr_list[:data_limit]
-
     def set_epoch(self, epoch):
         self.epoch = epoch
 
@@ -62,18 +61,17 @@ class VoxAugDataset(torch.utils.data.Dataset):
         M = np.abs(V)
 
         augmentations = [
-            (0.1, apply_channel_drop, { "channel": 0}),
-            (0.1, apply_channel_drop, { "channel": 1}),
-            (0.2, apply_dynamic_range_mod, { "c": Vc, "threshold": np.random.uniform(0, 0.5), "gain": np.random.uniform(0, 0.5) }),
-            (0.2, apply_harmonic_distortion, { "c": Vc, "num_harmonics": np.random.randint(1, 6), "gain": np.random.uniform(0, 0.5), "n_fft": self.n_fft, "hop_length": self.hop_length }),
-            (0.2, apply_multiplicative_noise, { "loc": 1, "scale": np.random.uniform(0, 0.25) }),
-            (0.2, apply_random_eq, { "min": np.random.uniform(0.25, 1), "max": np.random.uniform(1, 1.75) }),
-            (0.2, apply_stereo_spatialization, { "c": Vc, "alpha": np.random.uniform(0.25, 1.75) }),
-            (0.2, apply_pitch_shift, { "c": Vc, "n_fft": self.n_fft, "hop_length": self.hop_length, "sr": self.sr, "n_steps": np.random.uniform(-12, 12) }),
-            (0.2, apply_time_masking, { "num_masks": np.random.randint(1, 5), "max_mask_percentage": np.random.uniform(0, 0.2) }),
-            (0.2, apply_frequency_masking, { "num_masks": np.random.randint(1, 5), "max_mask_percentage": np.random.uniform(0, 0.2) }),
-            (0.2, apply_emphasis, { "c": Vc, "emphasis_coef": np.random.uniform(0.95, 1), "n_fft": self.n_fft, "hop_length": self.hop_length }),
-            (0.2, apply_random_phase_noise, { "strength": np.random.uniform(0, 0.25)})
+            (0.05, apply_channel_drop, { "channel": np.random.randint(1,3), "alpha": np.random.uniform() }),
+            (0.2, apply_dynamic_range_mod, { "c": Vc, "threshold": np.random.uniform(), "gain": np.random.uniform(), "alpha": np.random.uniform() }),
+            (0.2, apply_harmonic_distortion, { "c": Vc, "num_harmonics": np.random.randint(1, 7), "gain": np.random.uniform(), "n_fft": self.n_fft, "hop_length": self.hop_length, "alpha": np.random.uniform() }),
+            (0.2, apply_multiplicative_noise, { "loc": 1, "scale": np.random.uniform(0, 0.5) }),
+            (0.2, apply_random_eq, { "min": np.random.uniform(0, 1), "max": np.random.uniform(1, 2) }),
+            (0.2, apply_stereo_spatialization, { "c": Vc, "alpha": np.random.uniform(0, 2), "alpha": np.random.uniform() }),
+            (0.2, apply_pitch_shift, { "c": Vc, "n_fft": self.n_fft, "hop_length": self.hop_length, "sr": self.sr, "n_steps": np.random.uniform(-12, 12), "alpha": np.random.uniform() }),
+            (0.2, apply_time_masking, { "num_masks": np.random.randint(1, 5), "max_mask_percentage": np.random.uniform(0, 0.2), "alpha": np.random.uniform() }),
+            (0.2, apply_frequency_masking, { "num_masks": np.random.randint(1, 5), "max_mask_percentage": np.random.uniform(0, 0.2), "alpha": np.random.uniform() }),
+            (0.2, apply_emphasis, { "c": Vc, "emphasis_coef": np.random.uniform(0.5, 1), "n_fft": self.n_fft, "hop_length": self.hop_length, "alpha": np.random.uniform() }),
+            (0.2, apply_random_phase_noise, { "strength": np.random.uniform(0, 0.5)})
         ]
 
         random.shuffle(augmentations)
@@ -98,17 +96,17 @@ class VoxAugDataset(torch.utils.data.Dataset):
         M = np.abs(X)
 
         augmentations = [
-            (0.05, apply_channel_drop, { "channel": 0}),
-            (0.05, apply_channel_drop, { "channel": 1}),
-            (0.1, apply_dynamic_range_mod, { "c": c, "threshold": np.random.uniform(0, 0.5), "gain": np.random.uniform(0, 0.25) }),
-            (0.1, apply_harmonic_distortion, { "c": c, "num_harmonics": np.random.randint(1, 4), "gain": np.random.uniform(0, 0.25), "n_fft": self.n_fft, "hop_length": self.hop_length }),
-            (0.1, apply_multiplicative_noise, { "loc": 1, "scale": np.random.uniform(0, 0.25) }),
-            (0.1, apply_random_eq, { "min": np.random.uniform(0.25, 1), "max": np.random.uniform(1, 1.75) }),
-            (0.1, apply_stereo_spatialization, { "c": c, "alpha": np.random.uniform(0.5, 1.5) }),
-            (0.1, apply_pitch_shift, { "c": c, "n_fft": self.n_fft, "hop_length": self.hop_length, "sr": self.sr, "n_steps": np.random.uniform(-4, 4) }),
-            (0.1, apply_time_masking, { "num_masks": np.random.randint(1, 5), "max_mask_percentage": np.random.uniform(0, 0.2) }),
-            (0.1, apply_frequency_masking, { "num_masks": np.random.randint(1, 5), "max_mask_percentage": np.random.uniform(0, 0.2) }),
-            (0.1, apply_random_phase_noise, { "strength": np.random.uniform(0, 0.25)})
+            (0.05, apply_channel_drop, { "channel": np.random.randint(1,3), "alpha": np.random.uniform() }),
+            (0.1, apply_dynamic_range_mod, { "c": c, "threshold": np.random.uniform(), "gain": np.random.uniform(), "alpha": np.random.uniform() }),
+            (0.1, apply_harmonic_distortion, { "c": c, "num_harmonics": np.random.randint(1, 7), "gain": np.random.uniform(), "n_fft": self.n_fft, "hop_length": self.hop_length, "alpha": np.random.uniform() }),
+            (0.1, apply_multiplicative_noise, { "loc": 1, "scale": np.random.uniform(0, 0.5) }),
+            (0.1, apply_random_eq, { "min": np.random.uniform(0, 1), "max": np.random.uniform(1, 2) }),
+            (0.1, apply_stereo_spatialization, { "c": c, "alpha": np.random.uniform(0, 2), "alpha": np.random.uniform() }),
+            (0.1, apply_pitch_shift, { "c": c, "n_fft": self.n_fft, "hop_length": self.hop_length, "sr": self.sr, "n_steps": np.random.uniform(-12, 12), "alpha": np.random.uniform() }),
+            (0.1, apply_time_masking, { "num_masks": np.random.randint(1, 5), "max_mask_percentage": np.random.uniform(0, 0.2), "alpha": np.random.uniform() }),
+            (0.1, apply_frequency_masking, { "num_masks": np.random.randint(1, 5), "max_mask_percentage": np.random.uniform(0, 0.2), "alpha": np.random.uniform() }),
+            (0.1, apply_emphasis, { "c": c, "emphasis_coef": np.random.uniform(0.5, 1), "n_fft": self.n_fft, "hop_length": self.hop_length, "alpha": np.random.uniform() }),
+            (0.1, apply_random_phase_noise, { "strength": np.random.uniform(0, 0.5)})
         ]
 
         random.shuffle(augmentations)
@@ -123,7 +121,7 @@ class VoxAugDataset(torch.utils.data.Dataset):
             X = X[::-1]
 
         return X
-
+    
     def __getitem__(self, idx):
         path = str(self.curr_list[idx % len(self.curr_list)])
         data = np.load(path)
@@ -141,5 +139,5 @@ class VoxAugDataset(torch.utils.data.Dataset):
 
         X = np.clip(np.abs(X) / c, 0, 1)
         Y = np.clip(np.abs(Y) / c, 0, 1)
-        
+
         return X.astype(np.float32), Y.astype(np.float32)
