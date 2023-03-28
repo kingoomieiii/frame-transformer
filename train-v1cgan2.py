@@ -58,7 +58,7 @@ def train_epoch(dataloader, generator, discriminator, device, optimizer_gen, opt
 
             for i in range(len(fake_losses)):
                 d_real_loss = d_real_loss + (bce_loss(real_losses[i], torch.ones_like(fake_losses[i])) / len(fake_losses))
-                d_fake_loss = d_real_loss + (bce_loss(fake_losses[i], torch.zeros_like(fake_losses[i])) / len(fake_losses))
+                d_fake_loss = d_fake_loss + (bce_loss(fake_losses[i], torch.zeros_like(fake_losses[i])) / len(fake_losses))
 
             d_loss = ((d_real_loss + d_fake_loss) * 0.5)
             batch_disc_fake_loss = batch_disc_fake_loss + d_fake_loss
