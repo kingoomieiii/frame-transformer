@@ -118,13 +118,14 @@ def apply_stereo_spatialization(M, P, c, alpha=1):
     right = alpha * right + (1 - alpha) * mid
     return np.clip(np.stack([left, right], axis=0), 0, 1) * c, P
 
-def apply_multiplicative_noise(M, P, loc=1, scale=0.1):
+def apply_multiplicative_noise(M, P, loc=1, scale=0.1, alpha=1):
     eps = np.random.normal(loc, scale, size=M.shape)
-    return M * eps, P
+    return (alpha * M * eps) + (1 - alpha) * M, P
 
-def apply_additive_noise(M, P, c, loc=0, scale=0.1):
+def apply_additive_noise(M, P, c, loc=0, scale=0.1, alpha=1):
+    X = M / c
     eps = np.random.normal(loc, scale, size=M.shape)
-    return np.clip((M / c) + eps, 0, 1) * c, P
+    return (alpha * np.clip(X + eps, 0, 1) + (1 - alpha) * X) * c, P
 
 def apply_dynamic_range_mod(M, P, c, threshold=0.5, gain=0.1, alpha=1):
     M = M / c
