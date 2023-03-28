@@ -3,7 +3,7 @@ import torch.nn.functional as F
 import numpy as np
 import librosa
 
-def apply_random_eq(M, P, min=0, max=2):
+def apply_random_eq(M, P, min=0, max=2, alpha=1):
     arr1 = F.interpolate(torch.rand((1, 1, 512,)) * (max - min) + min, size=(M.shape[1]), mode='linear', align_corners=True).squeeze(0).squeeze(0).numpy()
     arr2 = F.interpolate(torch.rand((1, 1, 256,)) * (max - min) + min, size=(M.shape[1]), mode='linear', align_corners=True).squeeze(0).squeeze(0).numpy()
     arr3 = F.interpolate(torch.rand((1, 1, 128,)) * (max - min) + min, size=(M.shape[1]), mode='linear', align_corners=True).squeeze(0).squeeze(0).numpy()
@@ -16,7 +16,7 @@ def apply_random_eq(M, P, min=0, max=2):
     eq = (arr1 + arr2 + arr3 + arr4 + arr5 + arr6 + arr7 + arr8 + arr9) / 9.0
     eq = np.clip(eq, min, max)
     eq = np.expand_dims(eq, (0, 2))
-    return M * eq, P
+    return (alpha * M * eq) + (1 - alpha) * M, P
 
 def apply_harmonic_distortion(M, P, c, num_harmonics=2, gain=0.1, n_fft=2048, hop_length=1024, alpha=0.25):
     left_M = M[0] / c
