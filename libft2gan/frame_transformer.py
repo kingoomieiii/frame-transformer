@@ -267,7 +267,7 @@ class FrameTransformerDiscriminator2(nn.Module):
             nn.Conv2d(channels * 10 + num_attention_maps, 1, kernel_size=3, padding=1),
             nn.AdaptiveAvgPool2d((frequency_bands, None)))
 
-        self.enc7 = FrameEncoder(channels * 10 + num_attention_maps, channels * 12, self.max_bin // 32)
+        self.enc7 = FrameEncoder(channels * 10 + num_attention_maps, channels * 12, self.max_bin // 32, stride=2)
         self.enc7_transformer = FrameTransformerEncoder(channels * 12, num_attention_maps, self.max_bin // 64, dropout=dropout, expansion=expansion, num_heads=num_heads)
         self.enc7_out = nn.Sequential(
             nn.Conv2d(channels * 12 + num_attention_maps, channels * 12 + num_attention_maps, kernel_size=3, padding=1),
@@ -275,7 +275,7 @@ class FrameTransformerDiscriminator2(nn.Module):
             nn.Conv2d(channels * 12 + num_attention_maps, 1, kernel_size=3, padding=1),
             nn.AdaptiveAvgPool2d((frequency_bands, None)))
 
-        self.enc8 = FrameEncoder(channels * 12 + num_attention_maps, channels * 14, self.max_bin // 64)
+        self.enc8 = FrameEncoder(channels * 12 + num_attention_maps, channels * 14, self.max_bin // 64, stride=2)
         self.enc8_transformer = FrameTransformerEncoder(channels * 14, num_attention_maps, self.max_bin // 128, dropout=dropout, expansion=expansion, num_heads=num_heads)
         self.enc8_out = nn.Sequential(
             nn.Conv2d(channels * 14 + num_attention_maps, channels * 14 + num_attention_maps, kernel_size=3, padding=1),
@@ -283,7 +283,7 @@ class FrameTransformerDiscriminator2(nn.Module):
             nn.Conv2d(channels * 14 + num_attention_maps, 1, kernel_size=3, padding=1),
             nn.AdaptiveAvgPool2d((frequency_bands, None)))
 
-        self.enc9 = FrameEncoder(channels * 14 + num_attention_maps, channels * 16, self.max_bin // 128)
+        self.enc9 = FrameEncoder(channels * 14 + num_attention_maps, channels * 16, self.max_bin // 128, stride=2)
         self.enc9_transformer = FrameTransformerEncoder(channels * 16, num_attention_maps, self.max_bin // 256, dropout=dropout, expansion=expansion, num_heads=num_heads // 2)
         self.enc9_out = nn.Sequential(
             nn.Conv2d(channels * 16 + num_attention_maps, channels * 16 + num_attention_maps, kernel_size=3, padding=1),

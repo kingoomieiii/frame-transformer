@@ -4,7 +4,7 @@ import numpy as np
 import torch
 import torch.utils.data
 import torch.nn.functional as F
-from libft2gan.dataset_utils import apply_channel_drop, apply_dynamic_range_mod, apply_multiplicative_noise, apply_random_eq, apply_stereo_spatialization, apply_time_stretch, apply_random_phase_noise, apply_time_masking, apply_frequency_masking, apply_time_masking2, apply_frequency_masking2
+from libft2gan.dataset_utils import apply_channel_drop, apply_dynamic_range_mod, apply_emphasis, apply_harmonic_distortion, apply_multiplicative_noise, apply_pitch_shift, apply_random_eq, apply_stereo_spatialization, apply_time_stretch, apply_random_phase_noise, apply_time_masking, apply_frequency_masking, apply_time_masking2, apply_frequency_masking2
 import librosa
 
 class VoxAugDataset(torch.utils.data.Dataset):
@@ -70,7 +70,9 @@ class VoxAugDataset(torch.utils.data.Dataset):
             (0.1, apply_frequency_masking, { "num_masks": np.random.randint(0, 5), "max_mask_percentage": np.random.uniform(0, 0.2), "alpha": np.random.uniform() }),
             (0.1, apply_time_masking2, { "num_masks": np.random.randint(0, 5), "max_mask_percentage": np.random.uniform(0, 0.2), "alpha": np.random.uniform() }),
             (0.1, apply_frequency_masking2, { "num_masks": np.random.randint(0, 5), "max_mask_percentage": np.random.uniform(0, 0.2), "alpha": np.random.uniform() }),
-            (0.2, apply_random_phase_noise, { "strength": np.random.uniform(0, 0.5)})
+            (0.2, apply_random_phase_noise, { "strength": np.random.uniform(0, 0.5)}),
+            (0.2, apply_emphasis, { "c": Vc, "emphasis_coef": np.random.uniform(0.75, 1), "n_fft": self.n_fft, "hop_length": self.hop_length, "alpha": np.random.uniform() }),
+            (0.2, apply_pitch_shift, { "c": Vc, "n_fft": self.n_fft, "hop_length": self.hop_length, "sr": self.sr, "n_steps": np.random.uniform(-12, 12), "alpha": np.random.uniform() })            
         ]
 
         random.shuffle(augmentations)
@@ -104,7 +106,9 @@ class VoxAugDataset(torch.utils.data.Dataset):
             (0.1, apply_frequency_masking, { "num_masks": np.random.randint(0, 5), "max_mask_percentage": np.random.uniform(0, 0.2), "alpha": np.random.uniform() }),
             (0.1, apply_time_masking2, { "num_masks": np.random.randint(0, 5), "max_mask_percentage": np.random.uniform(0, 0.2), "alpha": np.random.uniform() }),
             (0.1, apply_frequency_masking2, { "num_masks": np.random.randint(0, 5), "max_mask_percentage": np.random.uniform(0, 0.2), "alpha": np.random.uniform() }),
-            (0.2, apply_random_phase_noise, { "strength": np.random.uniform(0, 0.5)})
+            (0.2, apply_random_phase_noise, { "strength": np.random.uniform(0, 0.5)}),
+            (0.2, apply_emphasis, { "c": c, "emphasis_coef": np.random.uniform(0.75, 1), "n_fft": self.n_fft, "hop_length": self.hop_length, "alpha": np.random.uniform() }),
+            (0.2, apply_pitch_shift, { "c": c, "n_fft": self.n_fft, "hop_length": self.hop_length, "sr": self.sr, "n_steps": np.random.uniform(-12, 12), "alpha": np.random.uniform() })  
         ]
 
         random.shuffle(augmentations)
