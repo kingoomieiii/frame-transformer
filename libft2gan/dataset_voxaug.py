@@ -109,8 +109,8 @@ class VoxAugDataset(torch.utils.data.Dataset):
             (0.1, apply_frequency_masking2, { "num_masks": np.random.randint(0, 5), "max_mask_percentage": np.random.uniform(0, 0.2), "alpha": np.random.uniform() }),
             (0.2, apply_random_phase_noise, { "strength": np.random.uniform(0, 0.5)}),
             (0.2, apply_pitch_shift, { "pitch_shift": np.random.uniform(-12, 12) }),
-            (0.2, apply_emphasis, { "coef": np.random.uniform(0.8, 1) }),
-            (0.2, apply_deemphasis, { "coef": np.random.uniform(0.8, 1) }),
+            (0.2, apply_emphasis, { "coef": np.random.uniform(0.75, 1) }),
+            (0.2, apply_deemphasis, { "coef": np.random.uniform(0.75, 1) }),
         ]
 
         random.shuffle(augmentations)
@@ -125,6 +125,12 @@ class VoxAugDataset(torch.utils.data.Dataset):
             X = X[::-1]
 
         return X
+    
+    def _get_wave(self, X, c):
+        left_s = np.pad(librosa.istft((np.abs(X[0]) / c) + np.exp(1.j * np.angle(X[0])), hop_length=self.hop_length), ((0, self.hop_length)))
+        right_s = np.pad(librosa.istft((np.abs(X[1]) / c) + np.exp(1.j * np.angle(X[1])), hop_length=self.hop_length), ((0, self.hop_length)))
+        S = np.expand_dims(np.stack([left_s, right_s], axis=0), axis=2).reshape((2, left_s.shape[0] // X.shape[2], -1))
+        return S
     
     def __getitem__(self, idx):
         path = str(self.curr_list[idx % len(self.curr_list)])
@@ -143,9 +149,5 @@ class VoxAugDataset(torch.utils.data.Dataset):
 
         X = np.clip(np.abs(X) / c, 0, 1)
         Y = np.clip(np.abs(Y) / c, 0, 1)
-        left_s = librosa.istft(np.pad(X[0], ((0, 0), (0, 1))), hop_length=self.hop_length)
-        right_s = librosa.istft(np.pad(X[1], ((0, 0), (0, 1))), hop_length=self.hop_length)
-        S = np.expand_dims(np.stack([left_s, right_s], axis=0), axis=2).reshape((2, left_s.shape[0] // X.shape[2], -1))
-        X = np.concatenate((X[:, :self.max_bin], S), axis=0)
 
         return X.astype(np.float32), Y.astype(np.float32)

@@ -126,6 +126,12 @@ class VoxAugDataset(torch.utils.data.Dataset):
 
         return X
     
+    def _get_wave(self, X, c):
+        left_s = np.pad(librosa.istft((np.abs(X[0]) / c) + np.exp(1.j * np.angle(X[0])), hop_length=self.hop_length), ((0, self.hop_length)))
+        right_s = np.pad(librosa.istft((np.abs(X[1]) / c) + np.exp(1.j * np.angle(X[1])), hop_length=self.hop_length), ((0, self.hop_length)))
+        S = np.expand_dims(np.stack([left_s, right_s], axis=0), axis=2).reshape((2, left_s.shape[0] // X.shape[2], -1))
+        return S
+    
     def __getitem__(self, idx):
         path = str(self.curr_list[idx % len(self.curr_list)])
         data = np.load(path)
@@ -141,11 +147,10 @@ class VoxAugDataset(torch.utils.data.Dataset):
             X = Y + V
             c = np.max([c, np.abs(X).max()])
 
+        XW = self._get_wave(X, c)
+        XW = (XW + 1) * 0.5
         X = np.clip(np.abs(X) / c, 0, 1)
         Y = np.clip(np.abs(Y) / c, 0, 1)
-        left_s = librosa.istft(np.pad(X[0], ((0, 0), (0, 1))), hop_length=self.hop_length)
-        right_s = librosa.istft(np.pad(X[1], ((0, 0), (0, 1))), hop_length=self.hop_length)
-        S = np.expand_dims(np.stack([left_s, right_s], axis=0), axis=2).reshape((2, left_s.shape[0] // X.shape[2], -1))
-        X = np.concatenate((X[:, :self.max_bin], S), axis=0)
+        X = np.concatenate((X[:, :self.max_bin], XW), axis=0)
 
         return X.astype(np.float32), Y.astype(np.float32)
