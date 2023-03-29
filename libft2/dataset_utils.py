@@ -93,7 +93,58 @@ def apply_time_stretch(M, target_size):
             H.imag = F.interpolate(torch.from_numpy(cropped.imag).unsqueeze(0), size=(M.shape[1], target_size), mode='bilinear', align_corners=True).squeeze(0).numpy()
 
     return H
-        
+
+def apply_pitch_shift(M, P, pitch_shift):
+    _, num_bins, num_frames = M.shape
+    scaling_factor = 2 ** (pitch_shift / 12)
+
+    H_L = np.zeros_like(M[0])
+    H_R = np.zeros_like(M[1])
+
+    for i in range(num_frames):
+        H_L[:, i] = np.interp(np.arange(num_bins) * scaling_factor, np.arange(num_bins), M[0, :, i])
+        H_R[:, i] = np.interp(np.arange(num_bins) * scaling_factor, np.arange(num_bins), M[1, :, i])
+
+    G_L, G_L_accum = np.zeros_like(P[0]), np.zeros(num_bins)
+    G_R, G_R_accum = np.zeros_like(P[1]), np.zeros(num_bins)
+
+    for i in range(1, num_frames):
+        dphase = P[0, :, i] - P[0, :, i - 1]
+        dphase = dphase - 2 * np.pi * np.floor((dphase + np.pi) / (2 * np.pi))
+        dphase = dphase / scaling_factor
+        G_L_accum += dphase
+        G_L[:, i] = P[0, :, i - 1] + G_L_accum
+
+        dphase = P[1, :, i] - P[1, :, i - 1]
+        dphase = dphase - 2 * np.pi * np.floor((dphase + np.pi) / (2 * np.pi))
+        dphase = dphase / scaling_factor
+        G_R_accum += dphase
+        G_R[:, i] = P[1, :, i - 1] + G_R_accum
+
+    return np.array([H_L, H_R]), np.array([G_L, G_R])
+
+def apply_emphasis(M, P, coef):
+    left_M = M[0]
+    right_M = M[1]
+    
+    _, num_bins, _ = M.shape
+    filter = 1 - coef * np.linspace(0, 1, num_bins)
+    left_M = left_M * filter[:, None]
+    right_M = right_M * filter[:, None]
+
+    return np.array([left_M, right_M]), P
+
+def apply_deemphasis(M, P, coef):
+    left_M = M[0]
+    right_M = M[1]
+    
+    _, num_bins, _ = M.shape
+    filter = 1 / (1 - coef * np.linspace(0, 1, num_bins))
+    left_M = left_M * filter[:, None]
+    right_M = right_M * filter[:, None]
+
+    return np.array([left_M, right_M]), P
+
 def apply_time_masking(M, P, num_masks=1, max_mask_percentage=0.2, alpha=1):
     H = np.copy(M)
 

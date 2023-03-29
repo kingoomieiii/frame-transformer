@@ -93,6 +93,57 @@ def apply_time_stretch(M, target_size):
             H.imag = F.interpolate(torch.from_numpy(cropped.imag).unsqueeze(0), size=(M.shape[1], target_size), mode='bilinear', align_corners=True).squeeze(0).numpy()
 
     return H
+
+def apply_pitch_shift(M, P, pitch_shift):
+    _, num_bins, num_frames = M.shape
+    scaling_factor = 2 ** (pitch_shift / 12)
+
+    H_L = np.zeros_like(M[0])
+    H_R = np.zeros_like(M[1])
+
+    for i in range(num_frames):
+        H_L[:, i] = np.interp(np.arange(num_bins) * scaling_factor, np.arange(num_bins), M[0, :, i])
+        H_R[:, i] = np.interp(np.arange(num_bins) * scaling_factor, np.arange(num_bins), M[1, :, i])
+
+    G_L, G_L_accum = np.zeros_like(P[0]), np.zeros(num_bins)
+    G_R, G_R_accum = np.zeros_like(P[1]), np.zeros(num_bins)
+
+    for i in range(1, num_frames):
+        dphase = P[0, :, i] - P[0, :, i - 1]
+        dphase = dphase - 2 * np.pi * np.floor((dphase + np.pi) / (2 * np.pi))
+        dphase = dphase / scaling_factor
+        G_L_accum += dphase
+        G_L[:, i] = P[0, :, i - 1] + G_L_accum
+
+        dphase = P[1, :, i] - P[1, :, i - 1]
+        dphase = dphase - 2 * np.pi * np.floor((dphase + np.pi) / (2 * np.pi))
+        dphase = dphase / scaling_factor
+        G_R_accum += dphase
+        G_R[:, i] = P[1, :, i - 1] + G_R_accum
+
+    return np.array([H_L, H_R]), np.array([G_L, G_R])
+
+def apply_emphasis(M, P, coef):
+    left_M = M[0]
+    right_M = M[1]
+    
+    _, num_bins, _ = M.shape
+    filter = 1 - coef * np.linspace(0, 1, num_bins)
+    left_M = left_M * filter[:, None]
+    right_M = right_M * filter[:, None]
+
+    return np.array([left_M, right_M]), P
+
+def apply_deemphasis(M, P, coef):
+    left_M = M[0]
+    right_M = M[1]
+    
+    _, num_bins, _ = M.shape
+    filter = 1 / (1 - coef * np.linspace(0, 1, num_bins))
+    left_M = left_M * filter[:, None]
+    right_M = right_M * filter[:, None]
+
+    return np.array([left_M, right_M]), P
         
 def apply_time_masking(M, P, num_masks=1, max_mask_percentage=0.2, alpha=1):
     H = np.copy(M)
@@ -137,92 +188,3 @@ def apply_frequency_masking2(M, P, num_masks=1, max_mask_percentage=0.2, alpha=1
         H[:, mask_start:mask_start+mask_height, :] = H[:, mask_start:mask_start+mask_height, :] * (1 - alpha)
 
     return H, P
-
-def apply_harmonic_distortion(M, P, c, num_harmonics=2, gain=0.1, n_fft=2048, hop_length=1024, alpha=0.25):
-    left_M = M[0] / c
-    right_M = M[1] / c
-    left_P = P[0]
-    right_P = P[1]
-    
-    left_X = left_M * np.exp(1.j * left_P)
-    right_X = right_M * np.exp(1.j * right_P)
-
-    left_s = librosa.istft(left_X, hop_length=hop_length)
-    right_s = librosa.istft(right_X, hop_length=hop_length)
-
-    left_ds = np.copy(left_s)
-    right_ds = np.copy(right_s)
-    for h in range(2, num_harmonics + 1):
-        left_hs = np.roll(left_s, h, axis=-1)
-        right_hs = np.roll(right_s, h, axis=-1)
-        left_ds += (gain ** (h - 1)) * left_hs
-        right_ds += (gain ** (h - 1)) * right_hs
-
-    left_s = np.nan_to_num(left_s, nan=0, neginf=-1, posinf=1)
-    right_s = np.nan_to_num(left_s, nan=0, neginf=-1, posinf=1)
-
-    left_X = librosa.stft(left_ds, n_fft=n_fft, hop_length=hop_length)
-    right_X = librosa.stft(right_ds, n_fft=n_fft, hop_length=hop_length)
-    
-    clipped_left_M = np.clip(np.abs(left_X), 0, 1)
-    clipped_right_M = np.clip(np.abs(right_X), 0, 1)
-
-    return (alpha * np.array([clipped_left_M, clipped_right_M]) + (1 - alpha) * M) * c, np.array([np.angle(left_X), np.angle(right_X)])
-
-def apply_pitch_shift(M, P, c, n_fft=2048, hop_length=1024, sr=44100, n_steps=1, alpha=1):
-    M = M / c
-    left_M = M[0] / c
-    right_M = M[1] / c
-    left_P = P[0]
-    right_P = P[1]
-    
-    left_X = left_M * np.exp(1.j * left_P)
-    right_X = right_M * np.exp(1.j * right_P)
-
-    left_s = librosa.istft(left_X, hop_length=hop_length)
-    right_s = librosa.istft(right_X, hop_length=hop_length)
-
-    left_s = librosa.effects.pitch_shift(left_s, sr=sr, n_steps=n_steps)
-    right_s = librosa.effects.pitch_shift(right_s, sr=sr, n_steps=n_steps)
-
-    left_s = np.nan_to_num(left_s, nan=0, neginf=-1, posinf=1)
-    right_s = np.nan_to_num(left_s, nan=0, neginf=-1, posinf=1)
-
-    left_X = librosa.stft(left_s, n_fft=n_fft, hop_length=hop_length)
-    right_X = librosa.stft(right_s, n_fft=n_fft, hop_length=hop_length)
-    
-    clipped_left_M = np.clip(np.abs(left_X), 0, 1)
-    clipped_right_M = np.clip(np.abs(right_X), 0, 1)
-
-    return (alpha * np.array([clipped_left_M, clipped_right_M]) + (1 - alpha) * M) * c, np.array([np.angle(left_X), np.angle(right_X)])
-
-def apply_emphasis(M, P, c, emphasis_coef, n_fft=2048, hop_length=1024, alpha=1):
-    M = M / c
-    left_M = M[0]
-    right_M = M[1]
-    left_P = P[0]
-    right_P = P[1]
-    
-    left_X = left_M * np.exp(1.j * left_P)
-    right_X = right_M * np.exp(1.j * right_P)
-
-    left_s = librosa.istft(left_X, hop_length=hop_length)
-    right_s = librosa.istft(right_X, hop_length=hop_length)
-    
-    if np.random.uniform() < 0.5:
-        left_s = librosa.effects.preemphasis(left_s, coef=emphasis_coef)
-        right_s = librosa.effects.preemphasis(right_s, coef=emphasis_coef)
-    else:
-        left_s = librosa.effects.deemphasis(left_s, coef=emphasis_coef)
-        right_s = librosa.effects.deemphasis(right_s, coef=emphasis_coef)
-
-    left_s = np.nan_to_num(left_s, nan=0, neginf=-1, posinf=1)
-    right_s = np.nan_to_num(left_s, nan=0, neginf=-1, posinf=1)
-
-    left_X = librosa.stft(left_s, n_fft=n_fft, hop_length=hop_length)
-    right_X = librosa.stft(right_s, n_fft=n_fft, hop_length=hop_length)
-    
-    clipped_left_M = np.clip(np.abs(left_X), 0, 1)
-    clipped_right_M = np.clip(np.abs(right_X), 0, 1)
-
-    return (alpha * np.array([clipped_left_M, clipped_right_M]) + (1 - alpha) * M) * c, np.array([np.angle(left_X), np.angle(right_X)])
