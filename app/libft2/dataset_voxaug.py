@@ -27,18 +27,23 @@ class VoxAugDataset(torch.utils.data.Dataset):
             mixes = [os.path.join(mp, f) for f in os.listdir(mp) if os.path.isfile(os.path.join(mp, f))]
 
             for m in mixes:
-                self.curr_list.append(m)
+                self.curr_list.append((os.path.basename(m), m))
             
         if not is_validation and len(vocal_path) != 0:
             for vp in vocal_path:
                 vox = [os.path.join(vp, f) for f in os.listdir(vp) if os.path.isfile(os.path.join(vp, f))]
 
                 for v in vox:
-                    self.vocal_list.append(v)
+                    self.vocal_list.append((os.path.basename(v), v))
 
-            random.Random(seed).shuffle(self.vocal_list)
-
+        def sort(val):
+            return val[0]
+        
+        self.curr_list.sort(key=sort)
+        self.vocal_list.sort(key=sort)
+        
         random.Random(seed+1).shuffle(self.curr_list)
+        random.Random(seed+1).shuffle(self.vocal_list)
 
     def set_epoch(self, epoch):
         self.epoch = epoch
@@ -66,6 +71,10 @@ class VoxAugDataset(torch.utils.data.Dataset):
             (0.2, apply_multiplicative_noise, { "loc": 1, "scale": np.random.uniform(0, 0.5), }),
             (0.2, apply_random_eq, { "min": np.random.uniform(0, 1), "max": np.random.uniform(1, 2), }),
             (0.2, apply_stereo_spatialization, { "c": Vc, "alpha": np.random.uniform(0, 2) }),
+            (0.1, apply_time_masking, { "num_masks": np.random.randint(0, 5), "max_mask_percentage": np.random.uniform(0, 0.2), "alpha": np.random.uniform() }),
+            (0.1, apply_frequency_masking, { "num_masks": np.random.randint(0, 5), "max_mask_percentage": np.random.uniform(0, 0.2), "alpha": np.random.uniform() }),
+            (0.1, apply_time_masking2, { "num_masks": np.random.randint(0, 5), "max_mask_percentage": np.random.uniform(0, 0.2), "alpha": np.random.uniform() }),
+            (0.1, apply_frequency_masking2, { "num_masks": np.random.randint(0, 5), "max_mask_percentage": np.random.uniform(0, 0.2), "alpha": np.random.uniform() }),
             (0.2, apply_random_phase_noise, { "strength": np.random.uniform(0, 0.5)}),
             (0.2, apply_harmonic_distortion, { "c": Vc, "num_harmonics": np.random.randint(1,4), "gain": np.random.uniform(0, 0.1), "hop_length": self.hop_length, "n_fft": self.n_fft }),
             (0.2, apply_pitch_shift, { "pitch_shift": np.random.uniform(-12, 12) }),
@@ -100,6 +109,10 @@ class VoxAugDataset(torch.utils.data.Dataset):
             (0.2, apply_multiplicative_noise, { "loc": 1, "scale": np.random.uniform(0, 0.5), }),
             (0.2, apply_random_eq, { "min": np.random.uniform(0, 1), "max": np.random.uniform(1, 2), }),
             (0.2, apply_stereo_spatialization, { "c": c, "alpha": np.random.uniform(0, 2) }),
+            (0.1, apply_time_masking, { "num_masks": np.random.randint(0, 5), "max_mask_percentage": np.random.uniform(0, 0.2), "alpha": np.random.uniform() }),
+            (0.1, apply_frequency_masking, { "num_masks": np.random.randint(0, 5), "max_mask_percentage": np.random.uniform(0, 0.2), "alpha": np.random.uniform() }),
+            (0.1, apply_time_masking2, { "num_masks": np.random.randint(0, 5), "max_mask_percentage": np.random.uniform(0, 0.2), "alpha": np.random.uniform() }),
+            (0.1, apply_frequency_masking2, { "num_masks": np.random.randint(0, 5), "max_mask_percentage": np.random.uniform(0, 0.2), "alpha": np.random.uniform() }),
             (0.2, apply_random_phase_noise, { "strength": np.random.uniform(0, 0.5)}),
             (0.2, apply_harmonic_distortion, { "c": c, "num_harmonics": np.random.randint(1,4), "gain": np.random.uniform(0, 0.1), "hop_length": self.hop_length, "n_fft": self.n_fft }),
             (0.2, apply_pitch_shift, { "pitch_shift": np.random.uniform(-12, 12) }),

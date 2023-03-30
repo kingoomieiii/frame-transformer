@@ -27,18 +27,23 @@ class VoxAugDataset(torch.utils.data.Dataset):
             mixes = [os.path.join(mp, f) for f in os.listdir(mp) if os.path.isfile(os.path.join(mp, f))]
 
             for m in mixes:
-                self.curr_list.append(m)
+                self.curr_list.append((os.path.basename(m), m))
             
         if not is_validation and len(vocal_path) != 0:
             for vp in vocal_path:
                 vox = [os.path.join(vp, f) for f in os.listdir(vp) if os.path.isfile(os.path.join(vp, f))]
 
                 for v in vox:
-                    self.vocal_list.append(v)
+                    self.vocal_list.append((os.path.basename(v), v))
 
-            random.Random(seed).shuffle(self.vocal_list)
-
+        def sort(val):
+            return val[0]
+        
+        self.curr_list.sort(key=sort)
+        self.vocal_list.sort(key=sort)
+        
         random.Random(seed+1).shuffle(self.curr_list)
+        random.Random(seed+1).shuffle(self.vocal_list)
 
     def set_epoch(self, epoch):
         self.epoch = epoch
