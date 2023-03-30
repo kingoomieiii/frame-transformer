@@ -94,6 +94,37 @@ def apply_time_stretch(M, target_size):
 
     return H
 
+def apply_harmonic_distortion(M, P, c, num_harmonics=2, gain=0.1, n_fft=2048, hop_length=1024):
+    left_M = M[0]
+    right_M = M[1]
+    left_P = P[0]
+    right_P = P[1]
+    
+    left_X = left_M * np.exp(1.j * left_P)
+    right_X = right_M * np.exp(1.j * right_P)
+
+    left_s = librosa.istft(left_X, hop_length=hop_length)
+    right_s = librosa.istft(right_X, hop_length=hop_length)
+
+    left_ds = np.copy(left_s)
+    right_ds = np.copy(right_s)
+    for h in range(2, num_harmonics + 1):
+        left_hs = np.roll(left_s, h, axis=-1)
+        right_hs = np.roll(right_s, h, axis=-1)
+        left_ds += (gain ** (h - 1)) * left_hs
+        right_ds += (gain ** (h - 1)) * right_hs
+
+    left_s = np.nan_to_num(left_s, nan=0, neginf=-1, posinf=1)
+    right_s = np.nan_to_num(right_s, nan=0, neginf=-1, posinf=1)
+
+    left_X = librosa.stft(left_ds, n_fft=n_fft, hop_length=hop_length)
+    right_X = librosa.stft(right_ds, n_fft=n_fft, hop_length=hop_length)
+    
+    left_M = np.abs(left_X)
+    right_M = np.abs(right_X)
+
+    return np.clip(np.array([left_M / c, right_M / c]) * c, 0, 1), np.array([np.angle(left_X), np.angle(right_X)])
+
 def apply_pitch_shift(M, P, pitch_shift):
     _, num_bins, num_frames = M.shape
     scaling_factor = 2 ** (pitch_shift / 12)
@@ -144,7 +175,7 @@ def apply_deemphasis(M, P, coef):
     right_M = right_M * filter[:, None]
 
     return np.array([left_M, right_M]), P
-        
+
 def apply_time_masking(M, P, num_masks=1, max_mask_percentage=0.2, alpha=1):
     H = np.copy(M)
 
