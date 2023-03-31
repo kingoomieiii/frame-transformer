@@ -175,6 +175,36 @@ class FrameTransformerDiscriminator(nn.Module):
             SquaredReLU(),
             nn.Conv2d(channels * 32, 1, 1))
         
+    def from_generator(self, gen: FrameTransformerGenerator):
+        self.positional_embedding = gen.positional_embedding
+
+        self.enc1 = gen.enc1
+        self.enc1_transformer = gen.enc1_transformer
+
+        self.enc2 = gen.enc2
+        self.enc2_transformer = gen.enc2_transformer
+
+        self.enc3 = gen.enc3
+        self.enc3_transformer = gen.enc3_transformer
+        
+        self.enc4 = gen.enc4
+        self.enc4_transformer = gen.enc4_transformer
+        
+        self.enc5 = gen.enc5
+        self.enc5_transformer = gen.enc5_transformer
+        
+        self.enc6 = gen.enc6
+        self.enc6_transformer = gen.enc6_transformer
+        
+        self.enc7 = gen.enc7
+        self.enc7_transformer = gen.enc7_transformer
+        
+        self.enc8 = gen.enc8
+        self.enc8_transformer = gen.enc8_transformer
+        
+        self.enc9 = gen.enc9
+        self.enc9_transformer = gen.enc9_transformer
+        
     def forward(self, x):
         x = torch.cat((x, self.positional_embedding(x)), dim=1)
 
