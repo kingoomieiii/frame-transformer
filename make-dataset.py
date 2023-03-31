@@ -1,32 +1,55 @@
 from lib.dataset import make_validation_set, train_val_split, make_vocal_stems, make_dataset, make_mix_dataset
 
 vocal_dataset = [
-    # ("/media/ben/Evo 870 SATA 1/dataset/vocals_padding", "/media/ben/internal-nvme-b/")
+    # ("J://dataset/vocals", "C://"),
+    # ("J://dataset/vocals2", "D://")
 ]
 
-validation = "/media/ben/Evo 870 SATA 1/dataset/validation"
-
-cropsize = 256
-hop_length = 1024
-fft = 2048
+validation = [
+    #("J://dataset/validation", "C://")
+]
 
 dirs = [
+    # ('J:///dataset/instruments/training_p10', 'D://', True, False),
+    # ('J:///dataset/instruments/training_p1', 'D://', True, False),
+    # ('J:///dataset/instruments/training_p2', 'C://', True, False),
+    # ('J:///dataset/instruments/training_p3', 'F://', True, False),
+    # ('J:///dataset/instruments/training_p11', 'H://', True, False),
+    # ('J:///dataset/instruments/training_p4', 'D://', True, False),
+    # ('J:///dataset/instruments/training_p15', 'C://', True, False),
+    # ('J:///dataset/instruments/training_p13', 'F://', True, False),
+    # ('J:///dataset/instruments/training_p5', 'H://', True, False),
+    # ('J:///dataset/instruments/training_p7', 'D://', True, False),
+    # ('J:///dataset/instruments/training_p12', 'C://', True, False),
+    # ('J:///dataset/instruments/training_p14', 'F://', True, False),
+    # ('J:///dataset/instruments/training_p6', 'H://', True, False),
+    # ('J:///dataset/instruments/training_p16', 'D://', True, False),
+    # ('J:///dataset/instruments/training_p9', 'H://', True, False),
+    # ('J:///dataset/instruments/training_p8', 'F://', True, False),
     # ('/media/ben/Evo 870 SATA 1/dataset/instruments/training_p1', '/media/ben/internal-nvme-b/', True, False),
     # ('/media/ben/Evo 870 SATA 1/dataset/instruments/training_p10', '/home/ben/', True, False),
     # ('/media/ben/Evo 870 SATA 1/dataset/instruments/training_p2', '/media/ben/internal-nvme-b/', True, False),
     # ('/media/ben/Evo 870 SATA 1/dataset/instruments/training_p3', '/home/ben/', True, False),
     # ('/media/ben/Evo 870 SATA 1/dataset/instruments/training_p11', '/media/ben/internal-nvme-b/', True, False),
     # ('/media/ben/Evo 870 SATA 1/dataset/instruments/training_p4', '/home/ben/', True, False),
-    # ('/media/ben/Evo 870 SATA 1/dataset/instruments/training_p15', '/media/ben/internal-nvme-b/', True, False),
-    # ('/media/ben/Evo 870 SATA 1/dataset/instruments/training_p13', '/home/ben/', True, False),
-    # ('/media/ben/Evo 870 SATA 1/dataset/instruments/training_p5', '/media/ben/internal-nvme-b/', True, False),
-    # ('/media/ben/Evo 870 SATA 1/dataset/instruments/training_p7', '/home/ben/', True, False),
-    # ('/media/ben/Evo 870 SATA 1/dataset/instruments/training_p12', '/media/ben/internal-nvme-b/', True, False),
-    # ('/media/ben/Evo 870 SATA 1/dataset/instruments/training_p14', '/home/ben/', True, False),
-    # ('/media/ben/Evo 870 SATA 1/dataset/instruments/training_p6', '/media/ben/internal-nvme-b/', True, False),
-    # ('/media/ben/Evo 870 SATA 1/dataset/instruments/training_p9', '/home/ben/', True, False),
-    # ('/media/ben/Evo 870 SATA 1/dataset/instruments/training_p16', '/media/ben/internal-nvme-b/', True, False),
 ]
+
+pretraining_dirs = [
+    ( "J://dataset/pretraining/pretraining_p1", "F://" ),
+    ( "J://dataset/pairs/training_p5", "D://" ),
+    ( "J://dataset/pairs/training_p6", "F://" ),
+    ( "J://dataset/pairs/training_p7", "H://" ),
+    ( "J://dataset/pairs/training_p12", "F://" ),
+    ( "J://dataset/pairs/training_p13", "H://" ),
+    # ( "J://dataset/pretraining/pretraining_p2", "F://" ),
+    # ( "J://dataset/pretraining/pretraining_p3", "F://" ),
+    # ( "J://dataset/pretraining/pretraining_p4", "F://" ),
+    # ( "J://dataset/pretraining/pretraining_p5", "F://" ),
+]
+
+cropsize = 2048
+hop_length = 1024
+fft = 2048
 
 for dir in dirs:
     train_filelist, _ = train_val_split(
@@ -59,22 +82,41 @@ for dir in dirs:
             root=dir[1],
             is_validation=True)
 
-val_filelist, _ = train_val_split(
-    dataset_dir=validation,
-    val_filelist=[],
-    val_size=-1,
-    train_size=-1,
-    voxaug=False)
+for input_dir, output_dir in pretraining_dirs:
+    train_filelist, _ = train_val_split(
+        dataset_dir=input_dir,
+        val_filelist=[],
+        val_size=-1,
+        train_size=-1,
+        pretraining=True)
+    
+    val_dataset = make_dataset(
+        filelist=train_filelist,
+        cropsize=cropsize,
+        sr=44100,
+        hop_length=hop_length,
+        n_fft=fft,
+        root=output_dir,
+        is_validation=True,
+        suffix='_PRETRAINING')
+        
+for input_dir, output_dir in validation:
+    val_filelist, _ = train_val_split(
+        dataset_dir=input_dir,
+        val_filelist=[],
+        val_size=-1,
+        train_size=-1,
+        voxaug=False)
 
-val_dataset = make_dataset(
-    filelist=val_filelist,
-    cropsize=cropsize,
-    sr=44100,
-    hop_length=hop_length,
-    n_fft=fft,
-    root="/media/ben/internal-nvme-b/",
-    is_validation=True,
-    suffix='_VALIDATION')
+    val_dataset = make_dataset(
+        filelist=val_filelist,
+        cropsize=cropsize,
+        sr=44100,
+        hop_length=hop_length,
+        n_fft=fft,
+        root=output_dir,
+        is_validation=True,
+        suffix='_VALIDATION')
 
 for dir in vocal_dataset:
     make_vocal_stems(dataset=dir[0], root=dir[1],
