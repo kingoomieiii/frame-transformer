@@ -4,7 +4,7 @@ import numpy as np
 import torch
 import torch.utils.data
 import torch.nn.functional as F
-from libft2gan.dataset_utils import apply_channel_drop, apply_dynamic_range_mod, apply_multiplicative_noise, apply_random_eq, apply_stereo_spatialization, apply_time_stretch, apply_random_phase_noise, apply_time_masking, apply_frequency_masking, apply_time_masking2, apply_frequency_masking2, apply_emphasis, apply_deemphasis, apply_pitch_shift, apply_harmonic_distortion
+from libft2gan.dataset_utils import apply_channel_drop, apply_dynamic_range_mod, apply_multiplicative_noise, apply_random_eq, apply_stereo_spatialization, apply_time_stretch, apply_random_phase_noise, apply_time_masking, apply_frequency_masking, apply_time_masking2, apply_frequency_masking2, apply_emphasis, apply_deemphasis, apply_pitch_shift, apply_masking, apply_harmonic_distortion
 import librosa
 
 class VoxAugDataset(torch.utils.data.Dataset):
@@ -87,7 +87,8 @@ class VoxAugDataset(torch.utils.data.Dataset):
             (0.25, apply_dynamic_range_mod, { "c": c, "threshold": np.random.uniform(), "gain": np.random.uniform(), }),
             (0.25, apply_multiplicative_noise, { "loc": 1, "scale": np.random.uniform(0, 0.5), }),
             (0.25, apply_random_eq, { "min": np.random.uniform(0, 1), "max": np.random.uniform(1, 2), }),
-            (0.25, apply_stereo_spatialization, { "c": c, "alpha": np.random.uniform(0, 1) }),
+            (0.25, apply_stereo_spatialization, { "c": c, "alpha": np.random.uniform(0, 1) }),            
+            (0.25, apply_masking, { "c": c, "num_masks": np.random.randint(0, 6), "max_mask_percentage": np.random.uniform(0, 0.2), "alpha": np.random.uniform() }),
             (0.25, apply_random_phase_noise, { "strength": np.random.uniform(0, 0.5)}),
             (0.25, apply_emphasis, { "coef": np.random.uniform(0.75, 1) }),
             (0.25, apply_deemphasis, { "coef": np.random.uniform(0.75, 1) }),
