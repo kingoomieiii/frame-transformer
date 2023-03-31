@@ -10,6 +10,8 @@ import torch.utils.data
 from tqdm import tqdm
 import librosa
 
+import hashlib
+
 try:
     from lib import spec_utils
 except ModuleNotFoundError:
@@ -554,20 +556,21 @@ class VocalRemoverValidationSet(torch.utils.data.Dataset):
         return X_mag, y_mag
 
 
-def make_pair(mix_dir, inst_dir, voxaug=False):
+def make_pair(mix_dir, inst_dir, voxaug=False, pretraining=False):
     input_exts = ['.wav', '.m4a', '.mp3', '.mp4', '.flac']
+
+    inst_dir = mix_dir if pretraining else inst_dir
 
     y_list = sorted([
         os.path.join(inst_dir, fname)
         for fname in os.listdir(inst_dir)
         if os.path.splitext(fname)[1] in input_exts])
 
-    if not voxaug:    
+    if not voxaug and not pretraining:
         X_list = sorted([
         os.path.join(mix_dir, fname)
         for fname in os.listdir(mix_dir)
         if os.path.splitext(fname)[1] in input_exts])
-
     else:
         X_list = y_list
 
@@ -602,11 +605,12 @@ def train_val_split(dataset_dir, val_filelist, selected_validation=[], voxaug=Fa
 
     return train_filelist, val_filelist
 
-def train_val_split(dataset_dir, val_filelist, val_size=-1, train_size=-1, selected_validation=[], voxaug=False):
+def train_val_split(dataset_dir, val_filelist, val_size=-1, train_size=-1, selected_validation=[], voxaug=False, pretraining=False):
     filelist = make_pair(
         os.path.join(dataset_dir, 'mixtures'),
         os.path.join(dataset_dir, 'instruments'),
-        voxaug=voxaug)
+        voxaug=voxaug,
+        pretraining=pretraining)
 
     train_filelist = list()
     val_filelist = list()
@@ -664,38 +668,6 @@ def make_training_set(filelist, sr, hop_length, n_fft):
 
     return ret
 
-
-def make_validation_set(filelist, cropsize, sr, hop_length, n_fft, offset):
-    patch_list = []
-    patch_dir = 'cs{}_sr{}_hl{}_nf{}_of{}'.format(cropsize, sr, hop_length, n_fft, offset)
-    os.makedirs(patch_dir, exist_ok=True)
-
-    for X_path, y_path in tqdm(filelist):
-        basename = os.path.splitext(os.path.basename(X_path))[0]
-
-        X, y, _, _ = spec_utils.cache_or_load(X_path, y_path, sr, hop_length, n_fft)
-        coef = np.max([np.abs(X).max(), np.abs(y).max()])
-        X, y = X / coef, y / coef
-
-        l, r, roi_size = make_padding(X.shape[2], cropsize, offset)
-        X_pad = np.pad(X, ((0, 0), (0, 0), (l, r)), mode='constant')
-        y_pad = np.pad(y, ((0, 0), (0, 0), (l, r)), mode='constant')
-
-        len_dataset = int(np.ceil(X.shape[2] / roi_size))
-        for j in range(len_dataset):
-            outpath = os.path.join(patch_dir, '{}_p{}.npz'.format(basename, j))
-            start = j * roi_size
-            if not os.path.exists(outpath):
-                np.savez(
-                    outpath,
-                    X=X_pad[:, :, start:start + cropsize],
-                    y=y_pad[:, :, start:start + cropsize]
-                )
-            patch_list.append(outpath)
-
-    return patch_list
-
-
 def get_oracle_data(X, y, oracle_loss, oracle_rate, oracle_drop_rate):
     k = int(len(X) * oracle_rate * (1 / (1 - oracle_drop_rate)))
     n = int(len(X) * oracle_rate)
@@ -722,7 +694,7 @@ def make_vocal_stems(dataset, cropsize=1024, sr=44100, hop_length=512, n_fft=102
         os.makedirs(patch_dir, exist_ok=True)
 
         X, _ = spec_utils.to_spec(xw, xw, hop_length=hop_length, n_fft=n_fft)
-        coef = np.abs(X).max()
+        coef = np.abs(xw).max()
 
         l, r, roi_size = make_padding(X.shape[2], cropsize, offset)
         X_pad = np.pad(X, ((0, 0), (0, 0), (l, r)), mode='constant')
@@ -732,7 +704,7 @@ def make_vocal_stems(dataset, cropsize=1024, sr=44100, hop_length=512, n_fft=102
             outpath = os.path.join(patch_dir, '{}_p{}.npz'.format(basename, j))
 
             start = j * roi_size
-            if not os.path.exists(outpath) and coef != 0:
+            if coef != 0:
                 xp = X_pad[:, :, start:start + cropsize]
                 xc = np.abs(xp).mean()
 
@@ -778,100 +750,6 @@ def make_dataset(filelist, cropsize, sr, hop_length, n_fft, offset=0, is_validat
                         X=X_pad[:, :, start:start + cropsize],
                         Y=Y_pad[:, :, start:start + cropsize],
                         c=coef.item())
-
-def make_overfit_dataset(file, dir, cropsize, sr, hop_length, n_fft, offset=0):
-    X_set = []
-    Y_set = []
-
-    train_filelist, _ = train_val_split(
-    dataset_dir=dir,
-    val_filelist=[],
-    val_size=-1,
-    train_size=-1)
-
-    for (xp, yp) in train_filelist:
-        if os.path.basename(xp) == os.path.basename(file) or os.path.basename(yp) == os.path.basename(file):
-            print(xp)
-            print(yp)
-            X_path = xp
-            Y_path = yp
-            break
-
-    X, Y = spec_utils.load(X_path, Y_path, sr, hop_length, n_fft)
-    cx = np.abs(X).max()
-    cy = np.abs(Y).max()
-
-    l, r, roi_size = make_padding(X.shape[2], cropsize, offset)
-    X_pad = np.pad(X, ((0, 0), (0, 0), (l, r)), mode='constant')
-    Y_pad = np.pad(Y, ((0, 0), (0, 0), (l, r)), mode='constant')
-
-    len_dataset = int(np.ceil(X.shape[2] / roi_size))
-    for j in range(len_dataset):
-        start = j * roi_size
-        X_set.append(X_pad[:, :, start:start + cropsize])
-        Y_set.append(Y_pad[:, :, start:start + cropsize])
-
-    return X_set, Y_set, X_path, Y_path, cx, cy
-
-def make_mix_dataset(filelist, cropsize, sr, hop_length, n_fft, offset=0, is_validation=False, root='', max_samples=220000000):
-    patch_list = []    
-    patch_dir = f'{root}cs{cropsize}_sr{sr}_hl{hop_length}_nf{n_fft}_of{offset}_MIXES'
-    os.makedirs(patch_dir, exist_ok=True)
-
-    for X_path, Y_path in tqdm(filelist):
-        basename = os.path.splitext(os.path.basename(X_path))[0]
-
-        cache_dir = 'sr{}_hl{}_nf{}'.format(sr, hop_length, n_fft)
-        inst_cache_dir = os.path.join(os.path.dirname(X_path), cache_dir)
-        os.makedirs(inst_cache_dir, exist_ok=True)
-
-        X, _ = librosa.load(X_path, sr, False, dtype=np.float32, res_type='kaiser_fast')
-
-        if X.ndim == 1:
-            X = np.array([X, X])
-
-        if X.shape[1] > max_samples:
-            for i in range(math.ceil(X.shape[1] / max_samples)):
-                start = i * max_samples
-                ix = X[:, start:start+max_samples]
-                ix = spec_utils.wave_to_spectrogram(ix, hop_length, n_fft)
-                coef = np.abs(ix).max()
-                
-                l, r, roi_size = make_padding(ix.shape[2], cropsize, offset)
-                X_pad = np.pad(ix, ((0, 0), (0, 0), (l, r)), mode='constant')
-
-                len_dataset = int(np.ceil(ix.shape[2] / roi_size))
-                for j in range(len_dataset):
-                    outpath = os.path.join(patch_dir, '{}_c{}_p{}.npz'.format(basename, i, j))
-                    patch_list.append(outpath)
-
-                    start = j * roi_size
-                    if not os.path.exists(outpath):
-                        np.savez(
-                            outpath,
-                            X=X_pad[:, :, start:start + cropsize],
-                            c=coef.item(),
-                            vocals=True)
-        else:
-            X = spec_utils.wave_to_spectrogram(X, hop_length, n_fft)
-
-            coef = np.abs(X).max()
-
-            l, r, roi_size = make_padding(X.shape[2], cropsize, offset)
-            X_pad = np.pad(X, ((0, 0), (0, 0), (l, r)), mode='constant')
-
-            len_dataset = int(np.ceil(X.shape[2] / roi_size))
-            for j in range(len_dataset):
-                outpath = os.path.join(patch_dir, '{}_p{}.npz'.format(basename, j))
-                patch_list.append(outpath)
-
-                start = j * roi_size
-                if not os.path.exists(outpath):
-                    np.savez(
-                        outpath,
-                        X=X_pad[:, :, start:start + cropsize],
-                        c=coef.item(),
-                        vocals=True)
 
 def make_validation_set(filelist, sr, hop_length, n_fft, offset=0, root=''):
     patch_list = []    
