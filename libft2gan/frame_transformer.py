@@ -168,17 +168,15 @@ class FrameTransformerDiscriminator(nn.Module):
         self.enc8_transformer = FrameTransformerEncoder(channels * 14, num_attention_maps, self.max_bin // 128, dropout=dropout, expansion=expansion, num_heads=num_heads)
 
         self.enc9 = FrameEncoder(channels * 14 + num_attention_maps, channels * 16, self.max_bin // 128)
-        self.enc9_transformer = nn.Sequential(*[ConvolutionalTransformerEncoder(channels * 16, dropout=dropout, expansion=4, num_heads=num_heads) for _ in range(num_bridge_layers)])
+        self.enc9_transformer = nn.Sequential(*[ConvolutionalTransformerEncoder(channels * 16, dropout=0.5, expansion=4, num_heads=num_heads) for _ in range(num_bridge_layers)])
 
         self.out = nn.Sequential(
+            MultichannelLayerNorm(channels * 16, self.max_bin // 256),
             nn.Conv2d(channels * 16, channels * 32, kernel_size=(1,3), padding=(0,1), stride=(1,2)),
             SquaredReLU(),
             nn.Conv2d(channels * 32, 1, 1))
         
     def from_generator(self, gen: FrameTransformerGenerator):
-        self.positional_embedding = gen.positional_embedding
-
-        self.enc1 = gen.enc1
         self.enc1_transformer = gen.enc1_transformer
 
         self.enc2 = gen.enc2
@@ -201,10 +199,10 @@ class FrameTransformerDiscriminator(nn.Module):
         
         self.enc8 = gen.enc8
         self.enc8_transformer = gen.enc8_transformer
-        
+
         self.enc9 = gen.enc9
         self.enc9_transformer = gen.enc9_transformer
-        
+
     def forward(self, x):
         x = torch.cat((x, self.positional_embedding(x)), dim=1)
 
@@ -369,6 +367,7 @@ class FrameTransformerEncoder(nn.Module):
         self.activate = SquaredReLU()
         self.dropout = nn.Dropout(dropout)
 
+        self.has_embed = channels != out_channels
         self.embed = nn.Conv2d(channels, out_channels, 1) if channels != out_channels else nn.Identity()
 
         self.norm1 = MultichannelLayerNorm(out_channels, features)
@@ -389,6 +388,13 @@ class FrameTransformerEncoder(nn.Module):
         self.norm5 = MultichannelLayerNorm(out_channels, features)
         self.conv3 = MultichannelLinear(out_channels, out_channels, features, expansion)
         self.conv4 = MultichannelLinear(out_channels, out_channels, expansion, features)
+
+    # def from_other(self, other):
+    #     if self.has_embed:
+    #         self.embed.weight = other.embed.weight
+    #         self.embed.bias = other.embed.bias
+
+    #     self.norm1.from_other(other.norm1)
         
     def forward(self, x, prev_qk=None):
         h = self.embed(x)

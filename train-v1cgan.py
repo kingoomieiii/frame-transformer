@@ -48,7 +48,7 @@ def train_epoch(dataloader, generator, discriminator, device, optimizer_gen, opt
         with torch.cuda.amp.autocast_mode.autocast():
             M = generator(X)
             M = torch.sigmoid(M)
-            Z = X * M
+            Z = M
             pavg = torch.mean(M)
             pmin = torch.min(M)
             disc_fake = discriminator(torch.cat((X, Z.detach()), dim=1))
@@ -73,7 +73,7 @@ def train_epoch(dataloader, generator, discriminator, device, optimizer_gen, opt
         with torch.cuda.amp.autocast_mode.autocast():
             M = generator(X)
             M = torch.sigmoid(M)
-            Z = X * M
+            Z = M
             disc_fake = discriminator(torch.cat((X, Z.detach()), dim=1))
             g_gan_loss = bce_loss(disc_fake, torch.ones_like(disc_fake))
             g_l1_loss = F.l1_loss(Z, Y)
@@ -125,7 +125,7 @@ def validate_epoch(dataloader, model, device):
             with torch.cuda.amp.autocast_mode.autocast():
                 pred = torch.sigmoid(model(X))
 
-            l1_mag = crit(X[:, :2] * pred[:, :2], Y[:, :2])
+            l1_mag = crit(pred[:, :2], Y[:, :2])
             loss = l1_mag
 
             if torch.logical_or(loss.isnan(), loss.isinf()):
@@ -143,15 +143,16 @@ def main():
     p.add_argument('--sr', '-r', type=int, default=44100)
     p.add_argument('--hop_length', '-H', type=int, default=1024)
     p.add_argument('--n_fft', '-f', type=int, default=2048)
-    p.add_argument('--checkpoint_gen', type=str, default=None)
-    p.add_argument('--checkpoint_disc', type=str, default=None)
+    p.add_argument('--pretrained_model', type=str, default='./pretraining.4.62434.pth')#"/media/ben/internal-nvme-b/models/local.1.gen.pth")
+    p.add_argument('--checkpoint_gen', type=str, default=None)#"/media/ben/internal-nvme-b/models/local.1.gen.pth")
+    p.add_argument('--checkpoint_disc', type=str, default=None)#"/media/ben/internal-nvme-b/models/local.1.disc.pth")
     p.add_argument('--mixed_precision', type=str, default='true')
     p.add_argument('--learning_rate', '-l', type=float, default=1e-4)
     p.add_argument('--lam', type=float, default=100)
     
     p.add_argument('--model_dir', type=str, default='/media/ben/internal-nvme-b')
     p.add_argument('--instrumental_lib', type=str, default="/home/ben/cs2048_sr44100_hl1024_nf2048_of0|/media/ben/internal-nvme-b/cs2048_sr44100_hl1024_nf2048_of0")
-    p.add_argument('--vocal_lib', type=str, default="/home/ben/cs2048_sr44100_hl1024_nf2048_of0_VOCALS")
+    p.add_argument('--vocal_lib', type=str, default="/home/ben/cs2048_sr44100_hl1024_nf2048_of0_VOCALS|/media/ben/internal-nvme-b/cs2048_sr44100_hl1024_nf2048_of0_VOCALS")
     p.add_argument('--validation_lib', type=str, default="/media/ben/internal-nvme-b/cs2048_sr44100_hl1024_nf2048_of0_VALIDATION")
 
     p.add_argument('--curr_step', type=int, default=0)
@@ -229,16 +230,22 @@ def main():
     generator = FrameTransformerGenerator(in_channels=2, out_channels=2, channels=args.channels, expansion=args.expansion, n_fft=args.n_fft, dropout=args.dropout, num_heads=args.num_heads)
     discriminator = FrameTransformerDiscriminator(in_channels=4, channels=args.channels, expansion=args.expansion, n_fft=args.n_fft, dropout=args.dropout, num_heads=args.num_heads)
     
+    if args.pretrained_model is not None:
+        gen2 = FrameTransformerGenerator(in_channels=2, out_channels=2, channels=args.channels, expansion=args.expansion, n_fft=args.n_fft, dropout=args.dropout, num_heads=args.num_heads)
+        generator.load_state_dict(torch.load(f'{args.pretrained_model}'))
+        gen2.load_state_dict(torch.load(f'{args.pretrained_model}'))
+        discriminator.from_generator(gen2)
+
     if torch.cuda.is_available() and args.gpu >= 0:
         device = torch.device('cuda:{}'.format(args.gpu))
         generator.to(device)
         discriminator.to(device)
 
     if args.checkpoint_gen is not None:
-        generator.load_state_dict(torch.load(f'{args.checkpoint_gen}.model.pth', map_location=device))
+        generator.load_state_dict(torch.load(f'{args.checkpoint_gen}', map_location=device))
 
     if args.checkpoint_disc is not None:
-        discriminator.load_state_dict(torch.load(f'{args.checkpoint_disc}.model.pth', map_location=device))
+        discriminator.load_state_dict(torch.load(f'{args.checkpoint_disc}', map_location=device))
         
     model_parameters = filter(lambda p: p.requires_grad, generator.parameters())
     params = sum([np.prod(p.size()) for p in model_parameters])
@@ -320,7 +327,8 @@ def main():
             print('  * best validation loss')
 
         model_path = f'{args.model_dir}models/local.{epoch}'
-        torch.save(generator.state_dict(), f'{model_path}.modelt.pth')
+        torch.save(generator.state_dict(), f'{model_path}.gen.pth')
+        torch.save(discriminator.state_dict(), f'{model_path}.disc.pth')
 
         epoch += 1
 
