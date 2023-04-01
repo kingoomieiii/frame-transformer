@@ -231,8 +231,9 @@ def main():
     discriminator = FrameTransformerDiscriminator(in_channels=4, channels=args.channels, expansion=args.expansion, n_fft=args.n_fft, dropout=args.dropout, num_heads=args.num_heads)
     
     if args.pretrained_model is not None:
-        gen2 = FrameTransformerGenerator(in_channels=2, out_channels=2, channels=args.channels, expansion=args.expansion, n_fft=args.n_fft, dropout=args.dropout, num_heads=args.num_heads)
         generator.load_state_dict(torch.load(f'{args.pretrained_model}'))
+        
+        gen2 = FrameTransformerGenerator(in_channels=2, out_channels=2, channels=args.channels, expansion=args.expansion, n_fft=args.n_fft, dropout=args.dropout, num_heads=args.num_heads)
         gen2.load_state_dict(torch.load(f'{args.pretrained_model}'))
         discriminator.from_generator(gen2)
 

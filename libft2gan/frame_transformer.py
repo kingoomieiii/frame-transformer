@@ -388,13 +388,6 @@ class FrameTransformerEncoder(nn.Module):
         self.norm5 = MultichannelLayerNorm(out_channels, features)
         self.conv3 = MultichannelLinear(out_channels, out_channels, features, expansion)
         self.conv4 = MultichannelLinear(out_channels, out_channels, expansion, features)
-
-    # def from_other(self, other):
-    #     if self.has_embed:
-    #         self.embed.weight = other.embed.weight
-    #         self.embed.bias = other.embed.bias
-
-    #     self.norm1.from_other(other.norm1)
         
     def forward(self, x, prev_qk=None):
         h = self.embed(x)
