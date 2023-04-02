@@ -11,13 +11,13 @@ import wandb
 from tqdm import tqdm
 
 from libft2gan.dataset_voxaug import VoxAugDataset
-from libft2gan.frame_transformer import FrameTransformerGenerator, FrameTransformerDiscriminator2
+from libft2gan.frame_transformer import FrameTransformerGenerator, FrameTransformerDiscriminator
 from libft2gan.lr_scheduler_linear_warmup import LinearWarmupScheduler
 from libft2gan.lr_scheduler_polynomial_decay import PolynomialDecayScheduler
 
 from torch.nn import functional as F
 
-def train_epoch(dataloader, generator, discriminator, device, optimizer_gen, optimizer_disc, accumulation_steps, progress_bar, scheduler_gen=None, scheduler_disc=None, grad_scaler_gen=None, grad_scaler_disc=None, step=0, lam=100):
+def train_epoch(dataloader, generator, discriminator, device, optimizer_gen, optimizer_disc, accumulation_steps, progress_bar, scheduler_gen=None, scheduler_disc=None, grad_scaler_gen=None, grad_scaler_disc=None, step=0, l1_lambda=100):
     gen_loss = 0
     batch_gen_loss = 0
     batch_gen_loss_l1 = 0
@@ -48,19 +48,15 @@ def train_epoch(dataloader, generator, discriminator, device, optimizer_gen, opt
         with torch.cuda.amp.autocast_mode.autocast():
             M = generator(X)
             M = torch.sigmoid(M)
-            Z = X * M
+            Z = M
             pavg = torch.mean(M)
             pmin = torch.min(M)
-            fake_losses = discriminator(torch.cat((X, Z.detach()), dim=1))
-            real_losses = discriminator(torch.cat((X, Y), dim=1))
-            d_real_loss = torch.zeros((1,), device=X.device)
-            d_fake_loss = torch.zeros((1,), device=X.device)
+            disc_fake = discriminator(torch.cat((X, Z.detach()), dim=1))
+            disc_real = discriminator(torch.cat((X, Y), dim=1))            
+            d_real_loss = -torch.mean(disc_real)
+            d_fake_loss = torch.mean(disc_fake)
 
-            for i in range(len(fake_losses)):
-                d_real_loss = d_real_loss + (bce_loss(real_losses[i], torch.ones_like(fake_losses[i])) / len(fake_losses))
-                d_fake_loss = d_fake_loss + (bce_loss(fake_losses[i], torch.zeros_like(fake_losses[i])) / len(fake_losses))
-
-            d_loss = ((d_real_loss + d_fake_loss) * 0.5)
+            d_loss = d_real_loss + d_fake_loss
             batch_disc_fake_loss = batch_disc_fake_loss + d_fake_loss
             batch_disc_real_loss = batch_disc_real_loss + d_real_loss
             batch_disc_loss = batch_disc_loss + d_loss
@@ -77,15 +73,11 @@ def train_epoch(dataloader, generator, discriminator, device, optimizer_gen, opt
         with torch.cuda.amp.autocast_mode.autocast():
             M = generator(X)
             M = torch.sigmoid(M)
-            Z = X * M
-            gan_losses = discriminator(torch.cat((X, Z.detach()), dim=1))            
-            g_gan_loss = torch.zeros((1,), device=X.device)
-
-            for i in range(len(gan_losses)):
-                g_gan_loss = g_gan_loss + (bce_loss(gan_losses[i], torch.ones_like(gan_losses[i])) / len(gan_losses))
-
+            Z = M
+            disc_fake = discriminator(torch.cat((X, Z.detach()), dim=1))
+            g_gan_loss = -torch.mean(disc_fake)
             g_l1_loss = F.l1_loss(Z, Y)
-            g_loss = g_gan_loss + lam * g_l1_loss
+            g_loss = g_gan_loss + l1_lambda * g_l1_loss
             grad_scaler_gen.scale(g_loss).backward()
 
         batch_gen_loss_l1 = batch_gen_loss_l1 + g_l1_loss
@@ -133,7 +125,7 @@ def validate_epoch(dataloader, model, device):
             with torch.cuda.amp.autocast_mode.autocast():
                 pred = torch.sigmoid(model(X))
 
-            l1_mag = crit(X[:, :2] * pred[:, :2], Y[:, :2])
+            l1_mag = crit(pred[:, :2], Y[:, :2])
             loss = l1_mag
 
             if torch.logical_or(loss.isnan(), loss.isinf()):
@@ -151,6 +143,7 @@ def main():
     p.add_argument('--sr', '-r', type=int, default=44100)
     p.add_argument('--hop_length', '-H', type=int, default=1024)
     p.add_argument('--n_fft', '-f', type=int, default=2048)
+    p.add_argument('--pretrained_model', type=str, default='./pretraining.4.62434.pth')#"/media/ben/internal-nvme-b/models/local.1.gen.pth")
     p.add_argument('--checkpoint_gen', type=str, default=None)#"/media/ben/internal-nvme-b/models/local.1.gen.pth")
     p.add_argument('--checkpoint_disc', type=str, default=None)#"/media/ben/internal-nvme-b/models/local.1.disc.pth")
     p.add_argument('--mixed_precision', type=str, default='true')
@@ -235,8 +228,15 @@ def main():
 
     device = torch.device('cpu')
     generator = FrameTransformerGenerator(in_channels=2, out_channels=2, channels=args.channels, expansion=args.expansion, n_fft=args.n_fft, dropout=args.dropout, num_heads=args.num_heads)
-    discriminator = FrameTransformerDiscriminator2(in_channels=4, channels=args.channels, expansion=args.expansion, n_fft=args.n_fft, dropout=args.dropout, num_heads=args.num_heads)
+    discriminator = FrameTransformerDiscriminator(in_channels=4, channels=args.channels, expansion=args.expansion, n_fft=args.n_fft, dropout=args.dropout, num_heads=args.num_heads)
     
+    if args.pretrained_model is not None:
+        generator.load_state_dict(torch.load(f'{args.pretrained_model}'))
+
+        gen2 = FrameTransformerGenerator(in_channels=2, out_channels=2, channels=args.channels, expansion=args.expansion, n_fft=args.n_fft, dropout=args.dropout, num_heads=args.num_heads)
+        gen2.load_state_dict(torch.load(f'{args.pretrained_model}'))
+        discriminator.from_generator(gen2)
+
     if torch.cuda.is_available() and args.gpu >= 0:
         device = torch.device('cuda:{}'.format(args.gpu))
         generator.to(device)
@@ -315,7 +315,7 @@ def main():
 
         print('# epoch {}'.format(epoch))
         train_dataloader.dataset.set_epoch(epoch)
-        train_loss_mag, disc_loss, step = train_epoch(train_dataloader, generator, discriminator, device, optimizer_gen=optimizer_gen, optimizer_disc=optimizer_disc, accumulation_steps=accum_steps, progress_bar=args.progress_bar, scheduler_gen=scheduler_gen, scheduler_disc=scheduler_disc, grad_scaler_gen=grad_scaler_gen, grad_scaler_disc=grad_scaler_disc, step=step, lam=args.lam)
+        train_loss_mag, disc_loss, step = train_epoch(train_dataloader, generator, discriminator, device, optimizer_gen=optimizer_gen, optimizer_disc=optimizer_disc, accumulation_steps=accum_steps, progress_bar=args.progress_bar, scheduler_gen=scheduler_gen, scheduler_disc=scheduler_disc, grad_scaler_gen=grad_scaler_gen, grad_scaler_disc=grad_scaler_disc, step=step, l1_lambda=args.lam)
         val_loss_mag = validate_epoch(val_dataloader, generator, device)
 
         print(
