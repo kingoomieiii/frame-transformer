@@ -49,8 +49,6 @@ class VoxAugDataset(torch.utils.data.Dataset):
         self.random.shuffle(self.vocal_list)
         self.random.shuffle(self.curr_list)
 
-        self.curr_list = self.curr_list[:128]
-
     def set_epoch(self, epoch):
         self.epoch = epoch
 

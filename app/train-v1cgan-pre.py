@@ -19,12 +19,9 @@ from torch.nn import functional as F
 
 def train_epoch(dataloader, model, device, optimizer, accumulation_steps, progress_bar, lr_warmup=None, grad_scaler=None, step=0):
     model.train()
-    gen_loss = 0
 
     mag_loss = 0
     batch_mag_loss = 0
-
-    batch_loss = 0
     batches = 0
     
     model.zero_grad()
@@ -276,8 +273,6 @@ def main():
             '  * training l1 loss = {:.6f}, validation loss = {:.6f}'
             .format(train_loss_mag, val_loss_mag)
         )
-
-        quit()
 
         if val_loss_mag < best_loss:
             best_loss = val_loss_mag
