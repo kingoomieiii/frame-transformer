@@ -232,7 +232,7 @@ def main():
         PolynomialDecayScheduler(optimizer_gen, target=args.lr_scheduler_decay_target, power=args.lr_scheduler_decay_power, num_decay_steps=args.decay_steps, start_step=args.warmup_steps, current_step=step, verbose_skip_steps=args.lr_verbosity)
     ])
 
-    _ = validate_epoch(val_dataloader, generator, device)
+    #_ = validate_epoch(val_dataloader, generator, device)
 
     best_loss = float('inf')
     while step < args.stages[-1]:
