@@ -3,7 +3,7 @@ import torch.nn.functional as F
 import numpy as np
 import librosa
 
-def apply_random_eq(M, P, min=0, max=2):
+def apply_random_eq(M, P, random, min=0, max=2):
     arr1 = F.interpolate(torch.rand((1, 1, 512,)) * (max - min) + min, size=(M.shape[1]), mode='linear', align_corners=True).squeeze(0).squeeze(0).numpy()
     arr2 = F.interpolate(torch.rand((1, 1, 256,)) * (max - min) + min, size=(M.shape[1]), mode='linear', align_corners=True).squeeze(0).squeeze(0).numpy()
     arr3 = F.interpolate(torch.rand((1, 1, 128,)) * (max - min) + min, size=(M.shape[1]), mode='linear', align_corners=True).squeeze(0).squeeze(0).numpy()
@@ -19,12 +19,15 @@ def apply_random_eq(M, P, min=0, max=2):
 
     return M * eq, P
 
-def apply_random_phase_noise(M, P, strength=0.1):
+def apply_random_phase_noise(M, P, random, strength=0.1):
     random_phase = np.random.uniform(-np.pi, np.pi, size=P.shape)
-
     return M, P + strength * random_phase
 
-def apply_stereo_spatialization(M, P, c, alpha=1):
+def apply_random_volume(M, P, random, gain=0.1):
+    a = random.uniform(-gain, gain)
+    return M + (M * a), P
+
+def apply_stereo_spatialization(M, P, random, c, alpha=1):
     left, right = M[0] / c, M[1] / c
     mid = (left + right) * 0.5
     left = alpha * left + (1 - alpha) * mid 
@@ -32,7 +35,7 @@ def apply_stereo_spatialization(M, P, c, alpha=1):
 
     return np.clip(np.stack([left, right], axis=0), 0, 1) * c, P
 
-def apply_multiplicative_noise(M, P, loc=1, scale=0.1):
+def apply_multiplicative_noise(M, P, random, loc=1, scale=0.1):
     eps = np.random.normal(loc, scale, size=M.shape)
 
     return M * eps, P
@@ -43,21 +46,21 @@ def apply_additive_noise(M, P, c, loc=0, scale=0.1):
 
     return np.clip(X + eps, 0, 1) * c, P
 
-def apply_dynamic_range_mod(M, P, c, threshold=0.5, gain=0.1):
+def apply_dynamic_range_mod(M, P, random, c, threshold=0.5, gain=0.1):
     M = M / c
     
-    if np.random.uniform() < 0.5:
-        if np.random.uniform() < 0.5:
+    if random.uniform(0,1) < 0.5:
+        if random.uniform(0,1) < 0.5:
             return np.clip(np.where(M > threshold, M - (M * gain), M), 0, 1) * c, P
         else:
             return np.clip(np.where(M < threshold, M + (M * gain), M), 0, 1) * c, P
     else:
-        if np.random.uniform() < 0.5:
+        if random.uniform(0,1) < 0.5:
             return np.clip(np.where(M > threshold, M + (M * gain), M), 0, 1) * c, P
         else:
             return np.clip(np.where(M < threshold, M - (M * gain), M), 0, 1) * c, P
     
-def apply_channel_drop(M, P, channel, alpha=1):
+def apply_channel_drop(M, P, random, channel, alpha=1):
     H = np.copy(M)
 
     if channel == 2:
@@ -67,26 +70,26 @@ def apply_channel_drop(M, P, channel, alpha=1):
         
     return alpha * H + (1 - alpha) * M, P
 
-def apply_time_stretch(M, target_size):
+def apply_time_stretch(M, random, target_size):
     if M.shape[2] > target_size:
-        size = np.random.randint(target_size // 16, M.shape[2])
-        start = np.random.randint(0, M.shape[2] - size)
+        size = random.randint(target_size // 16, M.shape[2])
+        start = random.randint(0, M.shape[2] - size)
         cropped = M[:, :, start:start+size]
         H = M[:, :, :target_size]
         H.real = F.interpolate(torch.from_numpy(cropped.real).unsqueeze(0), size=(M.shape[1], target_size), mode='bilinear', align_corners=True).squeeze(0).numpy()
         H.imag = F.interpolate(torch.from_numpy(cropped.imag).unsqueeze(0), size=(M.shape[1], target_size), mode='bilinear', align_corners=True).squeeze(0).numpy()
     else:
-        if np.random.uniform() < 0.5:
-            padded = np.pad(M, ((0, 0), (0, 0), (np.random.randint(0, target_size // 4), (target_size - M.shape[2]) + np.random.randint(0, target_size // 4))))
-            size = np.random.randint(target_size, padded.shape[2])
-            start = np.random.randint(0, padded.shape[2] - size)
+        if random.uniform(0,1) < 0.5:
+            padded = np.pad(M, ((0, 0), (0, 0), (random.randint(0, target_size // 4), (target_size - M.shape[2]) + random.randint(0, target_size // 4))))
+            size = random.randint(target_size, padded.shape[2])
+            start = random.randint(0, padded.shape[2] - size)
             cropped = padded[:, :, start:start+size]
             H = padded[:, :, :target_size]
             H.real = F.interpolate(torch.from_numpy(cropped.real).unsqueeze(0), size=(padded.shape[1], target_size), mode='bilinear', align_corners=True).squeeze(0).numpy()
             H.imag = F.interpolate(torch.from_numpy(cropped.imag).unsqueeze(0), size=(padded.shape[1], target_size), mode='bilinear', align_corners=True).squeeze(0).numpy()
         else: 
-            size = np.random.randint(target_size // 8, target_size)
-            start = np.random.randint(0, M.shape[2] - size)
+            size = random.randint(target_size // 8, target_size)
+            start = random.randint(0, M.shape[2] - size)
             cropped = M[:, :, start:start+size]
             H = M[:, :, :target_size]
             H.real = F.interpolate(torch.from_numpy(cropped.real).unsqueeze(0), size=(M.shape[1], target_size), mode='bilinear', align_corners=True).squeeze(0).numpy()
@@ -94,7 +97,7 @@ def apply_time_stretch(M, target_size):
 
     return H
 
-def apply_harmonic_distortion(M, P, c, num_harmonics=2, gain=0.1, n_fft=2048, hop_length=1024):
+def apply_harmonic_distortion(M, P, random, c, num_harmonics=2, gain=0.1, n_fft=2048, hop_length=1024):
     left_M = M[0]
     right_M = M[1]
     left_P = P[0]
@@ -125,7 +128,7 @@ def apply_harmonic_distortion(M, P, c, num_harmonics=2, gain=0.1, n_fft=2048, ho
 
     return np.clip(np.array([left_M / c, right_M / c]) * c, 0, 1), np.array([np.angle(left_X), np.angle(right_X)])
 
-def apply_pitch_shift(M, P, pitch_shift):
+def apply_pitch_shift(M, P, random, pitch_shift):
     _, num_bins, num_frames = M.shape
     scaling_factor = 2 ** (pitch_shift / 12)
 
@@ -154,7 +157,7 @@ def apply_pitch_shift(M, P, pitch_shift):
 
     return np.array([H_L, H_R]), np.array([G_L, G_R])
 
-def apply_emphasis(M, P, coef):
+def apply_emphasis(M, P, random, coef):
     left_M = M[0]
     right_M = M[1]
     
@@ -165,7 +168,7 @@ def apply_emphasis(M, P, coef):
 
     return np.array([left_M, right_M]), P
 
-def apply_deemphasis(M, P, coef):
+def apply_deemphasis(M, P, random, coef):
     left_M = M[0]
     right_M = M[1]
     
@@ -176,60 +179,60 @@ def apply_deemphasis(M, P, coef):
 
     return np.array([left_M, right_M]), P
 
-def apply_masking(M, P, c, num_masks=1, max_mask_percentage=0.2, alpha=1):
+def apply_masking(M, P, random, c, num_masks=1, max_mask_percentage=0.2, alpha=1):
     H = np.copy(M) / c
     N = np.random.uniform(size=H.shape)
 
     for _ in range(num_masks):
-        mask_percentage = np.random.uniform(0, max_mask_percentage)
+        mask_percentage = random.uniform(0, max_mask_percentage)
         mask_height = int(M.shape[1] * mask_percentage)
-        mask_start_h = np.random.randint(0, M.shape[1] - mask_height)
+        mask_start_h = random.randint(0, M.shape[1] - mask_height)
         mask_width = int(M.shape[2] * mask_percentage)
-        mask_start_w = np.random.randint(0, M.shape[2] - mask_width)
+        mask_start_w = random.randint(0, M.shape[2] - mask_width)
         H[:, mask_start_h:mask_start_h+mask_height, mask_start_w:mask_start_w+mask_width] = (alpha * N[:, mask_start_h:mask_start_h+mask_height, mask_start_w:mask_start_w+mask_width]) + (1 - alpha) * H[:, mask_start_h:mask_start_h+mask_height, mask_start_w:mask_start_w+mask_width]
 
     return H * c, P
 
-def apply_time_masking(M, P, num_masks=1, max_mask_percentage=0.2, alpha=1):
+def apply_time_masking(M, P, random, num_masks=1, max_mask_percentage=0.2, alpha=1):
     H = np.copy(M)
 
     for _ in range(num_masks):
-        mask_percentage = np.random.uniform(0, max_mask_percentage)
+        mask_percentage = random.uniform(0, max_mask_percentage)
         mask_width = int(M.shape[2] * mask_percentage)
-        mask_start = np.random.randint(0, M.shape[2] - mask_width)
+        mask_start = random.randint(0, M.shape[2] - mask_width)
         H[:, :, mask_start:mask_start+mask_width] = 0
 
     return alpha * H + (1 - alpha) * M, P
         
-def apply_time_masking2(M, P, num_masks=1, max_mask_percentage=0.2, alpha=1):
+def apply_time_masking2(M, P, random, num_masks=1, max_mask_percentage=0.2, alpha=1):
     H = np.copy(M)
 
     for _ in range(num_masks):
-        mask_percentage = np.random.uniform(0, max_mask_percentage)
+        mask_percentage = random.uniform(0, max_mask_percentage)
         mask_width = int(M.shape[2] * mask_percentage)
-        mask_start = np.random.randint(0, M.shape[2] - mask_width)
+        mask_start = random.randint(0, M.shape[2] - mask_width)
         H[:, :, mask_start:mask_start+mask_width] = H[:, :, mask_start:mask_start+mask_width] * (1 - alpha)
 
     return H, P
 
-def apply_frequency_masking(M, P, num_masks=1, max_mask_percentage=0.2, alpha=1):
+def apply_frequency_masking(M, P, random, num_masks=1, max_mask_percentage=0.2, alpha=1):
     H = np.copy(M)
 
     for _ in range(num_masks):
-        mask_percentage = np.random.uniform(0, max_mask_percentage)
+        mask_percentage = random.uniform(0, max_mask_percentage)
         mask_height = int(M.shape[1] * mask_percentage)
-        mask_start = np.random.randint(0, M.shape[1] - mask_height)
+        mask_start = random.randint(0, M.shape[1] - mask_height)
         H[:, mask_start:mask_start+mask_height, :] = 0
 
     return alpha * H + (1 - alpha) * M, P
 
-def apply_frequency_masking2(M, P, num_masks=1, max_mask_percentage=0.2, alpha=1):
+def apply_frequency_masking2(M, P, random, num_masks=1, max_mask_percentage=0.2, alpha=1):
     H = np.copy(M)
 
     for _ in range(num_masks):
-        mask_percentage = np.random.uniform(0, max_mask_percentage)
+        mask_percentage = random.uniform(0, max_mask_percentage)
         mask_height = int(M.shape[1] * mask_percentage)
-        mask_start = np.random.randint(0, M.shape[1] - mask_height)
+        mask_start = random.randint(0, M.shape[1] - mask_height)
         H[:, mask_start:mask_start+mask_height, :] = H[:, mask_start:mask_start+mask_height, :] * (1 - alpha)
 
     return H, P

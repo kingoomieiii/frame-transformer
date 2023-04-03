@@ -4,7 +4,7 @@ import numpy as np
 import torch
 import torch.utils.data
 import torch.nn.functional as F
-from libft2gan.dataset_utils import apply_channel_drop, apply_dynamic_range_mod, apply_multiplicative_noise, apply_random_eq, apply_stereo_spatialization, apply_time_stretch, apply_random_phase_noise, apply_time_masking, apply_frequency_masking, apply_time_masking2, apply_frequency_masking2, apply_emphasis, apply_deemphasis, apply_pitch_shift, apply_harmonic_distortion
+from libft2gan.dataset_utils import apply_channel_drop, apply_dynamic_range_mod, apply_multiplicative_noise, apply_random_eq, apply_stereo_spatialization, apply_time_stretch, apply_random_phase_noise, apply_time_masking, apply_frequency_masking, apply_time_masking2, apply_frequency_masking2, apply_emphasis, apply_deemphasis, apply_pitch_shift, apply_harmonic_distortion, apply_random_volume
 import librosa
 
 class VoxAugDataset(torch.utils.data.Dataset):
@@ -22,6 +22,8 @@ class VoxAugDataset(torch.utils.data.Dataset):
         self.n_fft = n_fft
         self.hop_length = hop_length
         self.cropsize = cropsize
+
+        self.random = random.Random(seed)
 
         for mp in instrumental_lib:
             mixes = [os.path.join(mp, f) for f in os.listdir(mp) if os.path.isfile(os.path.join(mp, f))]
@@ -41,8 +43,8 @@ class VoxAugDataset(torch.utils.data.Dataset):
         
         self.vocal_list.sort(key=key)
         self.curr_list.sort(key=key)
-        random.Random(seed).shuffle(self.vocal_list)
-        random.Random(seed+1).shuffle(self.curr_list)
+        self.random.shuffle(self.vocal_list)
+        self.random.shuffle(self.curr_list)
 
         self.curr_list = self.curr_list[:128]
 
@@ -57,80 +59,75 @@ class VoxAugDataset(torch.utils.data.Dataset):
         vdata = np.load(path)
         V, Vc = vdata['X'], vdata['c']
 
-        if np.random.uniform() < 0.5:
-            V = apply_time_stretch(V, self.cropsize)
+        if self.random.uniform(0,1) < 0.5:
+            V = apply_time_stretch(V, self.random, self.cropsize)
         elif V.shape[2] > self.cropsize:
-            start = np.random.randint(0, V.shape[2] - self.cropsize)
+            start = self.random.randint(0, V.shape[2] - self.cropsize)
             V = V[:, :, start:start+self.cropsize]
 
         P = np.angle(V)
         M = np.abs(V)
 
         augmentations = [
-            (0.04, apply_channel_drop, { "channel": np.random.randint(1,3), "alpha": np.random.uniform() }),
-            (0.2, apply_dynamic_range_mod, { "c": Vc, "threshold": np.random.uniform(), "gain": np.random.uniform(), }),
-            (0.2, apply_multiplicative_noise, { "loc": 1, "scale": np.random.uniform(), }),
-            (0.2, apply_random_eq, { "min": np.random.uniform(0, 1), "max": np.random.uniform(1, 2), }),
-            (0.2, apply_stereo_spatialization, { "c": Vc, "alpha": np.random.uniform(0, 2) }),
-            (0.2, apply_random_phase_noise, { "strength": np.random.uniform(0, 0.5)}),
-            (0.2, apply_harmonic_distortion, { "c": Vc, "num_harmonics": np.random.randint(1,4), "gain": np.random.uniform(0, 0.1), "hop_length": self.hop_length, "n_fft": self.n_fft }),
-            (0.2, apply_pitch_shift, { "pitch_shift": np.random.uniform(-12, 12) }),
-            (0.2, apply_emphasis, { "coef": np.random.uniform(0.9, 1) }),
-            (0.2, apply_deemphasis, { "coef": np.random.uniform(0.9, 1) }),
+            (0.04, apply_channel_drop, { "channel": self.random.randint(1,3), "alpha": self.random.uniform(0,1) }),
+            (0.2, apply_dynamic_range_mod, { "c": Vc, "threshold": self.random.uniform(0,1), "gain": self.random.uniform(0,1), }),
+            (0.2, apply_multiplicative_noise, { "loc": 1, "scale": self.random.uniform(0,1), }),
+            (0.2, apply_random_eq, { "min": self.random.uniform(0, 1), "max": self.random.uniform(1, 2), }),
+            (0.2, apply_stereo_spatialization, { "c": Vc, "alpha": self.random.uniform(0, 2) }),
+            (0.2, apply_random_phase_noise, { "strength": self.random.uniform(0, 0.5)}),
+            (0.2, apply_harmonic_distortion, { "c": Vc, "num_harmonics": self.random.randint(1,4), "gain": self.random.uniform(0, 0.1), "hop_length": self.hop_length, "n_fft": self.n_fft }),
+            (0.2, apply_pitch_shift, { "pitch_shift": self.random.uniform(-12, 12) }),
+            (0.2, apply_emphasis, { "coef": self.random.uniform(0.9, 1) }),
+            (0.2, apply_deemphasis, { "coef": self.random.uniform(0.9, 1) }),
+            (0.2, apply_random_volume, { "gain": self.random.uniform(0, 0.25) })
         ]
 
         random.shuffle(augmentations)
 
         for p, aug, args in augmentations:
-            if np.random.uniform() < p:
-                M, P = aug(M, P, **args)
+            if self.random.uniform(0,1) < p:
+                M, P = aug(M, P, self.random, **args)
 
         V = M * np.exp(1.j * P)
 
-        if np.random.uniform() < 0.5:
+        if self.random.uniform(0,1) < 0.5:
             V = V[::-1]
 
         return V
 
     def _augment_instruments(self, X, c):
         if X.shape[2] > self.cropsize:
-            start = np.random.randint(0, X.shape[2] - self.cropsize)
+            start = self.random.randint(0, X.shape[2] - self.cropsize)
             X = X[:, :, start:start+self.cropsize]
 
         P = np.angle(X)
         M = np.abs(X)
 
         augmentations = [
-            (0.02, apply_channel_drop, { "channel": np.random.randint(1,3), "alpha": np.random.uniform() }),
-            (0.2, apply_dynamic_range_mod, { "c": c, "threshold": np.random.uniform(), "gain": np.random.uniform(), }),
-            (0.2, apply_multiplicative_noise, { "loc": 1, "scale": np.random.uniform(0, 0.5), }),
-            (0.2, apply_random_eq, { "min": np.random.uniform(0.5, 1), "max": np.random.uniform(1, 1.5), }),
-            (0.2, apply_stereo_spatialization, { "c": c, "alpha": np.random.uniform(0.5, 1.5) }),
-            (0.2, apply_random_phase_noise, { "strength": np.random.uniform(0, 0.25)}),
-            (0.2, apply_harmonic_distortion, { "c": c, "num_harmonics": np.random.randint(1,4), "gain": np.random.uniform(0, 0.1), "hop_length": self.hop_length, "n_fft": self.n_fft }),
-            (0.2, apply_pitch_shift, { "pitch_shift": np.random.uniform(-6, 6) }),
-            (0.2, apply_emphasis, { "coef": np.random.uniform(0.9, 1) }),
-            (0.2, apply_deemphasis, { "coef": np.random.uniform(0.9, 1) }),
+            (0.02, apply_channel_drop, { "channel": self.random.randint(1,3), "alpha": self.random.uniform(0,1) }),
+            (0.2, apply_dynamic_range_mod, { "c": c, "threshold": self.random.uniform(0,1), "gain": self.random.uniform(0,1), }),
+            (0.2, apply_multiplicative_noise, { "loc": 1, "scale": self.random.uniform(0, 0.5), }),
+            (0.2, apply_random_eq, { "min": self.random.uniform(0.5, 1), "max": self.random.uniform(1, 1.5), }),
+            (0.2, apply_stereo_spatialization, { "c": c, "alpha": self.random.uniform(0.5, 1.5) }),
+            (0.2, apply_random_phase_noise, { "strength": self.random.uniform(0, 0.25)}),
+            (0.2, apply_harmonic_distortion, { "c": c, "num_harmonics": self.random.randint(1,4), "gain": self.random.uniform(0, 0.1), "hop_length": self.hop_length, "n_fft": self.n_fft }),
+            (0.2, apply_pitch_shift, { "pitch_shift": self.random.uniform(-6, 6) }),
+            (0.2, apply_emphasis, { "coef": self.random.uniform(0.9, 1) }),
+            (0.2, apply_deemphasis, { "coef": self.random.uniform(0.9, 1) }),
         ]
 
         random.shuffle(augmentations)
 
         for p, aug, args in augmentations:
-            if np.random.uniform() < p:
-                M, P = aug(M, P, **args)
+            if self.random.uniform(0,1) < p:
+                M, P = aug(M, P, self.random, **args)
 
         X = M * np.exp(1.j * P)
 
-        if np.random.uniform() < 0.5:
+        if self.random.uniform(0,1) < 0.5:
             X = X[::-1]
 
         return X
-    
-    def _get_wave(self, X, c):
-        left_s = np.pad(librosa.istft((np.abs(X[0]) / c) + np.exp(1.j * np.angle(X[0])), hop_length=self.hop_length), ((0, self.hop_length)))
-        right_s = np.pad(librosa.istft((np.abs(X[1]) / c) + np.exp(1.j * np.angle(X[1])), hop_length=self.hop_length), ((0, self.hop_length)))
-        S = np.expand_dims(np.stack([left_s, right_s], axis=0), axis=2).reshape((2, left_s.shape[0] // X.shape[2], -1))
-        return S
     
     def __getitem__(self, idx):
         path = str(self.curr_list[idx % len(self.curr_list)])
@@ -144,8 +141,10 @@ class VoxAugDataset(torch.utils.data.Dataset):
         if not self.is_validation:
             Y = self._augment_instruments(Y, c)
             V = self._get_vocals(idx)
-            X = Y + V
-            c = np.max([c, np.abs(X).max()])
+            Y_norm = Y / c
+            V_norm = V / c
+            X = Y_norm + V_norm
+            c = np.abs(X).max()
 
         X = np.clip(np.abs(X) / c, 0, 1)
         Y = np.clip(np.abs(Y) / c, 0, 1)

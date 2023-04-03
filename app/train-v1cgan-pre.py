@@ -277,6 +277,8 @@ def main():
             .format(train_loss_mag, val_loss_mag)
         )
 
+        quit()
+
         if val_loss_mag < best_loss:
             best_loss = val_loss_mag
             print('  * best validation loss')
