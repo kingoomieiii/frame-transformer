@@ -168,6 +168,9 @@ def main():
     np.random.seed(args.seed + 1)
     torch.manual_seed(args.seed + 1)
 
+    if args.distributed:
+        torch.distributed.init_process_group(backend='nccl')
+
     train_dataset = VoxAugDataset(
         instrumental_lib=args.instrumental_lib,
         pretraining_lib=args.pretraining_lib,
