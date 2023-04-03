@@ -1,4 +1,4 @@
-export MASTER_ADDR="10.0.0.34"
+export MASTER_ADDR="10.42.0.1"
 export MASTER_PORT=1234
 
 torchrun --nproc_per_node=1 --nnodes=2 --node_rank=0 --master_addr="${MASTER_ADDR}" --master_port="${MASTER_PORT}" \
