@@ -63,14 +63,14 @@ class VoxAugDataset(torch.utils.data.Dataset):
         if self.random.uniform(0,1) < 0.5:
             V = apply_time_stretch(V, self.random, self.cropsize)
         elif V.shape[2] > self.cropsize:
-            start = self.random.randint(0, V.shape[2] - self.cropsize)
+            start = self.random.randint(0, V.shape[2] - self.cropsize - 1)
             V = V[:, :, start:start+self.cropsize]
 
         P = np.angle(V)
         M = np.abs(V)
 
         augmentations = [
-            (0.02, apply_channel_drop, { "channel": self.random.randint(1,3), "alpha": self.random.uniform(0,1) }),
+            (0.02, apply_channel_drop, { "channel": self.random.randint(0,2), "alpha": self.random.uniform(0,1) }),
             (0.2, apply_pitch_shift, { "pitch_shift": self.random.uniform(-12, 12) }),
             (0.2, apply_random_volume, { "gain": self.random.uniform(0, 0.25) })
         ]
@@ -90,7 +90,7 @@ class VoxAugDataset(torch.utils.data.Dataset):
 
     def _augment_mix(self, X, c):
         if X.shape[2] > self.cropsize:
-            start = self.random.randint(0, X.shape[2] - self.cropsize)
+            start = self.random.randint(0, X.shape[2] - self.cropsize - 1)
             X = X[:, :, start:start+self.cropsize]
 
         P = np.angle(X)
@@ -101,7 +101,7 @@ class VoxAugDataset(torch.utils.data.Dataset):
             (0.25, apply_multiplicative_noise, { "loc": 1, "scale": self.random.uniform(0, 0.5), }),
             (0.25, apply_random_eq, { "min": self.random.uniform(0, 1), "max": self.random.uniform(1, 2), }),
             (0.25, apply_stereo_spatialization, { "c": c, "alpha": self.random.uniform(0, 1) }),            
-            (0.25, apply_masking, { "c": c, "num_masks": self.random.randint(0, 6), "max_mask_percentage": self.random.uniform(0, 0.2), "alpha": self.random.uniform(0,1) }),
+            (0.25, apply_masking, { "c": c, "num_masks": self.random.randint(0, 5), "max_mask_percentage": self.random.uniform(0, 0.2), "alpha": self.random.uniform(0,1) }),
             (0.25, apply_random_phase_noise, { "strength": self.random.uniform(0, 0.5)}),
             (0.25, apply_emphasis, { "coef": self.random.uniform(0.75, 1) }),
             (0.25, apply_deemphasis, { "coef": self.random.uniform(0.75, 1) }),
@@ -122,14 +122,14 @@ class VoxAugDataset(torch.utils.data.Dataset):
 
     def _get_instruments(self, X, c):
         if X.shape[2] > self.cropsize:
-            start = self.random.randint(0, X.shape[2] - self.cropsize)
+            start = self.random.randint(0, X.shape[2] - self.cropsize - 1)
             X = X[:, :, start:start+self.cropsize]
 
         P = np.angle(X)
         M = np.abs(X)
 
         augmentations = [
-            (0.01, apply_channel_drop, { "channel": self.random.randint(1,3), "alpha": self.random.uniform(0,1) })
+            (0.01, apply_channel_drop, { "channel": self.random.randint(0,2), "alpha": self.random.uniform(0,1) })
         ]
 
         random.shuffle(augmentations)
@@ -153,14 +153,14 @@ class VoxAugDataset(torch.utils.data.Dataset):
         if self.random.uniform(0,1) < 0.5:
             V = apply_time_stretch(V, self.random, self.cropsize)
         elif V.shape[2] > self.cropsize:
-            start = self.random.randint(0, V.shape[2] - self.cropsize)
+            start = self.random.randint(0, V.shape[2] - self.cropsize - 1)
             V = V[:, :, start:start+self.cropsize]
 
         P = np.angle(V)
         M = np.abs(V)
 
         augmentations = [
-            (0.02, apply_channel_drop, { "channel": self.random.randint(1,3), "alpha": self.random.uniform(0,1) }),
+            (0.02, apply_channel_drop, { "channel": self.random.randint(0,2), "alpha": self.random.uniform(0,1) }),
             (0.2, apply_pitch_shift, { "pitch_shift": self.random.uniform(-12, 12) }),
         ]
 
