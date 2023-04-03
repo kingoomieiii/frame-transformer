@@ -4,12 +4,11 @@ import os
 import random
 import numpy as np
 import torch
+import torch.distributed
 import torch.nn as nn
 import torch.utils.data
 import wandb
 import libft2.signal_loss as signal_loss
-
-from torch.optim.swa_utils import AveragedModel
 
 from tqdm import tqdm
 

@@ -1,0 +1,1 @@
+sudo docker build -f dockerfile -t local_frame_transformer:latest ./
