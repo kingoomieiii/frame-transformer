@@ -141,7 +141,7 @@ def main():
     p.add_argument('--gpu', '-g', type=int, default=-1)
     p.add_argument('--optimizer', type=str.lower, choices=['adam', 'adamw', 'sgd', 'radam', 'rmsprop'], default='adam')
     p.add_argument('--prefetch_factor', type=int, default=4)
-    p.add_argument('--num_workers', '-w', type=int, default=2)
+    p.add_argument('--num_workers', '-w', type=int, default=8)
     p.add_argument('--epoch', '-E', type=int, default=40)
     p.add_argument('--progress_bar', '-pb', type=str, default='true')
     p.add_argument('--save_all', type=str, default='true')
@@ -239,6 +239,8 @@ def main():
 
     best_loss = float('inf')
     while step < args.stages[-1]:
+        train_sampler.set_epoch(epoch)
+        
         if best_loss == float('inf') or step >= args.stages[stage]:
             for idx in range(len(args.stages)):
                 if step >= args.stages[idx]:
@@ -264,7 +266,8 @@ def main():
                 shuffle=False if args.distributed else True,
                 sampler=train_sampler if args.distributed else None,
                 num_workers=args.num_workers,
-                prefetch_factor=args.prefetch_factor
+                prefetch_factor=args.prefetch_factor,
+                pin_memory=True
             )
 
         print('# epoch {}'.format(epoch))
