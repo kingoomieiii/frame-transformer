@@ -17,7 +17,7 @@ from libft2gan.lr_scheduler_polynomial_decay import PolynomialDecayScheduler
 
 from torch.nn import functional as F
 
-def train_epoch(dataloader, model, device, optimizer, accumulation_steps, progress_bar, lr_warmup=None, grad_scaler=None, step=0):
+def train_epoch(dataloader, model, device, optimizer, accumulation_steps, progress_bar, lr_warmup=None, grad_scaler=None, step=0, max_bin=0):
     model.train()
 
     mag_loss = 0
@@ -28,8 +28,8 @@ def train_epoch(dataloader, model, device, optimizer, accumulation_steps, progre
 
     pbar = tqdm(dataloader) if progress_bar else dataloader
     for itr, (X, Y) in enumerate(pbar):
-        X = X.to(device)[:, :, :model.max_bin]
-        Y = Y.to(device)[:, :, :model.max_bin]
+        X = X.to(device)[:, :, :max_bin]
+        Y = Y.to(device)[:, :, :max_bin]
 
         with torch.cuda.amp.autocast_mode.autocast(enabled=grad_scaler is not None):
             pred = model(X)
@@ -75,7 +75,7 @@ def train_epoch(dataloader, model, device, optimizer, accumulation_steps, progre
 
     return mag_loss / batches, step
 
-def validate_epoch(dataloader, model, device):
+def validate_epoch(dataloader, model, device, max_bin=0):
     model.train()
     crit = nn.L1Loss()
 
@@ -83,8 +83,8 @@ def validate_epoch(dataloader, model, device):
 
     with torch.no_grad():
         for X, Y in dataloader:
-            X = X.to(device)[:, :, :model.max_bin]
-            Y = Y.to(device)[:, :, :model.max_bin]
+            X = X.to(device)[:, :, :max_bin]
+            Y = Y.to(device)[:, :, :max_bin]
 
             with torch.cuda.amp.autocast_mode.autocast():
                 pred = torch.sigmoid(model(X))
@@ -129,7 +129,7 @@ def main():
     p.add_argument('--lr_scheduler_decay_power', type=float, default=0.1)
     p.add_argument('--lr_verbosity', type=int, default=1000)
     
-    p.add_argument('--channels', type=int, default=16)
+    p.add_argument('--channels', type=int, default=8)
     p.add_argument('--expansion', type=int, default=10240)
     p.add_argument('--num_heads', type=int, default=8)
     p.add_argument('--dropout', type=float, default=0.1)
@@ -235,7 +235,7 @@ def main():
         PolynomialDecayScheduler(optimizer_gen, target=args.lr_scheduler_decay_target, power=args.lr_scheduler_decay_power, num_decay_steps=args.decay_steps, start_step=args.warmup_steps, current_step=step, verbose_skip_steps=args.lr_verbosity)
     ])
 
-    #_ = validate_epoch(val_dataloader, generator, device)
+    #_ = validate_epoch(val_dataloader, generator, device, max_bin=args.n_fft // 2)
 
     best_loss = float('inf')
     while step < args.stages[-1]:
@@ -269,8 +269,8 @@ def main():
 
         print('# epoch {}'.format(epoch))
         train_dataloader.dataset.set_epoch(epoch)
-        train_loss_mag, step = train_epoch(train_dataloader, generator, device, optimizer=optimizer_gen, accumulation_steps=accum_steps, progress_bar=args.progress_bar, lr_warmup=scheduler_gen, grad_scaler=grad_scaler_gen, step=step)
-        val_loss_mag = validate_epoch(val_dataloader, generator, device)
+        train_loss_mag, step = train_epoch(train_dataloader, generator, device, optimizer=optimizer_gen, accumulation_steps=accum_steps, progress_bar=args.progress_bar, lr_warmup=scheduler_gen, grad_scaler=grad_scaler_gen, step=step, max_bin=args.n_fft // 2)
+        val_loss_mag = validate_epoch(val_dataloader, generator, device, max_bin=args.n_fft // 2)
 
         print(
             '  * training l1 loss = {:.6f}, validation loss = {:.6f}'

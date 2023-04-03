@@ -197,9 +197,8 @@ class VoxAugDataset(torch.utils.data.Dataset):
                 V_norm = V / Vc
 
                 Y = Y_norm if self.random.uniform(0,1) < 0.4 else Y_norm + V_norm
-                c = np.abs(Y).max()
 
-            X = Y if self.random.uniform(0,1) < 0.08 else self._augment_mix(Y, c)
+            X = Y if self.random.uniform(0,1) < 0.08 else self._augment_mix(Y, 1)
 
         X = np.clip(np.abs(X), 0, 1)
         Y = np.clip(np.abs(Y), 0, 1)
