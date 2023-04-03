@@ -31,12 +31,12 @@ def train_epoch(dataloader, model, device, optimizer, accumulation_steps, progre
         X = X.to(device)[:, :, :max_bin]
         Y = Y.to(device)[:, :, :max_bin]
 
-        #with torch.cuda.amp.autocast_mode.autocast(enabled=grad_scaler is not None):
-        pred = model(X)
-        pred = torch.sigmoid(pred)
-        pmax = torch.max(pred)
-        pavg = torch.mean(pred)
-        pmin = torch.min(pred)
+        with torch.cuda.amp.autocast_mode.autocast(enabled=grad_scaler is not None):
+            pred = model(X)
+            pred = torch.sigmoid(pred)
+            pmax = torch.max(pred)
+            pavg = torch.mean(pred)
+            pmin = torch.min(pred)
             
         mae_loss = F.l1_loss(pred, Y) / accumulation_steps        
         accum_loss = mae_loss
@@ -46,22 +46,22 @@ def train_epoch(dataloader, model, device, optimizer, accumulation_steps, progre
             print('nan training loss; aborting')
             quit()
 
-        # if grad_scaler is not None:
-        #     grad_scaler.scale(accum_loss).backward()
-        # else:
-        accum_loss.backward()
+        if grad_scaler is not None:
+            grad_scaler.scale(accum_loss).backward()
+        else:
+            accum_loss.backward()
 
         if (itr + 1) % accumulation_steps == 0:
             if progress_bar:
                 pbar.set_description(f'{step}: {str(batch_mag_loss.item())}|{pavg.item()}|{pmin.item()}')
 
-            # if grad_scaler is not None:
-            #     grad_scaler.unscale_(optimizer)
-            #     torch.nn.utils.clip_grad.clip_grad_norm_(model.parameters(), 0.5)
-            #     grad_scaler.step(optimizer)
-            #     grad_scaler.update()
-            # else:
-            optimizer.step()
+            if grad_scaler is not None:
+                grad_scaler.unscale_(optimizer)
+                torch.nn.utils.clip_grad.clip_grad_norm_(model.parameters(), 0.5)
+                grad_scaler.step(optimizer)
+                grad_scaler.update()
+            else:
+                optimizer.step()
 
             step = step + 1
             
