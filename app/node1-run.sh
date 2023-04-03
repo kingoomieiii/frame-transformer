@@ -1,7 +1,7 @@
 export MASTER_ADDR="10.0.0.34"
 export MASTER_PORT=1234
 
-python3 -m torch.distributed.launch --nproc_per_node=1 --nnodes=2 --node_rank=1 --master_addr="${MASTER_ADDR}" --master_port="${MASTER_PORT}" \
+torchrun --nproc_per_node=1 --nnodes=2 --node_rank=1 --master_addr="${MASTER_ADDR}" --master_port="${MASTER_PORT}" \
             train-v1cgan-pre.py \
                 --gpu 0 \
                 --batch_sizes 8 \
