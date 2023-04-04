@@ -53,7 +53,7 @@ class FrameTransformerGenerator(nn.Module):
         self.vout_transform = ConvolutionalTransformerEncoder(channels * 16, dropout=dropout, expansion=4, num_heads=num_heads)
         self.vout_conv = nn.Conv2d(channels * 16, out_channels, 1)
         
-        self.dec8 = FrameDecoder(channels * 16 + num_attention_maps, channels * 14, self.max_bin // 128, dropout=0.5)
+        self.dec8 = FrameDecoder(channels * 16 + num_attention_maps + out_channels, channels * 14, self.max_bin // 128, dropout=0.5)
         self.dec8_transformer = FrameTransformerDecoder(channels * 14, num_attention_maps, self.max_bin // 128, dropout=dropout, expansion=expansion, num_heads=num_heads, has_prev_skip=False)
 
         self.dec7 = FrameDecoder(channels * 14 + num_attention_maps + num_attention_maps, channels * 12, self.max_bin // 64, dropout=0.5)
@@ -113,6 +113,7 @@ class FrameTransformerGenerator(nn.Module):
         vout = self.vout_norm(e9)
         vout, _ = self.vout_transform(e9)
         vout = self.vout_conv(vout)
+        e9 = torch.cat((e9, vout), dim=1)
             
         h = self.dec8(e9, e8)
         h, pqk1, pqk2 = self.dec8_transformer(h, a8, prev_qk1=None, prev_qk2=None, skip_qk=qk8)
