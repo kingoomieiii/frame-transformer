@@ -99,8 +99,9 @@ class VoxAugDataset(torch.utils.data.Dataset):
         augmentations = [
             (0.25, apply_dynamic_range_mod, { "c": c, "threshold": self.random.uniform(0,1), "gain": self.random.uniform(0,1), }),
             (0.25, apply_multiplicative_noise, { "loc": 1, "scale": self.random.uniform(0, 0.5), }),
-            (0.25, apply_random_eq, { "min": self.random.uniform(0, 1), "max": self.random.uniform(1, 2), }),
-            (0.25, apply_stereo_spatialization, { "c": c, "alpha": self.random.uniform(0, 1) }),            
+            (0.25, apply_random_eq, { "min": self.random.uniform(0, 0.5), "max": self.random.uniform(1.5, 2), }),
+            (0.25, apply_stereo_spatialization, { "c": c, "alpha": self.random.uniform(1.5, 2) }),
+            (0.25, apply_stereo_spatialization, { "c": c, "alpha": self.random.uniform(0, 0.5) }),
             (0.25, apply_masking, { "c": c, "num_masks": self.random.randint(0, 5), "max_mask_percentage": self.random.uniform(0, 0.2), "alpha": self.random.uniform(0,1) }),
             (0.25, apply_random_phase_noise, { "strength": self.random.uniform(0, 0.5)}),
             (0.25, apply_emphasis, { "coef": self.random.uniform(0.75, 1) }),
@@ -192,15 +193,14 @@ class VoxAugDataset(torch.utils.data.Dataset):
 
             if path.find('instruments') != -1:
                 V, Vc = self._get_vocals(idx)
+                V = V / Vc
+                Y = Y / c                
+                Y = Y if self.random.uniform(0,1) < 0.4 else Y + V
+                c = np.max([1, np.abs(Y).max()])
 
-                Y_norm = Y / c
-                V_norm = V / Vc
+            X = Y if self.random.uniform(0,1) < 0.08 else self._augment_mix(Y, c)
 
-                Y = Y_norm if self.random.uniform(0,1) < 0.4 else Y_norm + V_norm
-
-            X = Y if self.random.uniform(0,1) < 0.08 else self._augment_mix(Y, 1)
-
-        X = np.clip(np.abs(X), 0, 1)
-        Y = np.clip(np.abs(Y), 0, 1)
+        X = np.clip(np.abs(X) / c, 0, 1)
+        Y = np.clip(np.abs(Y) / c, 0, 1)
 
         return X.astype(np.float32), Y.astype(np.float32)

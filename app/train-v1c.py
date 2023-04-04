@@ -8,19 +8,20 @@ import torch.distributed
 import torch.nn as nn
 import torch.utils.data
 import wandb
-import libft2.signal_loss as signal_loss
 
 from tqdm import tqdm
 
-from libft2.dataset_voxaug import VoxAugDataset
-from libft2.frame_transformer import FrameTransformer
+from libft2gan.dataset_voxaug import VoxAugDataset
+from libft2gan.frame_transformer import FrameTransformerGenerator as FrameTransformer
 
 from torch.nn import functional as F
 from libft2.lr_scheduler_linear_warmup import LinearWarmupScheduler
 from libft2.lr_scheduler_polynomial_decay import PolynomialDecayScheduler
 
-def train_epoch(dataloader, model, device, optimizer, accumulation_steps, progress_bar, lr_warmup=None, grad_scaler=None, use_wandb=True, step=0, model_dir="", save_every=20000):
+def train_epoch(dataloader, model, device, optimizer, accumulation_steps, progress_bar, lr_warmup=None, grad_scaler=None, use_wandb=True, step=0, model_dir="", save_every=20000, max_bin=0):
     model.train()
+
+    batch_bce_loss = 0
 
     mag_loss = 0
     batch_mag_loss = 0
@@ -31,20 +32,23 @@ def train_epoch(dataloader, model, device, optimizer, accumulation_steps, progre
     model.zero_grad()
 
     pbar = tqdm(dataloader) if progress_bar else dataloader
-    for itr, (X, Y) in enumerate(pbar):
-        X = X.to(device)[:, :, :model.max_bin]
-        Y = Y.to(device)[:, :, :model.max_bin]
+    for itr, (X, Y, VP) in enumerate(pbar):
+        X = X.to(device)[:, :, :max_bin]
+        Y = Y.to(device)[:, :, :max_bin]
+        VP = VP.to(device)
 
         with torch.cuda.amp.autocast_mode.autocast(enabled=grad_scaler is not None):
-            pred = model(X)
+            pred, v_pred = model(X)
             pred = torch.sigmoid(pred)
             pavg = torch.mean(pred)
             pmin = torch.min(pred)
-            pred = X * pred
+            pred = X * pred[:, :2]
             
-        mae_loss = F.l1_loss(pred, Y) / accumulation_steps        
-        accum_loss = mae_loss
+        mae_loss = F.l1_loss(pred, Y) / accumulation_steps
+        bce_loss = F.binary_cross_entropy_with_logits(v_pred, VP) / accumulation_steps
+        accum_loss = mae_loss + bce_loss
         batch_mag_loss = batch_mag_loss + mae_loss
+        batch_bce_loss = batch_bce_loss + bce_loss
 
         if torch.logical_or(accum_loss.isnan(), accum_loss.isinf()):
             print('nan training loss; aborting')
@@ -57,7 +61,7 @@ def train_epoch(dataloader, model, device, optimizer, accumulation_steps, progre
 
         if (itr + 1) % accumulation_steps == 0:
             if progress_bar:
-                pbar.set_description(f'{step}: {str(batch_mag_loss.item())}|{pavg.item()}|{pmin.item()}')
+                pbar.set_description(f'{step}: {str(batch_mag_loss.item())}|{str(batch_bce_loss.item())}|{pavg.item()}|{pmin.item()}')
 
             if use_wandb:
                 wandb.log({
@@ -81,6 +85,7 @@ def train_epoch(dataloader, model, device, optimizer, accumulation_steps, progre
             batches = batches + 1
             mag_loss = mag_loss + batch_mag_loss.item()
             batch_mag_loss = 0
+            batch_bce_loss = 0
 
             if batches % save_every == 0:
                 model_path = f'{model_dir}models/remover.{step}.tmp.pth'
@@ -88,7 +93,7 @@ def train_epoch(dataloader, model, device, optimizer, accumulation_steps, progre
 
     return mag_loss / batches, step
 
-def validate_epoch(dataloader, model, device):
+def validate_epoch(dataloader, model, device, max_bin=0):
     model.eval()
     crit = nn.L1Loss()
 
@@ -96,13 +101,13 @@ def validate_epoch(dataloader, model, device):
 
     with torch.no_grad():
         for X, Y in dataloader:
-            X = X.to(device)[:, :, :model.max_bin]
-            Y = Y.to(device)[:, :, :model.max_bin]
+            X = X.to(device)[:, :, :max_bin]
+            Y = Y.to(device)[:, :, :max_bin]
 
             with torch.cuda.amp.autocast_mode.autocast():
-                pred = torch.sigmoid(model(X))
+                pred, _ = model(X)
 
-            l1_mag = crit(X[:, :2] * pred[:, :2], Y[:, :2])
+            l1_mag = crit(X[:, :2] * torch.sigmoid(pred[:, :2]), Y[:, :2])
             loss = l1_mag
 
             if torch.logical_or(loss.isnan(), loss.isinf()):
@@ -128,10 +133,15 @@ def main():
     p.add_argument('--learning_rate', '-l', type=float, default=1e-4)
     p.add_argument('--learning_rate_swa', type=float, default=1e-4)
     
-    p.add_argument('--model_dir', type=str, default='/media/ben/internal-nvme-b')
-    p.add_argument('--instrumental_lib', type=str, default="/home/ben/cs2048_sr44100_hl1024_nf2048_of0|/media/ben/internal-nvme-b/cs2048_sr44100_hl1024_nf2048_of0")
-    p.add_argument('--vocal_lib', type=str, default="/home/ben/cs2048_sr44100_hl1024_nf2048_of0_VOCALS")
-    p.add_argument('--validation_lib', type=str, default="/media/ben/internal-nvme-b/cs2048_sr44100_hl1024_nf2048_of0_VALIDATION")
+    # p.add_argument('--model_dir', type=str, default='/media/ben/internal-nvme-b')
+    # p.add_argument('--instrumental_lib', type=str, default="/home/ben/cs2048_sr44100_hl1024_nf2048_of0|/media/ben/internal-nvme-b/cs2048_sr44100_hl1024_nf2048_of0")
+    # p.add_argument('--vocal_lib', type=str, default="/home/ben/cs2048_sr44100_hl1024_nf2048_of0_VOCALS")
+    # p.add_argument('--validation_lib', type=str, default="/media/ben/internal-nvme-b/cs2048_sr44100_hl1024_nf2048_of0_VALIDATION")
+
+    p.add_argument('--model_dir', type=str, default='H://')
+    p.add_argument('--instrumental_lib', type=str, default="C://cs2048_sr44100_hl1024_nf2048_of0|D://cs2048_sr44100_hl1024_nf2048_of0|F://cs2048_sr44100_hl1024_nf2048_of0|H://cs2048_sr44100_hl1024_nf2048_of0")
+    p.add_argument('--vocal_lib', type=str, default="C://cs2048_sr44100_hl1024_nf2048_of0_VOCALS|D://cs2048_sr44100_hl1024_nf2048_of0_VOCALS")
+    p.add_argument('--validation_lib', type=str, default="C://cs2048_sr44100_hl1024_nf2048_of0_VALIDATION")
 
     p.add_argument('--curr_step', type=int, default=0)
     p.add_argument('--curr_epoch', type=int, default=0)
@@ -141,7 +151,7 @@ def main():
     p.add_argument('--lr_scheduler_decay_power', type=float, default=0.1)
     p.add_argument('--lr_verbosity', type=int, default=1000)
     
-    p.add_argument('--channels', type=int, default=16)
+    p.add_argument('--channels', type=int, default=8)
     p.add_argument('--expansion', type=int, default=10240)
     p.add_argument('--num_heads', type=int, default=8)
     p.add_argument('--dropout', type=float, default=0.1)
@@ -153,9 +163,9 @@ def main():
     p.add_argument('--gpu', '-g', type=int, default=-1)
     p.add_argument('--optimizer', type=str.lower, choices=['adam', 'adamw', 'sgd', 'radam', 'rmsprop'], default='adam')
     p.add_argument('--amsgrad', type=str, default='false')
-    p.add_argument('--weight_decay', type=float, default=1e-3)
-    p.add_argument('--prefetch_factor', type=int, default=3)
-    p.add_argument('--num_workers', '-w', type=int, default=6)
+    p.add_argument('--weight_decay', type=float, default=0)
+    p.add_argument('--prefetch_factor', type=int, default=2)
+    p.add_argument('--num_workers', '-w', type=int, default=8)
     p.add_argument('--epoch', '-E', type=int, default=40)
     p.add_argument('--progress_bar', '-pb', type=str, default='true')
     p.add_argument('--save_all', type=str, default='true')
@@ -200,18 +210,18 @@ def main():
         torch.distributed.init_process_group(backend='nccl')
 
     train_dataset = VoxAugDataset(
-        path=args.instrumental_lib,
-        vocal_path=args.vocal_lib,
+        instrumental_lib=args.instrumental_lib,
+        vocal_lib=args.vocal_lib,
         is_validation=False,
         n_fft=args.n_fft,
         hop_length=args.hop_length
     )
 
-    train_sampler = torch.utils.data.DistributedSampler(train_dataset)
+    train_sampler = torch.utils.data.DistributedSampler(train_dataset) if args.distributed else None
 
     val_dataset = VoxAugDataset(
-        path=[args.validation_lib],
-        vocal_path=None,
+        instrumental_lib=[args.validation_lib],
+        vocal_lib=None,
         cropsize=2048,
         is_validation=True
     )
@@ -280,28 +290,19 @@ def main():
 
             train_dataset.cropsize = cropsize
 
-            if args.distributed:
-                train_dataloader = torch.utils.data.DataLoader(
-                    dataset=train_dataset,
-                    batch_size=batch_size,
-                    sampler=train_sampler,
-                    shuffle=False,
-                    num_workers=args.num_workers,
-                    prefetch_factor=args.prefetch_factor
-                )
-            else:
-                train_dataloader = torch.utils.data.DataLoader(
-                    dataset=train_dataset,
-                    batch_size=batch_size,
-                    shuffle=True,
-                    num_workers=args.num_workers,
-                    prefetch_factor=args.prefetch_factor
-                )
+            train_dataloader = torch.utils.data.DataLoader(
+                dataset=train_dataset,
+                batch_size=batch_size,
+                sampler=train_sampler,
+                shuffle=(train_sampler is None),
+                num_workers=args.num_workers,
+                prefetch_factor=args.prefetch_factor
+            )
 
         print('# epoch {}'.format(epoch))
         train_dataloader.dataset.set_epoch(epoch)
-        train_loss_mag, step = train_epoch(train_dataloader, model, device, optimizer, accum_steps, args.progress_bar, lr_warmup=scheduler, grad_scaler=grad_scaler, use_wandb=args.wandb, step=step, model_dir=args.model_dir)
-        val_loss_mag = validate_epoch(val_dataloader, model, device)
+        train_loss_mag, step = train_epoch(train_dataloader, model, device, optimizer, accum_steps, args.progress_bar, lr_warmup=scheduler, grad_scaler=grad_scaler, use_wandb=args.wandb, step=step, model_dir=args.model_dir, max_bin=args.n_fft // 2)
+        val_loss_mag = validate_epoch(val_dataloader, model, device, max_bin=args.n_fft // 2)
 
         if args.wandb:
             wandb.log({

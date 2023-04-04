@@ -8,7 +8,7 @@ from libft2gan.dataset_utils import apply_channel_drop, apply_dynamic_range_mod,
 import librosa
 
 class VoxAugDataset(torch.utils.data.Dataset):
-    def __init__(self, instrumental_lib=[], vocal_lib=[], is_validation=False, n_fft=2048, hop_length=1024, cropsize=256, sr=44100, seed=0, inst_rate=0.01, data_limit=None, predict_vocals=False, time_scaling=True, vocal_threshold=0.00125, vout_bands=4):
+    def __init__(self, instrumental_lib=[], vocal_lib=[], is_validation=False, n_fft=2048, hop_length=1024, cropsize=256, sr=44100, seed=0, inst_rate=0.01, data_limit=None, predict_vocals=False, time_scaling=True, vocal_threshold=0.35, frequency_bands=4):
         self.is_validation = is_validation
         self.vocal_list = []
         self.curr_list = []
@@ -17,7 +17,7 @@ class VoxAugDataset(torch.utils.data.Dataset):
         self.predict_vocals = predict_vocals
         self.time_scaling = time_scaling
         self.vocal_threshold = vocal_threshold
-        self.vout_bands = vout_bands
+        self.frequency_bands = frequency_bands
 
         self.max_bin = n_fft // 2
         self.sr = sr
@@ -65,26 +65,17 @@ class VoxAugDataset(torch.utils.data.Dataset):
             start = self.random.randint(0, V.shape[2] - self.cropsize - 1)
             V = V[:, :, start:start+self.cropsize]
 
-        if np.random.uniform() < 0.04:
-            if np.random.uniform() < 0.5:
-                V[0] = 0
-            else:
-                V[1] = 0
-
-        VP = V[:, :-1, :]
-        VP = np.abs(VP).reshape((VP.shape[0], self.vout_bands, VP.shape[1] // self.vout_bands, VP.shape[2]))
-        VP = np.where(VP.mean(axis=2) > self.vocal_threshold, 1, 0)
-
         P = np.angle(V)
         M = np.abs(V)
 
         augmentations = [
+            (0.04, apply_channel_drop, { "channel": self.random.randint(0,2), "alpha": self.random.uniform(0,1) }),
             (0.2, apply_dynamic_range_mod, { "c": Vc, "threshold": self.random.uniform(0,1), "gain": self.random.uniform(0,1), }),
             (0.2, apply_multiplicative_noise, { "loc": 1, "scale": self.random.uniform(0,1), }),
             (0.2, apply_random_eq, { "min": self.random.uniform(0, 1), "max": self.random.uniform(1, 2), }),
             (0.2, apply_stereo_spatialization, { "c": Vc, "alpha": self.random.uniform(0, 2) }),
             (0.2, apply_random_phase_noise, { "strength": self.random.uniform(0, 0.5)}),
-            #(0.2, apply_harmonic_distortion, { "c": Vc, "num_harmonics": self.random.randint(1,4), "gain": self.random.uniform(0, 0.1), "hop_length": self.hop_length, "n_fft": self.n_fft }),
+            (0.2, apply_harmonic_distortion, { "c": Vc, "num_harmonics": self.random.randint(1,4), "gain": self.random.uniform(0, 0.1), "hop_length": self.hop_length, "n_fft": self.n_fft }),
             (0.2, apply_pitch_shift, { "pitch_shift": self.random.uniform(-12, 12) }),
             (0.2, apply_emphasis, { "coef": self.random.uniform(0.9, 1) }),
             (0.2, apply_deemphasis, { "coef": self.random.uniform(0.9, 1) }),
@@ -96,14 +87,15 @@ class VoxAugDataset(torch.utils.data.Dataset):
         for p, aug, args in augmentations:
             if self.random.uniform(0,1) < p:
                 M, P = aug(M, P, self.random, **args)
-                M = np.clip(M / Vc, 0, 1) * Vc
 
         V = M * np.exp(1.j * P)
 
         if self.random.uniform(0,1) < 0.5:
             V = V[::-1]
 
-        return V, Vc, VP
+        VP = np.abs(V/Vc).mean(axis=1, keepdims=True)
+
+        return V, VP
 
     def _augment_instruments(self, X, c):
         if X.shape[2] > self.cropsize:
@@ -131,7 +123,6 @@ class VoxAugDataset(torch.utils.data.Dataset):
         for p, aug, args in augmentations:
             if self.random.uniform(0,1) < p:
                 M, P = aug(M, P, self.random, **args)
-                M = np.clip(M / c, 0, 1) * c
 
         X = M * np.exp(1.j * P)
 
@@ -139,23 +130,54 @@ class VoxAugDataset(torch.utils.data.Dataset):
             X = X[::-1]
 
         return X
+
+    def _get_vocals(self, idx):
+        path = str(self.vocal_list[(self.epoch + idx) % len(self.vocal_list)])
+        vdata = np.load(path)
+        V, Vc = vdata['X'], vdata['c']
+
+        if self.random.uniform(0,1) < 0.5:
+            V = apply_time_stretch(V, self.random, self.cropsize)
+        elif V.shape[2] > self.cropsize:
+            start = self.random.randint(0, V.shape[2] - self.cropsize - 1)
+            V = V[:, :, start:start+self.cropsize]
+
+        VP = V[:, :-1, :]
+        VP = (np.abs(VP) / Vc).reshape((VP.shape[0], self.frequency_bands, VP.shape[1] // self.frequency_bands, VP.shape[2]))
+        VP = VP.mean(axis=2, keepdims=True)
+
+        P = np.angle(V)
+        M = np.abs(V)
+
+        augmentations = [
+            (0.04, apply_channel_drop, { "channel": self.random.randint(0,2), "alpha": self.random.uniform(0,1) }),
+            (0.2, apply_dynamic_range_mod, { "c": Vc, "threshold": self.random.uniform(0,1), "gain": self.random.uniform(0,1), }),
+            (0.2, apply_multiplicative_noise, { "loc": 1, "scale": self.random.uniform(0,1), }),
+            (0.2, apply_random_eq, { "min": self.random.uniform(0, 1), "max": self.random.uniform(1, 2), }),
+            (0.2, apply_stereo_spatialization, { "c": Vc, "alpha": self.random.uniform(0, 2) }),
+            (0.2, apply_random_phase_noise, { "strength": self.random.uniform(0, 0.5)}),
+            (0.2, apply_harmonic_distortion, { "c": Vc, "num_harmonics": self.random.randint(1,4), "gain": self.random.uniform(0, 0.1), "hop_length": self.hop_length, "n_fft": self.n_fft }),
+            (0.2, apply_pitch_shift, { "pitch_shift": self.random.uniform(-12, 12) }),
+            (0.2, apply_emphasis, { "coef": self.random.uniform(0.9, 1) }),
+            (0.2, apply_deemphasis, { "coef": self.random.uniform(0.9, 1) }),
+            (0.2, apply_random_volume, { "gain": self.random.uniform(0, 0.25) })
+        ]
+
+        random.shuffle(augmentations)
+
+        for p, aug, args in augmentations:
+            if self.random.uniform(0,1) < p:
+                M, P = aug(M, P, self.random, **args)
+                M = np.clip(M / Vc, 0, 1) * Vc
+
+        V = M * np.exp(1.j * P)
+
+        if self.random.uniform(0,1) < 0.5:
+            V = V[::-1]
+
+        return V, VP
     
     def __getitem__(self, idx):
-        path = str(self.curr_list[idx % len(self.curr_list)])
-        data = np.load(path)
-        aug = 'Y' not in data.files
+        _, VP = self._get_vocals(idx)
 
-        X, c = data['X'], data['c']
-        Y = X if aug else data['Y']
-        V, VP = None, np.zeros((X.shape[0], 4, X.shape[2]))
-
-        if not self.is_validation:
-            Y = self._augment_instruments(Y, c)
-            V, Vc, VP = self._get_vocals(idx)
-            X = Y + V
-            c = np.max([np.abs(X).max(), c, Vc])
-
-        X = np.clip(np.abs(X) / c, 0, 1)
-        Y = np.clip(np.abs(Y) / c, 0, 1)
-
-        return X.astype(np.float32), Y.astype(np.float32), VP.astype(np.float32)
+        return VP.astype(np.float32)

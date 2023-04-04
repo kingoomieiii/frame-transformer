@@ -28,12 +28,12 @@ def apply_random_volume(M, P, random, gain=0.1):
     return M + (M * a), P
 
 def apply_stereo_spatialization(M, P, random, c, alpha=1):
-    left, right = M[0] / c, M[1] / c
+    left, right = M[0], M[1]
     mid = (left + right) * 0.5
     left = alpha * left + (1 - alpha) * mid 
     right = alpha * right + (1 - alpha) * mid
 
-    return np.clip(np.stack([left, right], axis=0), 0, 1) * c, P
+    return np.stack([left, right], axis=0), P
 
 def apply_multiplicative_noise(M, P, random, loc=1, scale=0.1):
     eps = np.random.normal(loc, scale, size=M.shape)
@@ -44,21 +44,21 @@ def apply_additive_noise(M, P, c, loc=0, scale=0.1):
     X = M / c
     eps = np.random.normal(loc, scale, size=M.shape)
 
-    return np.clip(X + eps, 0, 1) * c, P
+    return X + eps * c, P
 
 def apply_dynamic_range_mod(M, P, random, c, threshold=0.5, gain=0.1):
     M = M / c
     
     if random.uniform(0,1) < 0.5:
         if random.uniform(0,1) < 0.5:
-            return np.clip(np.where(M > threshold, M - (M * gain), M), 0, 1) * c, P
+            return np.where(M > threshold, M - (M * gain), M) * c, P
         else:
-            return np.clip(np.where(M < threshold, M + (M * gain), M), 0, 1) * c, P
+            return np.where(M < threshold, M + (M * gain), M) * c, P
     else:
         if random.uniform(0,1) < 0.5:
-            return np.clip(np.where(M > threshold, M + (M * gain), M), 0, 1) * c, P
+            return np.where(M > threshold, M + (M * gain), M) * c, P
         else:
-            return np.clip(np.where(M < threshold, M - (M * gain), M), 0, 1) * c, P
+            return np.where(M < threshold, M - (M * gain), M) * c, P
     
 def apply_channel_drop(M, P, random, channel, alpha=1):
     H = np.copy(M)
@@ -98,8 +98,8 @@ def apply_time_stretch(M, random, target_size):
     return H
 
 def apply_harmonic_distortion(M, P, random, c, num_harmonics=2, gain=0.1, n_fft=2048, hop_length=1024):
-    left_M = M[0]
-    right_M = M[1]
+    left_M = M[0] / c
+    right_M = M[1] / c
     left_P = P[0]
     right_P = P[1]
     
@@ -123,10 +123,10 @@ def apply_harmonic_distortion(M, P, random, c, num_harmonics=2, gain=0.1, n_fft=
     left_X = librosa.stft(left_ds, n_fft=n_fft, hop_length=hop_length)
     right_X = librosa.stft(right_ds, n_fft=n_fft, hop_length=hop_length)
     
-    left_M = np.abs(left_X)
-    right_M = np.abs(right_X)
+    left_M = np.abs(left_X) * c
+    right_M = np.abs(right_X) * c
 
-    return np.clip(np.array([left_M / c, right_M / c]) * c, 0, 1), np.array([np.angle(left_X), np.angle(right_X)])
+    return np.array([left_M, right_M]), np.array([np.angle(left_X), np.angle(right_X)])
 
 def apply_pitch_shift(M, P, random, pitch_shift):
     _, num_bins, num_frames = M.shape
