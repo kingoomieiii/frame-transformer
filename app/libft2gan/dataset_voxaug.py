@@ -56,7 +56,9 @@ class VoxAugDataset(torch.utils.data.Dataset):
 
     def _get_vocals(self, idx):
         path = str(self.vocal_list[(self.epoch + idx) % len(self.vocal_list)])
-        vdata = np.load(path)
+
+        vdata = np.load(path, allow_pickle=True)
+            
         V, Vc = vdata['X'], vdata['c']
 
         if self.random.uniform(0,1) < 0.5:
@@ -74,7 +76,7 @@ class VoxAugDataset(torch.utils.data.Dataset):
         VP = V[:, :-1, :]
         VP = (np.abs(VP) / Vc).reshape((VP.shape[0], self.vout_bands, VP.shape[1] // self.vout_bands, VP.shape[2]))
         VP = VP.mean(axis=2)
-        VP = np.where(VP > self.vocal_threshold, 1, (self.vocal_threshold - VP) ** 2)
+        VP = np.where(VP > self.vocal_threshold, 1, (VP / self.vocal_threshold) ** 2)
 
         P = np.angle(V)
         M = np.abs(V)
@@ -141,7 +143,7 @@ class VoxAugDataset(torch.utils.data.Dataset):
     
     def __getitem__(self, idx):
         path = str(self.curr_list[idx % len(self.curr_list)])
-        data = np.load(path)
+        data = np.load(path, allow_pickle=True)
         aug = 'Y' not in data.files
 
         X, c = data['X'], data['c']
