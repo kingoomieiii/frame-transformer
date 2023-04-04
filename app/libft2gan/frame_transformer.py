@@ -111,7 +111,7 @@ class FrameTransformerGenerator(nn.Module):
             e9, pqk = encoder(e9, prev_qk=pqk)
 
         vout = self.vout_norm(e9)
-        vout, _ = self.vout_transform(e9)
+        vout, _ = self.vout_transform(e9, prev_qk=pqk)
         vout = self.vout_conv(vout)
         e9 = torch.cat((e9, vout), dim=1)
             
