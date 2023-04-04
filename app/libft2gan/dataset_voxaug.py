@@ -73,7 +73,8 @@ class VoxAugDataset(torch.utils.data.Dataset):
 
         VP = V[:, :-1, :]
         VP = (np.abs(VP) / Vc).reshape((VP.shape[0], self.vout_bands, VP.shape[1] // self.vout_bands, VP.shape[2]))
-        VP = np.where(VP.mean(axis=2) > self.vocal_threshold, 1, 0)
+        VP = VP.mean(axis=2)
+        VP = np.where(VP > self.vocal_threshold, 1, (self.vocal_threshold - VP) ** 2)
 
         P = np.angle(V)
         M = np.abs(V)
