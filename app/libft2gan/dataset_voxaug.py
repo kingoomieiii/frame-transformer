@@ -73,11 +73,6 @@ class VoxAugDataset(torch.utils.data.Dataset):
             else:
                 V[1] = 0
 
-        VP = V[:, :-1, :]
-        VP = (np.abs(VP) / Vc).reshape((VP.shape[0], self.vout_bands, VP.shape[1] // self.vout_bands, VP.shape[2]))
-        VP = VP.mean(axis=2)
-        VP = np.where(VP > self.vocal_threshold, 1, (VP / self.vocal_threshold) ** 2)
-
         P = np.angle(V)
         M = np.abs(V)
 
@@ -91,8 +86,7 @@ class VoxAugDataset(torch.utils.data.Dataset):
             (0.2, apply_pitch_shift, { "pitch_shift": self.random.uniform(-12, 12) }),
             (0.2, apply_emphasis, { "coef": self.random.uniform(0.8, 1) }),
             (0.2, apply_deemphasis, { "coef": self.random.uniform(0.8, 1) }),
-            (0.2, apply_random_volume, { "gain": self.random.uniform(0.5, 1.5) }),
-            (0.2, apply_masking, { "c": Vc, "num_masks": np.random.randint(0, 6), "max_mask_percentage": np.random.uniform(0, 0.2), "alpha": np.random.uniform() }),
+            (0.2, apply_random_volume, { "gain": self.random.uniform(-0.5, 0.5) }),
         ]
 
         random.shuffle(augmentations)
@@ -106,6 +100,11 @@ class VoxAugDataset(torch.utils.data.Dataset):
 
         if self.random.uniform(0,1) < 0.5:
             V = V[::-1]
+
+        VP = V[:, :-1, :]
+        VP = (np.abs(VP) / Vc).reshape((VP.shape[0], self.vout_bands, VP.shape[1] // self.vout_bands, VP.shape[2]))
+        VP = VP.mean(axis=2)
+        VP = np.where(VP > self.vocal_threshold, 1, (VP / self.vocal_threshold) ** 2)
 
         return V, Vc, VP
 

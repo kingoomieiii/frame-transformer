@@ -100,7 +100,7 @@ def validate_epoch(dataloader, model, device, max_bin=0):
     mag_loss = 0
 
     with torch.no_grad():
-        for X, Y in dataloader:
+        for X, Y, _ in dataloader:
             X = X.to(device)[:, :, :max_bin]
             Y = Y.to(device)[:, :, :max_bin]
 
@@ -151,6 +151,7 @@ def main():
     p.add_argument('--lr_scheduler_decay_power', type=float, default=0.1)
     p.add_argument('--lr_verbosity', type=int, default=1000)
     
+    p.add_argument('--num_attention_maps', type=int, default=1)
     p.add_argument('--channels', type=int, default=8)
     p.add_argument('--expansion', type=int, default=10240)
     p.add_argument('--num_heads', type=int, default=8)
@@ -231,7 +232,7 @@ def main():
     torch.manual_seed(args.seed)
 
     device = torch.device('cpu')
-    model = FrameTransformer(in_channels=2, out_channels=2, channels=args.channels, expansion=args.expansion, n_fft=args.n_fft, dropout=args.dropout, num_heads=args.num_heads)
+    model = FrameTransformer(in_channels=2, out_channels=2, channels=args.channels, expansion=args.expansion, n_fft=args.n_fft, dropout=args.dropout, num_heads=args.num_heads, num_attention_maps=args.num_attention_maps)
     
     if torch.cuda.is_available() and args.gpu >= 0:
         device = torch.device('cuda:{}'.format(args.gpu))
@@ -320,8 +321,7 @@ def main():
             print('  * best validation loss')
 
         model_path = f'{args.model_dir}models/{wandb.run.name if args.wandb else "local"}.{epoch}'
-
-        torch.save(model.state_dict(), f'{model_path}.modelt.pth')
+        torch.save(model.state_dict(), f'{model_path}.voxaug.pth')
 
         epoch += 1
 

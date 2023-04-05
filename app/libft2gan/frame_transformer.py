@@ -14,7 +14,7 @@ from libft2gan.squared_relu import SquaredReLU
 from libft2gan.channel_norm import ChannelNorm
 
 class FrameTransformerGenerator(nn.Module):
-    def __init__(self, in_channels=2, out_channels=2, channels=2, dropout=0.1, n_fft=2048, num_heads=4, expansion=4, num_bridge_layers=4, num_attention_maps=1):
+    def __init__(self, in_channels=2, out_channels=2, channels=2, dropout=0.1, n_fft=2048, num_heads=4, expansion=4, latent_expansion=4, num_bridge_layers=4, num_attention_maps=1):
         super(FrameTransformerGenerator, self).__init__(),
         
         self.max_bin = n_fft // 2
@@ -47,13 +47,13 @@ class FrameTransformerGenerator(nn.Module):
         self.enc8_transformer = FrameTransformerEncoder(channels * 14, num_attention_maps, self.max_bin // 128, dropout=dropout, expansion=expansion, num_heads=num_heads)
 
         self.enc9 = FrameEncoder(channels * 14 + num_attention_maps, channels * 16, self.max_bin // 128)
-        self.enc9_transformer = nn.Sequential(*[ConvolutionalTransformerEncoder(channels * 16, dropout=dropout, expansion=4, num_heads=num_heads) for _ in range(num_bridge_layers)])
+        self.enc9_transformer = nn.Sequential(*[ConvolutionalTransformerEncoder(channels * 16, dropout=dropout, expansion=latent_expansion, num_heads=num_heads, kernel_size=1, padding=0) for _ in range(num_bridge_layers)])
 
         self.vout_norm = ChannelNorm(channels * 16)
-        self.vout_transform = ConvolutionalTransformerEncoder(channels * 16, dropout=dropout, expansion=4, num_heads=num_heads)
+        self.vout_transform = nn.Sequential(*[ConvolutionalTransformerEncoder(channels * 16, dropout=dropout, expansion=latent_expansion, num_heads=num_heads, kernel_size=1, padding=0) for _ in range(num_bridge_layers)])
         self.vout_conv = nn.Conv2d(channels * 16, out_channels, 1)
         
-        self.dec8 = FrameDecoder(channels * 16 + num_attention_maps + out_channels, channels * 14, self.max_bin // 128, dropout=0.5)
+        self.dec8 = FrameDecoder(channels * 32 + num_attention_maps, channels * 14, self.max_bin // 128, dropout=0.5)
         self.dec8_transformer = FrameTransformerDecoder(channels * 14, num_attention_maps, self.max_bin // 128, dropout=dropout, expansion=expansion, num_heads=num_heads, has_prev_skip=False)
 
         self.dec7 = FrameDecoder(channels * 14 + num_attention_maps + num_attention_maps, channels * 12, self.max_bin // 64, dropout=0.5)
@@ -111,9 +111,11 @@ class FrameTransformerGenerator(nn.Module):
             e9, pqk = encoder(e9, prev_qk=pqk)
 
         vout = self.vout_norm(e9)
-        vout, _ = self.vout_transform(e9, prev_qk=pqk)
-        vout = self.vout_conv(vout)
+        for encoder in self.vout_transform:
+            vout, pqk = encoder(vout, prev_qk=pqk)
+
         e9 = torch.cat((e9, vout), dim=1)
+        vout = self.vout_conv(vout)
             
         h = self.dec8(e9, e8)
         h, pqk1, pqk2 = self.dec8_transformer(h, a8, prev_qk1=None, prev_qk2=None, skip_qk=qk8)
@@ -494,7 +496,7 @@ class FrameTransformerDecoder(nn.Module):
         return torch.cat((x, h), dim=1), prev_qk1, prev_qk2
         
 class ConvolutionalTransformerEncoder(nn.Module):
-    def __init__(self, channels, dropout=0.1, expansion=4, num_heads=8):
+    def __init__(self, channels, dropout=0.1, expansion=4, num_heads=8, kernel_size=3, padding=1):
         super(ConvolutionalTransformerEncoder, self).__init__()
 
         self.activate = SquaredReLU()
@@ -517,7 +519,7 @@ class ConvolutionalTransformerEncoder(nn.Module):
             nn.Conv2d(channels, channels, kernel_size=1, padding=0))
 
         self.norm4 = ChannelNorm(channels)
-        self.attn = ConvolutionalMultiheadAttention(channels, num_heads, kernel_size=3, padding=1)
+        self.attn = ConvolutionalMultiheadAttention(channels, num_heads, kernel_size=kernel_size, padding=padding)
 
         self.norm5 = ChannelNorm(channels)
         self.conv3 = nn.Conv2d(channels, channels * expansion, kernel_size=3, padding=1)
