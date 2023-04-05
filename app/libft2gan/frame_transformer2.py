@@ -173,7 +173,7 @@ class FrameTransformerDiscriminator(nn.Module):
         self.out = nn.Sequential(
             nn.Conv2d(channels * 16, channels * 32, 1),
             SquaredReLU(),
-            nn.Conv2d(channels * 32, 2, 1))
+            nn.Conv2d(channels * 32, in_channels, 1))
         
     def from_generator(self, gen: FrameTransformerGenerator):
         self.enc1_transformer = gen.enc1_transformer

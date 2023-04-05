@@ -122,7 +122,7 @@ def validate_epoch(dataloader, model, device):
             Y = Y.to(device)[:, :, :model.max_bin]
 
             with torch.cuda.amp.autocast_mode.autocast():
-                pred, _ = model(X)
+                pred = model(X)
                 pred = torch.sigmoid(pred)
 
             l1_mag = crit(X[:, :2] * pred[:, :2], Y[:, :2])
