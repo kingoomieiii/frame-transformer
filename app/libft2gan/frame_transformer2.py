@@ -176,6 +176,9 @@ class FrameTransformerDiscriminator(nn.Module):
             nn.Conv2d(channels * 32, in_channels, 1))
         
     def from_generator(self, gen: FrameTransformerGenerator):
+        self.positional_embedding = gen.positional_embedding
+
+        self.enc1 = gen.enc1
         self.enc1_transformer = gen.enc1_transformer
 
         self.enc2 = gen.enc2
