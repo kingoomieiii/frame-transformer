@@ -40,7 +40,7 @@ def apply_multiplicative_noise(M, P, random, loc=1, scale=0.1):
 
     return M * eps, P
 
-def apply_additive_noise(M, P, c, loc=0, scale=0.1):
+def apply_additive_noise(M, P, random, c, loc=0, scale=0.1):
     X = M / c
     eps = np.random.normal(loc, scale, size=M.shape)
 
@@ -236,3 +236,31 @@ def apply_frequency_masking2(M, P, random, num_masks=1, max_mask_percentage=0.2,
         H[:, mask_start:mask_start+mask_height, :] = H[:, mask_start:mask_start+mask_height, :] * (1 - alpha)
 
     return H, P
+
+def apply_frame_masking(M, P, random, c, num_masks=1, max_frames=64, alpha=1, type=0):
+    M = M / c
+    H = np.copy(M)
+    N = np.random.uniform(size=H.shape)
+
+    for _ in range(num_masks):
+        w = random.randint(1, max_frames)
+        s = random.randint(0, H.shape[2] - w)
+
+        if type == 0:
+            m = N[:, :, s:s+w]
+        elif type == 1:
+            m = np.zeros_like(N[:, :, s:s+w])
+        elif type == 2:
+            m = np.ones_like(N[:, :, s:s+w])
+        elif type == 3:
+            m = np.full_like(N[:, :, s:s+w], fill_value=H[:, :, s:s+w].mean())
+        elif type == 4:
+            m = np.full_like(N[:, :, s:s+w], fill_value=H[:, :, s:s+w].min())
+        elif type == 5:
+            m = np.full_like(N[:, :, s:s+w], fill_value=H[:, :, s:s+w].max())
+        elif type == 6:
+            m = np.full_like(N[:, :, s:s+w], fill_value=H[:, :, s:s+w].var())
+
+        H[:, :, s:s+w] = alpha * m + (1 - alpha) * H[:, :, s:s+w]
+
+    return np.clip(H, 0, 1) * c, P

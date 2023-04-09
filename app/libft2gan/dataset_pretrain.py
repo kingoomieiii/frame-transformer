@@ -4,15 +4,18 @@ import numpy as np
 import torch
 import torch.utils.data
 import torch.nn.functional as F
-from libft2gan.dataset_utils import apply_channel_drop, apply_dynamic_range_mod, apply_multiplicative_noise, apply_random_eq, apply_stereo_spatialization, apply_time_stretch, apply_random_phase_noise, apply_time_masking, apply_frequency_masking, apply_time_masking2, apply_frequency_masking2, apply_emphasis, apply_deemphasis, apply_pitch_shift, apply_masking, apply_harmonic_distortion, apply_random_volume
+from libft2gan.dataset_utils import apply_channel_drop, apply_dynamic_range_mod, apply_frame_masking, apply_multiplicative_noise, apply_random_eq, apply_stereo_spatialization, apply_time_stretch, apply_random_phase_noise, apply_time_masking, apply_frequency_masking, apply_emphasis, apply_deemphasis, apply_pitch_shift, apply_masking, apply_harmonic_distortion, apply_random_volume
 import librosa
 
 class VoxAugDataset(torch.utils.data.Dataset):
-    def __init__(self, instrumental_lib=[], pretraining_lib=[], vocal_lib=[], is_validation=False, n_fft=2048, hop_length=1024, cropsize=256, sr=44100, seed=0, data_limit=None):
+    def __init__(self, instrumental_lib=[], pretraining_lib=[], vocal_lib=[], is_validation=False, n_fft=2048, hop_length=1024, cropsize=256, sr=44100, seed=0, data_limit=None, max_frames_per_mask=16, max_masks_per_item=16):
         self.is_validation = is_validation
         self.vocal_list = []
         self.curr_list = []
         self.epoch = 0
+
+        self.max_frames_per_mask = max_frames_per_mask
+        self.max_masks_per_item = max_masks_per_item
 
         self.max_bin = n_fft // 2
         self.sr = sr
@@ -70,16 +73,21 @@ class VoxAugDataset(torch.utils.data.Dataset):
         M = np.abs(V)
 
         augmentations = [
-            (0.02, apply_channel_drop, { "channel": self.random.randint(0,2), "alpha": self.random.uniform(0,1) }),
+            (0.2, apply_dynamic_range_mod, { "c": Vc, "threshold": self.random.uniform(0,1), "gain": self.random.uniform(0,0.25), }),
+            (0.2, apply_multiplicative_noise, { "loc": 1, "scale": self.random.uniform(0,0.25), }),
+            (0.2, apply_random_eq, { "min": self.random.uniform(0, 1), "max": self.random.uniform(1, 2), }),
+            (0.2, apply_stereo_spatialization, { "c": Vc, "alpha": self.random.uniform(0, 2) }),
+            (0.2, apply_random_phase_noise, { "strength": self.random.uniform(0, 0.5)}),
             (0.2, apply_pitch_shift, { "pitch_shift": self.random.uniform(-12, 12) }),
-            (0.2, apply_random_volume, { "gain": self.random.uniform(0, 0.25) })
+            (0.2, apply_emphasis, { "coef": self.random.uniform(0.8, 1) }),
+            (0.2, apply_deemphasis, { "coef": self.random.uniform(0.8, 1) })
         ]
 
         random.shuffle(augmentations)
 
         for p, aug, args in augmentations:
             if self.random.uniform(0,1) < p:
-                M, P = aug(M, P, **args)
+                M, P = aug(M, P, self.random, **args)
 
         V = M * np.exp(1.j * P)
 
@@ -96,23 +104,7 @@ class VoxAugDataset(torch.utils.data.Dataset):
         P = np.angle(X)
         M = np.abs(X)
 
-        augmentations = [
-            (0.25, apply_dynamic_range_mod, { "c": c, "threshold": self.random.uniform(0,1), "gain": self.random.uniform(0,1), }),
-            (0.25, apply_multiplicative_noise, { "loc": 1, "scale": self.random.uniform(0, 0.5), }),
-            (0.25, apply_random_eq, { "min": self.random.uniform(0, 0.5), "max": self.random.uniform(1.5, 2), }),
-            (0.25, apply_stereo_spatialization, { "c": c, "alpha": self.random.uniform(1.5, 2) }),
-            (0.25, apply_stereo_spatialization, { "c": c, "alpha": self.random.uniform(0, 0.5) }),
-            (0.25, apply_masking, { "c": c, "num_masks": self.random.randint(0, 5), "max_mask_percentage": self.random.uniform(0, 0.2), "alpha": self.random.uniform(0,1) }),
-            (0.25, apply_random_phase_noise, { "strength": self.random.uniform(0, 0.5)}),
-            (0.25, apply_emphasis, { "coef": self.random.uniform(0.75, 1) }),
-            (0.25, apply_deemphasis, { "coef": self.random.uniform(0.75, 1) }),
-        ] if self.random.uniform(0,1) > 0.02 else []
-
-        random.shuffle(augmentations)
-
-        for p, aug, args in augmentations:
-            if self.random.uniform(0,1) < p:
-                M, P = aug(M, P, self.random, **args)
+        M, P = apply_frame_masking(M, P, self.random, c, num_masks=np.random.randint(0, self.max_masks_per_item), max_frames=8, alpha=np.random.uniform(), type=np.random.randint(0,7))
 
         X = M * np.exp(1.j * P)
 
@@ -145,38 +137,6 @@ class VoxAugDataset(torch.utils.data.Dataset):
             X = X[::-1]
 
         return X
-
-    def _get_vocals(self, idx):
-        path = str(self.vocal_list[(self.epoch + idx) % len(self.vocal_list)])
-        vdata = np.load(path, allow_pickle=True)
-        V, Vc = vdata['X'], vdata['c']
-
-        if self.random.uniform(0,1) < 0.5:
-            V = apply_time_stretch(V, self.random, self.cropsize)
-        elif V.shape[2] > self.cropsize:
-            start = self.random.randint(0, V.shape[2] - self.cropsize - 1)
-            V = V[:, :, start:start+self.cropsize]
-
-        P = np.angle(V)
-        M = np.abs(V)
-
-        augmentations = [
-            (0.02, apply_channel_drop, { "channel": self.random.randint(0,2), "alpha": self.random.uniform(0,1) }),
-            (0.2, apply_pitch_shift, { "pitch_shift": self.random.uniform(-12, 12) }),
-        ]
-
-        random.shuffle(augmentations)
-
-        for p, aug, args in augmentations:
-            if self.random.uniform(0,1) < p:
-                M, P = aug(M, P, self.random, **args)
-
-        V = M * np.exp(1.j * P)
-
-        if self.random.uniform(0,1) < 0.5:
-            V = V[::-1]
-
-        return V, Vc
     
     def __getitem__(self, idx):
         path = str(self.curr_list[idx % len(self.curr_list)])
@@ -187,20 +147,27 @@ class VoxAugDataset(torch.utils.data.Dataset):
         Y = X if aug else data['Y']
         V = None
         
-        if not self.is_validation:
-            Y = self._get_instruments(Y, c)
-            X = Y
+        Y = self._get_instruments(Y, c)
+        X = Y
 
-            if path.find('instruments') != -1:
+        if not self.is_validation and str.lower(path).find('pretraining') == -1:
+            if np.random.uniform(0,1) < 0.2:
                 V, Vc = self._get_vocals(idx)
-                V = V / Vc
-                Y = Y / c                
-                Y = Y if self.random.uniform(0,1) < 0.4 else Y + V
-                c = np.max([1, np.abs(Y).max()])
+                Y = Y + V
+                
+            c = np.max([c, np.abs(Y).max()])
 
-            X = Y if self.random.uniform(0,1) < 0.08 else self._augment_mix(Y, c)
+        X = Y if (self.random.uniform(0,1) < 0.08 and not self.is_validation) else self._augment_mix(Y, c)
 
-        X = np.clip(np.abs(X) / c, 0, 1)
-        Y = np.clip(np.abs(Y) / c, 0, 1)
+        X = np.clip(((X / c) + 1) * 0.5, 0, 1)
+        Y = np.clip(((Y / c) + 1) * 0.5, 0, 1)
+
+        Xr = X.real
+        Xi = X.imag
+        Yr = Y.real
+        Yi = Y.imag
+        
+        X = np.concatenate((Xr, Xi), axis=0)
+        Y = np.concatenate((Yr, Yi), axis=0)
 
         return X.astype(np.float32), Y.astype(np.float32)

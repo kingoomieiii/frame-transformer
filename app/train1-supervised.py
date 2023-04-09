@@ -9,13 +9,16 @@ import torch.utils.data
 import torch.distributed
 
 from tqdm import tqdm
+from libft2gan.frame_transformer2 import FrameTransformerUnsupervised
 
-from libft2gan.dataset_pretrain import VoxAugDataset
-from libft2gan.frame_transformer import FrameTransformerGenerator, FrameTransformerDiscriminator
+from libft2gan.dataset_voxaug import VoxAugDataset
+from libft2gan.frame_transformer2 import FrameTransformerGenerator, FrameTransformerDiscriminator
 from libft2gan.lr_scheduler_linear_warmup import LinearWarmupScheduler
 from libft2gan.lr_scheduler_polynomial_decay import PolynomialDecayScheduler
 
 from torch.nn import functional as F
+
+import libft2gan.signal_loss as signal
 
 def train_epoch(dataloader, model, device, optimizer, accumulation_steps, progress_bar, lr_warmup=None, grad_scaler=None, step=0, max_bin=0):
     model.train()
@@ -27,20 +30,26 @@ def train_epoch(dataloader, model, device, optimizer, accumulation_steps, progre
     model.zero_grad()
 
     pbar = tqdm(dataloader) if progress_bar else dataloader
-    for itr, (X, Y) in enumerate(pbar):
+    for itr, (X, Y, VR) in enumerate(pbar):
         X = X.to(device)[:, :, :max_bin]
         Y = Y.to(device)[:, :, :max_bin]
+        VR = VR.to(device)
 
         with torch.cuda.amp.autocast_mode.autocast(enabled=grad_scaler is not None):
-            pred = model(X)
+            pred, VP = model(X)
             pred = torch.sigmoid(pred)
             pmax = torch.max(pred)
             pavg = torch.mean(pred)
             pmin = torch.min(pred)
-            
-        mae_loss = F.l1_loss(pred, Y) / accumulation_steps        
-        accum_loss = mae_loss
-        batch_mag_loss = batch_mag_loss + mae_loss
+
+        pred_c = torch.complex(pred[:, :2], pred[:, 2:])
+        pred_y = torch.complex(Y[:, :2], Y[:, 2:])
+        
+        mae_loss2 = F.l1_loss(torch.abs(pred_c), torch.abs(pred_y))
+        mae_loss = F.l1_loss(pred, Y) / accumulation_steps
+        bce_loss = F.binary_cross_entropy_with_logits(VP, VR) / accumulation_steps
+        accum_loss = mae_loss * 100 + bce_loss
+        batch_mag_loss = batch_mag_loss + mae_loss2
 
         if torch.logical_or(accum_loss.isnan(), accum_loss.isinf()):
             print('nan training loss; aborting')
@@ -53,7 +62,7 @@ def train_epoch(dataloader, model, device, optimizer, accumulation_steps, progre
 
         if (itr + 1) % accumulation_steps == 0:
             if progress_bar:
-                pbar.set_description(f'{step}: {str(batch_mag_loss.item())}|{pavg.item()}|{pmin.item()}')
+                pbar.set_description(f'{step}: {str(batch_mag_loss.item())}|{pmax.item()}|{pavg.item()}|{pmin.item()}')
 
             if grad_scaler is not None:
                 grad_scaler.unscale_(optimizer)
@@ -82,12 +91,13 @@ def validate_epoch(dataloader, model, device, max_bin=0):
     mag_loss = 0
 
     with torch.no_grad():
-        for X, Y in dataloader:
+        for X, Y, _ in dataloader:
             X = X.to(device)[:, :, :max_bin]
             Y = Y.to(device)[:, :, :max_bin]
 
             with torch.cuda.amp.autocast_mode.autocast():
-                pred = torch.sigmoid(model(X))
+                pred, _ = model(X)
+                pred = torch.sigmoid(pred)
 
             l1_mag = crit(pred[:, :2], Y[:, :2])
             loss = l1_mag
@@ -107,8 +117,8 @@ def main():
     p.add_argument('--sr', '-r', type=int, default=44100)
     p.add_argument('--hop_length', '-H', type=int, default=1024)
     p.add_argument('--n_fft', '-f', type=int, default=2048)
-    p.add_argument('--checkpoint_gen', type=str, default=None)
-    p.add_argument('--checkpoint_disc', type=str, default=None)
+    p.add_argument('--pretrained_checkpoint', type=str, default=None)#"H://models/local.2.pre.pth")
+    p.add_argument('--checkpoint', type=str, default=None)
     p.add_argument('--mixed_precision', type=str, default='true')
     p.add_argument('--learning_rate', '-l', type=float, default=1e-4)
     p.add_argument('--lam', type=float, default=100)
@@ -117,7 +127,6 @@ def main():
 
     p.add_argument('--model_dir', type=str, default='H://')
     p.add_argument('--instrumental_lib', type=str, default="C://cs2048_sr44100_hl1024_nf2048_of0|D://cs2048_sr44100_hl1024_nf2048_of0|F://cs2048_sr44100_hl1024_nf2048_of0|H://cs2048_sr44100_hl1024_nf2048_of0")
-    p.add_argument('--pretraining_lib', type=str, default="D://cs2048_sr44100_hl1024_nf2048_of0_pretraining|F://cs2048_sr44100_hl1024_nf2048_of0_pretraining|H://cs2048_sr44100_hl1024_nf2048_of0_pretraining|J://cs2048_sr44100_hl1024_nf2048_of0_pretraining|K://cs2048_sr44100_hl1024_nf2048_of0_pretraining")
     p.add_argument('--vocal_lib', type=str, default="C://cs2048_sr44100_hl1024_nf2048_of0_VOCALS|D://cs2048_sr44100_hl1024_nf2048_of0_VOCALS")
     p.add_argument('--validation_lib', type=str, default="C://cs2048_sr44100_hl1024_nf2048_of0_VALIDATION")
 
@@ -156,7 +165,6 @@ def main():
     args.batch_sizes = [int(batch_size) for batch_size in args.batch_sizes.split(',')]
     args.accumulation_steps = [int(steps) for steps in args.accumulation_steps.split(',')]
     args.instrumental_lib = [p for p in args.instrumental_lib.split('|')]
-    args.pretraining_lib = [p for p in args.pretraining_lib.split('|')]
     args.vocal_lib = [p for p in args.vocal_lib.split('|')]
     args.distributed = str.lower(args.distributed) == 'true'
 
@@ -173,20 +181,18 @@ def main():
 
     train_dataset = VoxAugDataset(
         instrumental_lib=args.instrumental_lib,
-        pretraining_lib=args.pretraining_lib,
         vocal_lib=args.vocal_lib,
         is_validation=False,
         n_fft=args.n_fft,
         hop_length=args.hop_length
     )
 
-    if args.distributed:
-        train_sampler = torch.utils.data.DistributedSampler(train_dataset)
+    train_sampler = torch.utils.data.DistributedSampler(train_dataset) if args.distributed else None
 
     val_dataset = VoxAugDataset(
         instrumental_lib=[args.validation_lib],
         vocal_lib=None,
-        cropsize=args.cropsizes[0],
+        cropsize=2048,
         is_validation=True
     )
 
@@ -202,7 +208,9 @@ def main():
     torch.manual_seed(args.seed)
 
     device = torch.device('cpu')
-    generator = FrameTransformerGenerator(in_channels=2, out_channels=2, channels=args.channels, expansion=args.expansion, n_fft=args.n_fft, dropout=args.dropout, num_heads=args.num_heads)
+
+    pretrained = FrameTransformerUnsupervised(in_channels=4, out_channels=4, channels=args.channels, expansion=args.expansion, n_fft=args.n_fft, dropout=args.dropout, num_heads=args.num_heads)    
+    generator = FrameTransformerGenerator(pretrained)
 
     if torch.cuda.is_available() and args.gpu >= 0:
         device = torch.device('cuda:{}'.format(args.gpu))
@@ -211,9 +219,11 @@ def main():
     if args.distributed:
         generator = nn.parallel.DistributedDataParallel(generator, device_ids=[args.gpu])
 
-    if args.checkpoint_gen is not None:
-        generator.load_state_dict(torch.load(f'{args.checkpoint_gen}.model.pth', map_location=device))
-        
+    if args.checkpoint is not None:
+        generator.load_state_dict(torch.load(f'{args.checkpoint}', map_location=device))
+    elif args.pretrained_checkpoint is not None:
+        pretrained.load_state_dict(torch.load(f'{args.pretrained_checkpoint}', map_location=device))
+
     model_parameters = filter(lambda p: p.requires_grad, generator.parameters())
     params = sum([np.prod(p.size()) for p in model_parameters])
     print(f'# num params: {params}')    
@@ -239,7 +249,8 @@ def main():
 
     best_loss = float('inf')
     while step < args.stages[-1]:
-        train_sampler.set_epoch(epoch)
+        if train_sampler is not None:
+            train_sampler.set_epoch(epoch)
         
         if best_loss == float('inf') or step >= args.stages[stage]:
             for idx in range(len(args.stages)):

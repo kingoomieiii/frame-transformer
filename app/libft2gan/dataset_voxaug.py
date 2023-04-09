@@ -82,11 +82,9 @@ class VoxAugDataset(torch.utils.data.Dataset):
             (0.2, apply_random_eq, { "min": self.random.uniform(0, 1), "max": self.random.uniform(1, 2), }),
             (0.2, apply_stereo_spatialization, { "c": Vc, "alpha": self.random.uniform(0, 2) }),
             (0.2, apply_random_phase_noise, { "strength": self.random.uniform(0, 0.5)}),
-            (0.2, apply_harmonic_distortion, { "c": Vc, "num_harmonics": self.random.randint(1,4), "gain": self.random.uniform(0, 0.2), "hop_length": self.hop_length, "n_fft": self.n_fft }),
             (0.2, apply_pitch_shift, { "pitch_shift": self.random.uniform(-12, 12) }),
             (0.2, apply_emphasis, { "coef": self.random.uniform(0.8, 1) }),
-            (0.2, apply_deemphasis, { "coef": self.random.uniform(0.8, 1) }),
-            (0.2, apply_random_volume, { "gain": self.random.uniform(-0.5, 0.5) }),
+            (0.2, apply_deemphasis, { "coef": self.random.uniform(0.8, 1) })
         ]
 
         random.shuffle(augmentations)
@@ -104,7 +102,7 @@ class VoxAugDataset(torch.utils.data.Dataset):
         VP = V[:, :-1, :]
         VP = (np.abs(VP) / Vc).reshape((VP.shape[0], self.vout_bands, VP.shape[1] // self.vout_bands, VP.shape[2]))
         VP = VP.mean(axis=2)
-        VP = np.where(VP > self.vocal_threshold, 1, (VP / self.vocal_threshold) ** 2)
+        VP = np.where(VP > self.vocal_threshold, 1, 0)
 
         return V, Vc, VP
 
@@ -119,10 +117,9 @@ class VoxAugDataset(torch.utils.data.Dataset):
         augmentations = [
             (0.02, apply_channel_drop, { "channel": self.random.randint(0,2), "alpha": self.random.uniform(0,1) }),
             (0.2, apply_dynamic_range_mod, { "c": c, "threshold": self.random.uniform(0,1), "gain": self.random.uniform(0,0.125), }),
-            (0.2, apply_multiplicative_noise, { "loc": 1, "scale": self.random.uniform(0, 0.125), }),
             (0.2, apply_random_eq, { "min": self.random.uniform(0.5, 1), "max": self.random.uniform(1, 1.5), }),
             (0.2, apply_stereo_spatialization, { "c": c, "alpha": self.random.uniform(0.5, 1.5) }),
-            (0.2, apply_random_phase_noise, { "strength": self.random.uniform(0, 0.25)}),
+            (0.2, apply_random_phase_noise, { "strength": self.random.uniform(0, 0.125)}),
             (0.2, apply_pitch_shift, { "pitch_shift": self.random.uniform(-6, 6) }),
         ]
 
@@ -147,7 +144,7 @@ class VoxAugDataset(torch.utils.data.Dataset):
 
         X, c = data['X'], data['c']
         Y = X if aug else data['Y']
-        V, VP = None, np.zeros((X.shape[0], 4, X.shape[2]))
+        V, VP = None, np.zeros((X.shape[0], self.vout_bands, X.shape[2]))
 
         if not self.is_validation:
             Y = self._augment_instruments(Y, c)
@@ -155,7 +152,18 @@ class VoxAugDataset(torch.utils.data.Dataset):
             X = Y + V
             c = np.max([np.abs(X).max(), c, Vc])
 
-        X = np.clip(np.abs(X) / c, 0, 1)
-        Y = np.clip(np.abs(Y) / c, 0, 1)
+        X = np.clip(((X / c) + 1) * 0.5, 0, 1)
+        Y = np.clip(((Y / c) + 1) * 0.5, 0, 1)
+
+        Xr = X.real
+        Xi = X.imag
+        Yr = Y.real
+        Yi = Y.imag
+        
+        X = np.concatenate((Xr, Xi), axis=0)
+        Y = np.concatenate((Yr, Yi), axis=0)
+
+        # X = np.clip(np.abs(X) / c, 0, 1)
+        # Y = np.clip(np.abs(Y) / c, 0, 1)
 
         return X.astype(np.float32), Y.astype(np.float32), VP.astype(np.float32)
