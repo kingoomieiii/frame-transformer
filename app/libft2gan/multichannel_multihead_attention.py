@@ -5,6 +5,7 @@ import math
 
 from libft2gan.rotary_embedding_torch import RotaryEmbedding
 from libft2gan.multichannel_linear import MultichannelLinear
+from libft2gan.multichannel_layernorm import MultichannelLayerNorm
 
 class MultichannelMultiheadAttention(nn.Module):
     def __init__(self, channels, num_heads, features, kernel_size=3, padding=1, dtype=torch.float):
@@ -25,7 +26,9 @@ class MultichannelMultiheadAttention(nn.Module):
             nn.Conv2d(channels, channels, kernel_size=kernel_size, padding=padding, dtype=dtype),
             MultichannelLinear(channels, channels, features, features, dtype=dtype))
         
-        self.o_proj = MultichannelLinear(channels, channels, features, features, dtype=dtype)
+        self.o_proj = nn.Sequential(
+            MultichannelLayerNorm(channels, features),
+            MultichannelLinear(channels, channels, features, features, dtype=dtype))
         
     def forward(self, x, mem=None, prev_qk=None):
         b,c,h,w = x.shape
@@ -37,7 +40,7 @@ class MultichannelMultiheadAttention(nn.Module):
         if prev_qk is not None:
             qk = qk + prev_qk
 
-        a = torch.matmul(torch.relu(qk),v).transpose(2,3).reshape(b,c,w,-1).transpose(2,3)
+        a = torch.matmul(torch.sigmoid(qk),v).transpose(2,3).reshape(b,c,w,-1).transpose(2,3)
         x = self.o_proj(a)
 
         return x, qk
