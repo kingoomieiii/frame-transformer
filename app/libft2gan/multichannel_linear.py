@@ -3,30 +3,30 @@ import torch.nn as nn
 import math
 
 class MultichannelLinear(nn.Module):
-    def __init__(self, in_channels, out_channels, in_features, out_features, positionwise=True, depthwise=False, bias=False):
+    def __init__(self, in_channels, out_channels, in_features, out_features, positionwise=True, depthwise=False, bias=False, dtype=torch.float):
         super(MultichannelLinear, self).__init__()
 
         self.weight_pw = None
         self.bias_pw = None
         if in_features != out_features or positionwise:
-            self.weight_pw = nn.Parameter(torch.empty(in_channels, out_features, in_features))
+            self.weight_pw = nn.Parameter(torch.empty(in_channels, out_features, in_features, dtype=dtype))
             bound = 1 / math.sqrt(in_features)
             nn.init.uniform_(self.weight_pw, -bound, bound)
 
             if bias:
-                self.bias_pw = nn.Parameter(torch.empty(in_channels, out_features, 1))
+                self.bias_pw = nn.Parameter(torch.empty(in_channels, out_features, 1, dtype=dtype))
                 bound = 1 / math.sqrt(in_features)
                 nn.init.uniform_(self.bias_pw, -bound, bound)
 
         self.weight_dw = None
         self.bias_dw = None
         if in_channels != out_channels or depthwise:
-            self.weight_dw = nn.Parameter(torch.empty(out_channels, in_channels))
+            self.weight_dw = nn.Parameter(torch.empty(out_channels, in_channels, dtype=dtype))
             bound = 1 / math.sqrt(in_channels)
             nn.init.uniform_(self.weight_dw, -bound, bound)
 
             if bias:
-                self.bias_dw = nn.Parameter(torch.empty(out_channels, 1, 1))
+                self.bias_dw = nn.Parameter(torch.empty(out_channels, 1, 1, dtype=dtype))
                 bound = 1 / math.sqrt(in_channels)
                 nn.init.uniform_(self.bias_dw, -bound, bound)
 

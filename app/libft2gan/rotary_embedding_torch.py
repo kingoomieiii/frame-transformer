@@ -8,6 +8,28 @@ from einops import rearrange, repeat
 
 # from https://github.com/lucidrains/rotary-embedding-torch
 
+# MIT License
+
+# Copyright (c) 2021 Phil Wang
+
+# Permission is hereby granted, free of charge, to any person obtaining a copy
+# of this software and associated documentation files (the "Software"), to deal
+# in the Software without restriction, including without limitation the rights
+# to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+# copies of the Software, and to permit persons to whom the Software is
+# furnished to do so, subject to the following conditions:
+
+# The above copyright notice and this permission notice shall be included in all
+# copies or substantial portions of the Software.
+
+# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+# AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+# OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+# SOFTWARE.
+
 # helper functions
 
 def exists(val):
@@ -69,19 +91,12 @@ class RotaryEmbedding(nn.Module):
         theta = 10000,
         max_freq = 10,
         num_freqs = 1,
-        learned_freq = False
+        learned_freq = False,
+        dtype=torch.float
     ):
         super().__init__()
-        if exists(custom_freqs):
-            freqs = custom_freqs
-        elif freqs_for == 'lang':
-            freqs = 1. / (theta ** (torch.arange(0, dim, 2)[:(dim // 2)].float() / dim))
-        elif freqs_for == 'pixel':
-            freqs = torch.linspace(1., max_freq / 2, dim // 2) * pi
-        elif freqs_for == 'constant':
-            freqs = torch.ones(num_freqs).float()
-        else:
-            raise ValueError(f'unknown modality {freqs_for}')
+        
+        freqs = 1. / (theta ** (torch.arange(0, dim, 2)[:(dim // 2)].type(dtype) / dim))
 
         self.learned_freq = learned_freq
         self.cache = dict()

@@ -237,13 +237,14 @@ def apply_frequency_masking2(M, P, random, num_masks=1, max_mask_percentage=0.2,
 
     return H, P
 
-def apply_frame_masking(M, P, random, c, num_masks=1, max_frames=64, alpha=1, type=0):
+def apply_frame_masking(M, P, random, c, num_masks=1, max_mask_percentage=0.2, alpha=1, type=0):
     M = M / c
     H = np.copy(M)
     N = np.random.uniform(size=H.shape)
 
     for _ in range(num_masks):
-        w = random.randint(1, max_frames)
+        mask_percentage = random.uniform(0.01, max_mask_percentage)
+        w = int(M.shape[2] * mask_percentage)
         s = random.randint(0, H.shape[2] - w)
 
         if type == 0:

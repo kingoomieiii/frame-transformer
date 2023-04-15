@@ -60,6 +60,7 @@ class VoxAugDataset(torch.utils.data.Dataset):
         vdata = np.load(path, allow_pickle=True)
             
         V, Vc = vdata['X'], vdata['c']
+        VCr, VCi = vdata['cr'], vdata['ci']
 
         if self.random.uniform(0,1) < 0.5:
             V = apply_time_stretch(V, self.random, self.cropsize)
@@ -103,8 +104,14 @@ class VoxAugDataset(torch.utils.data.Dataset):
         VP = (np.abs(VP) / Vc).reshape((VP.shape[0], self.vout_bands, VP.shape[1] // self.vout_bands, VP.shape[2]))
         VP = VP.mean(axis=2)
         VP = np.where(VP > self.vocal_threshold, 1, 0)
+        VP = np.stack((VP[0], VP[1], VP[0], VP[1]), axis=0)
 
-        return V, Vc, VP
+        VCr = np.max([VCr, np.abs(V.real).max()])
+        VCi = np.max([VCi, np.abs(V.imag).max()])
+        V.imag = V.imag / VCr
+        V.real = V.real / VCi
+
+        return V, VP
 
     def _augment_instruments(self, X, c):
         if X.shape[2] > self.cropsize:
@@ -143,27 +150,33 @@ class VoxAugDataset(torch.utils.data.Dataset):
         aug = 'Y' not in data.files
 
         X, c = data['X'], data['c']
+        cr, ci = data['cr'], data['ci']
         Y = X if aug else data['Y']
         V, VP = None, np.zeros((X.shape[0], self.vout_bands, X.shape[2]))
 
         if not self.is_validation:
             Y = self._augment_instruments(Y, c)
-            V, Vc, VP = self._get_vocals(idx)
+            V, VP = self._get_vocals(idx)
+            scaling_factor = self.random.uniform(0, 1.25)
+            V.imag = V.imag * (ci * scaling_factor)
+            V.real = V.real * (cr * scaling_factor)
             X = Y + V
-            c = np.max([np.abs(X).max(), c, Vc])
-
-        X = np.clip(((X / c) + 1) * 0.5, 0, 1)
-        Y = np.clip(((Y / c) + 1) * 0.5, 0, 1)
+            c = np.max([np.abs(X).max(), c])
 
         Xr = X.real
         Xi = X.imag
         Yr = Y.real
         Yi = Y.imag
-        
-        X = np.concatenate((Xr, Xi), axis=0)
-        Y = np.concatenate((Yr, Yi), axis=0)
 
-        # X = np.clip(np.abs(X) / c, 0, 1)
-        # Y = np.clip(np.abs(Y) / c, 0, 1)
+        cr = np.max([cr, np.abs(Xr).max(), np.abs(Yr).max()])
+        ci = np.max([ci, np.abs(Xi).max(), np.abs(Yi).max()])
+
+        Xr = Xr / cr
+        Xi = Xi / ci
+        Yr = Yr / cr
+        Yi = Yi / ci
+        
+        X = np.concatenate((Xr[:, :-1], Xi[:, :-1]), axis=0)
+        Y = np.concatenate((Yr[:, :-1], Yi[:, :-1]), axis=0)
 
         return X.astype(np.float32), Y.astype(np.float32), VP.astype(np.float32)
