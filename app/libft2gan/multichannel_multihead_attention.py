@@ -37,7 +37,7 @@ class MultichannelMultiheadAttention(nn.Module):
         if prev_qk is not None:
             qk = qk + prev_qk
 
-        a = torch.matmul(F.sigmoid(qk),v).transpose(2,3).reshape(b,c,w,-1).transpose(2,3)
+        a = torch.matmul(torch.relu(qk),v).transpose(2,3).reshape(b,c,w,-1).transpose(2,3)
         x = self.o_proj(a)
 
         return x, qk

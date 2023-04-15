@@ -27,7 +27,7 @@ class ConvolutionalMultiheadAttention(nn.Module):
         if prev_qk is not None:
             qk = qk + prev_qk
 
-        a = torch.matmul(F.sigmoid(qk),v).transpose(1,2).reshape(b,h,w,c).permute(0,3,1,2)
+        a = torch.matmul(torch.relu(qk),v).transpose(1,2).reshape(b,h,w,c).permute(0,3,1,2)
         x = self.o_proj(a)
 
         return x, qk
