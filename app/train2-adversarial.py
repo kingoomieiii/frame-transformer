@@ -11,7 +11,7 @@ import torch.utils.data
 from tqdm import tqdm
 
 from libft2gan.dataset_voxaug import VoxAugDataset
-from libft2gan.frame_transformer2 import FrameTransformerGenerator, FrameTransformerDiscriminator
+from libft2gan.frame_transformer3 import FrameTransformerGenerator, FrameTransformerDiscriminator
 from libft2gan.lr_scheduler_linear_warmup import LinearWarmupScheduler
 from libft2gan.lr_scheduler_polynomial_decay import PolynomialDecayScheduler
 
@@ -43,15 +43,24 @@ def train_epoch(dataloader, generator, discriminator, device, optimizer_gen, opt
         X = X.to(device)[:, :, :generator.max_bin]
         Y = Y.to(device)[:, :, :generator.max_bin]
         VP = VP.to(device)
+
+        for _ in range(2):
+            if np.random.uniform() < 0.5:
+                X1 = X[:, :, :, (X.shape[3] // 2):]
+                X2 = X[:, :, :, :(X.shape[3] // 2)]
+                Y1 = Y[:, :, :, (Y.shape[3] // 2):]
+                Y2 = Y[:, :, :, :(Y.shape[3] // 2)]
+                VP1 = VP[:, :, :, (VP.shape[3] // 2):]
+                VP2 = VP[:, :, :, :(VP.shape[3] // 2)]
+                X = torch.cat((X1, X2), dim=0)
+                Y = torch.cat((Y1, Y2), dim=0)
+                VP = torch.cat((VP1, VP2), dim=0)
         
         discriminator.zero_grad()
 
         with torch.cuda.amp.autocast_mode.autocast():
-            M = generator(X)
-            M = torch.sigmoid(M)
-            Z = X * M
-            pavg = torch.mean(M)
-            pmin = torch.min(M)
+            M = torch.sigmoid(generator(X)) * 2 - 1
+            Z = M
             fake_pred = discriminator(Z.detach())
             d_vox_pred_real = bce_loss(fake_pred, VP) / accumulation_steps
 
@@ -70,9 +79,11 @@ def train_epoch(dataloader, generator, discriminator, device, optimizer_gen, opt
             optimizer_gen.zero_grad()
 
         with torch.cuda.amp.autocast_mode.autocast():
-            M = generator(X)
-            M = torch.sigmoid(M)
-            Z = X * M
+            M = torch.sigmoid(generator(X)) * 2 - 1
+            Z = M
+            pmax = torch.max(M)
+            pavg = torch.mean(M)
+            pmin = torch.min(M)
             fake_pred = discriminator(Z.detach())
             g_gan_loss = bce_loss(fake_pred, torch.zeros_like(VP)) / accumulation_steps
             g_l1_loss = F.l1_loss(Z, Y) / accumulation_steps
@@ -85,7 +96,7 @@ def train_epoch(dataloader, generator, discriminator, device, optimizer_gen, opt
 
         if (itr + 1) % accumulation_steps == 0:
             if progress_bar:
-                pbar.set_description(f'{step}: {str((batch_gen_loss_l1).item())}||{str((batch_gen_loss_gan).item())}||{str((batch_disc_fake_loss).item())}||{str((batch_disc_real_loss).item())}||{pavg.item()}||{pmin.item()}')
+                pbar.set_description(f'{step}: l1={str((batch_gen_loss_l1).item())}|gan={str((batch_gen_loss_gan).item())}|dfake={str((batch_disc_fake_loss).item())}|dreal={str((batch_disc_real_loss).item())}|max={pmax.item()}|avg={pavg.item()}|min={pmin.item()}')
 
             grad_scaler_gen.unscale_(optimizer_gen)
             torch.nn.utils.clip_grad.clip_grad_norm_(generator.parameters(), 0.5)
@@ -170,8 +181,10 @@ def main():
     p.add_argument('--lr_scheduler_decay_power', type=float, default=0.1)
     p.add_argument('--lr_verbosity', type=int, default=1000)
     
-    p.add_argument('--channels', type=int, default=16)
-    p.add_argument('--expansion', type=int, default=10240)
+    p.add_argument('--num_bridge_layers', type=int, default=12)
+    p.add_argument('--num_attention_maps', type=int, default=1)
+    p.add_argument('--channels', type=int, default=8)
+    p.add_argument('--expansion', type=int, default=4096)
     p.add_argument('--num_heads', type=int, default=8)
     p.add_argument('--dropout', type=float, default=0.1)
     
@@ -240,8 +253,8 @@ def main():
     torch.manual_seed(args.seed)
 
     device = torch.device('cpu')
-    generator = FrameTransformerGenerator(in_channels=2, out_channels=2, channels=args.channels, expansion=args.expansion, n_fft=args.n_fft, dropout=args.dropout, num_heads=args.num_heads)
-    discriminator = FrameTransformerDiscriminator(in_channels=2, channels=args.channels, expansion=args.expansion, n_fft=args.n_fft, dropout=args.dropout, num_heads=args.num_heads)
+    generator = FrameTransformerGenerator(in_channels=4, out_channels=4, channels=args.channels, expansion=args.expansion, n_fft=args.n_fft, dropout=args.dropout, num_heads=args.num_heads, num_attention_maps=args.num_attention_maps, num_bridge_layers=args.num_bridge_layers)
+    discriminator = FrameTransformerDiscriminator(in_channels=4, channels=args.channels, expansion=args.expansion, n_fft=args.n_fft, dropout=args.dropout, num_heads=args.num_heads, num_attention_maps=args.num_attention_maps, num_bridge_layers=args.num_bridge_layers)
     
     if torch.cuda.is_available() and args.gpu >= 0:
         device = torch.device('cuda:{}'.format(args.gpu))

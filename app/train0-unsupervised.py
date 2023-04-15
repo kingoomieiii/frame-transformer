@@ -11,13 +11,15 @@ import torch.distributed
 from tqdm import tqdm
 
 from libft2gan.dataset_pretrain import VoxAugDataset
-from libft2gan.frame_transformer2 import FrameTransformerUnsupervised as FrameTransformer, FrameTransformerDiscriminator
+from libft2gan.frame_transformer3 import FrameTransformerGenerator
 from libft2gan.lr_scheduler_linear_warmup import LinearWarmupScheduler
 from libft2gan.lr_scheduler_polynomial_decay import PolynomialDecayScheduler
 
 from torch.nn import functional as F
 
 import libft2gan.signal_loss as signal
+
+import torchvision.transforms.functional as TF
 
 def train_epoch(dataloader, model, device, optimizer, accumulation_steps, progress_bar, lr_warmup=None, grad_scaler=None, step=0, max_bin=0):
     model.train()
@@ -30,16 +32,31 @@ def train_epoch(dataloader, model, device, optimizer, accumulation_steps, progre
 
     pbar = tqdm(dataloader) if progress_bar else dataloader
     for itr, (X, Y) in enumerate(pbar):
-        X = X.to(device)[:, :, :max_bin]
-        Y = Y.to(device)[:, :, :max_bin]
+        X = X.to(device)
+        Y = Y.to(device)
+
+        for _ in range(2):
+            if np.random.uniform() < 0.5:
+                X1 = X[:, :, :, (X.shape[3] // 2):]
+                X2 = X[:, :, :, :(X.shape[3] // 2)]
+                Y1 = Y[:, :, :, (Y.shape[3] // 2):]
+                Y2 = Y[:, :, :, :(Y.shape[3] // 2)]
+                VR1 = VR[:, :, :, (VR.shape[3] // 2):]
+                VR2 = VR[:, :, :, :(VR.shape[3] // 2)]
+                X = torch.cat((X1, X2), dim=0)
+                Y = torch.cat((Y1, Y2), dim=0)
+                VR = torch.cat((VR1, VR2), dim=0)
 
         with torch.cuda.amp.autocast_mode.autocast(enabled=grad_scaler is not None):
-            pred = model(X)            
-            pred = torch.sigmoid(pred)
-            pmax = torch.max(pred)
-            pavg = torch.mean(pred)
-            pmin = torch.min(pred)
-            
+            pred = torch.sigmoid(model(X)) * 2 - 1
+
+        pmax = torch.max(pred)
+        ymax = torch.max(Y)
+        pavg = torch.mean(pred)
+        yavg = torch.mean(Y)
+        pmin = torch.min(pred)
+        ymin = torch.min(Y)
+
         mae_loss = F.l1_loss(pred, Y) / accumulation_steps
         accum_loss = mae_loss
         batch_mag_loss = batch_mag_loss + mae_loss
@@ -55,7 +72,7 @@ def train_epoch(dataloader, model, device, optimizer, accumulation_steps, progre
 
         if (itr + 1) % accumulation_steps == 0:
             if progress_bar:
-                pbar.set_description(f'{step}: {str(batch_mag_loss.item())}|{pavg.item()}|{pmin.item()}')
+                pbar.set_description(f'{step}: {str(batch_mag_loss.item())}|max={pmax.item()}|ymax={ymax.item()}|min={pmin.item()}|ymin={ymin.item()}|pavg={pavg.item()}|yavg={yavg.item()}')
 
             if grad_scaler is not None:
                 grad_scaler.unscale_(optimizer)
@@ -89,9 +106,9 @@ def validate_epoch(dataloader, model, device, max_bin=0):
             Y = Y.to(device)[:, :, :max_bin]
 
             with torch.cuda.amp.autocast_mode.autocast():
-                pred = torch.sigmoid(model(X))
+                pred = model(X)
 
-            l1_mag = crit(pred[:, :2], Y[:, :2])
+            l1_mag = F.l1_loss(pred, Y)
             loss = l1_mag
 
             if torch.logical_or(loss.isnan(), loss.isinf()):
@@ -105,11 +122,11 @@ def validate_epoch(dataloader, model, device, max_bin=0):
 def main():
     p = argparse.ArgumentParser()
     p.add_argument('--id', type=str, default='')
-    p.add_argument('--seed', '-s', type=int, default=51)
+    p.add_argument('--seed', '-s', type=int, default=52)
     p.add_argument('--sr', '-r', type=int, default=44100)
     p.add_argument('--hop_length', '-H', type=int, default=1024)
     p.add_argument('--n_fft', '-f', type=int, default=2048)
-    p.add_argument('--checkpoint', type=str, default="H://models/local.2.pre.pth")
+    p.add_argument('--checkpoint', type=str, default=None)#"H://models/local.14.pre.pth")
     p.add_argument('--checkpoint_disc', type=str, default=None)
     p.add_argument('--mixed_precision', type=str, default='true')
     p.add_argument('--learning_rate', '-l', type=float, default=1e-4)
@@ -126,16 +143,18 @@ def main():
     p.add_argument('--vocal_lib', type=str, default="C://cs2048_sr44100_hl1024_nf2048_of0_VOCALS|D://cs2048_sr44100_hl1024_nf2048_of0_VOCALS")
     p.add_argument('--validation_lib', type=str, default="C://cs2048_sr44100_hl1024_nf2048_of0_VALIDATION")
 
-    p.add_argument('--curr_step', type=int, default=100976)
-    p.add_argument('--curr_epoch', type=int, default=3)
-    p.add_argument('--warmup_steps', type=int, default=8000)
+    p.add_argument('--curr_step', type=int, default=0)#597932)
+    p.add_argument('--curr_epoch', type=int, default=0)
+    p.add_argument('--warmup_steps', type=int, default=12000)
     p.add_argument('--decay_steps', type=int, default=1000000)
     p.add_argument('--lr_scheduler_decay_target', type=int, default=1e-12)
     p.add_argument('--lr_scheduler_decay_power', type=float, default=0.1)
     p.add_argument('--lr_verbosity', type=int, default=1000)
     
+    p.add_argument('--num_bridge_layers', type=int, default=12)
+    p.add_argument('--num_attention_maps', type=int, default=1)
     p.add_argument('--channels', type=int, default=8)
-    p.add_argument('--expansion', type=int, default=10240)
+    p.add_argument('--expansion', type=int, default=4096)
     p.add_argument('--num_heads', type=int, default=8)
     p.add_argument('--dropout', type=float, default=0.1)
     
@@ -145,8 +164,8 @@ def main():
     p.add_argument('--accumulation_steps', '-A', type=str, default='4,8')
     p.add_argument('--gpu', '-g', type=int, default=-1)
     p.add_argument('--optimizer', type=str.lower, choices=['adam', 'adamw', 'sgd', 'radam', 'rmsprop'], default='adam')
-    p.add_argument('--prefetch_factor', type=int, default=4)
-    p.add_argument('--num_workers', '-w', type=int, default=8)
+    p.add_argument('--prefetch_factor', type=int, default=2)
+    p.add_argument('--num_workers', '-w', type=int, default=4)
     p.add_argument('--epoch', '-E', type=int, default=40)
     p.add_argument('--progress_bar', '-pb', type=str, default='true')
     p.add_argument('--save_all', type=str, default='true')
@@ -206,7 +225,7 @@ def main():
     torch.manual_seed(args.seed)
 
     device = torch.device('cpu')
-    generator = FrameTransformer(in_channels=4, out_channels=4, channels=args.channels, expansion=args.expansion, n_fft=args.n_fft, dropout=args.dropout, num_heads=args.num_heads)
+    generator = FrameTransformerGenerator(in_channels=4, out_channels=4, channels=args.channels, expansion=args.expansion, n_fft=args.n_fft, dropout=args.dropout, num_heads=args.num_heads, num_attention_maps=args.num_attention_maps, num_bridge_layers=args.num_bridge_layers)
 
     if torch.cuda.is_available() and args.gpu >= 0:
         device = torch.device('cuda:{}'.format(args.gpu))
