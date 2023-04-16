@@ -17,9 +17,11 @@ from libft2gan.lr_scheduler_polynomial_decay import PolynomialDecayScheduler
 
 from torch.nn import functional as F
 
-import libft2gan.signal_loss as signal
-
-import torchvision.transforms.functional as TF
+def halve_tensor(X):
+    X1 = X[:, :, :, (X.shape[3] // 2):]
+    X2 = X[:, :, :, :(X.shape[3] // 2)]
+    X = torch.cat((X1, X2), dim=0)
+    return X
 
 def train_epoch(dataloader, model, device, optimizer, accumulation_steps, progress_bar, lr_warmup=None, grad_scaler=None, step=0, max_bin=0):
     model.train()
@@ -35,17 +37,13 @@ def train_epoch(dataloader, model, device, optimizer, accumulation_steps, progre
         X = X.to(device)
         Y = Y.to(device)
 
-        for _ in range(2):
+        if np.random.uniform() < 0.5:
+            X = halve_tensor(X)
+            Y = halve_tensor(Y)
+            
             if np.random.uniform() < 0.5:
-                X1 = X[:, :, :, (X.shape[3] // 2):]
-                X2 = X[:, :, :, :(X.shape[3] // 2)]
-                Y1 = Y[:, :, :, (Y.shape[3] // 2):]
-                Y2 = Y[:, :, :, :(Y.shape[3] // 2)]
-                VR1 = VR[:, :, :, (VR.shape[3] // 2):]
-                VR2 = VR[:, :, :, :(VR.shape[3] // 2)]
-                X = torch.cat((X1, X2), dim=0)
-                Y = torch.cat((Y1, Y2), dim=0)
-                VR = torch.cat((VR1, VR2), dim=0)
+                X = halve_tensor(X)
+                Y = halve_tensor(Y)
 
         with torch.cuda.amp.autocast_mode.autocast(enabled=grad_scaler is not None):
             pred = torch.sigmoid(model(X)) * 2 - 1

@@ -17,6 +17,12 @@ from libft2gan.lr_scheduler_polynomial_decay import PolynomialDecayScheduler
 
 from torch.nn import functional as F
 
+def halve_tensor(X):
+    X1 = X[:, :, :, (X.shape[3] // 2):]
+    X2 = X[:, :, :, :(X.shape[3] // 2)]
+    X = torch.cat((X1, X2), dim=0)
+    return X
+
 def train_epoch(dataloader, generator, discriminator, device, optimizer_gen, optimizer_disc, accumulation_steps, progress_bar, scheduler_gen=None, scheduler_disc=None, grad_scaler_gen=None, grad_scaler_disc=None, step=0, lam=100):
     gen_loss = 0
     batch_gen_loss = 0
@@ -44,17 +50,15 @@ def train_epoch(dataloader, generator, discriminator, device, optimizer_gen, opt
         Y = Y.to(device)[:, :, :generator.max_bin]
         VP = VP.to(device)
 
-        for _ in range(2):
+        if np.random.uniform() < 0.5:
+            X = halve_tensor(X)
+            Y = halve_tensor(Y)
+            VP = halve_tensor(VP)
+            
             if np.random.uniform() < 0.5:
-                X1 = X[:, :, :, (X.shape[3] // 2):]
-                X2 = X[:, :, :, :(X.shape[3] // 2)]
-                Y1 = Y[:, :, :, (Y.shape[3] // 2):]
-                Y2 = Y[:, :, :, :(Y.shape[3] // 2)]
-                VP1 = VP[:, :, :, (VP.shape[3] // 2):]
-                VP2 = VP[:, :, :, :(VP.shape[3] // 2)]
-                X = torch.cat((X1, X2), dim=0)
-                Y = torch.cat((Y1, Y2), dim=0)
-                VP = torch.cat((VP1, VP2), dim=0)
+                X = halve_tensor(X)
+                Y = halve_tensor(Y)
+                VP = halve_tensor(VP)
         
         discriminator.zero_grad()
 
