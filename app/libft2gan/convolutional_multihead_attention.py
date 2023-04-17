@@ -15,9 +15,7 @@ class ConvolutionalMultiheadAttention(nn.Module):
         self.q_proj = nn.Conv2d(channels, channels, kernel_size=kernel_size, padding=padding)
         self.k_proj = nn.Conv2d(channels, channels, kernel_size=kernel_size, padding=padding)
         self.v_proj = nn.Conv2d(channels, channels, kernel_size=kernel_size, padding=padding)
-        self.o_proj = nn.Sequential(
-            ChannelNorm(channels),
-            nn.Conv2d(channels, channels, kernel_size=kernel_size, padding=padding))
+        self.o_proj = nn.Conv2d(channels, channels, kernel_size=kernel_size, padding=padding)
         
     def forward(self, x, mem=None, prev_qk=None):
         b,c,h,w = x.shape
@@ -30,7 +28,7 @@ class ConvolutionalMultiheadAttention(nn.Module):
         if prev_qk is not None:
             qk = qk + prev_qk
 
-        a = torch.matmul(torch.sigmoid(qk),v).transpose(1,2).reshape(b,h,w,c).permute(0,3,1,2)
+        a = torch.matmul(F.softmax(qk, dim=-1),v).transpose(1,2).reshape(b,h,w,c).permute(0,3,1,2)
         x = self.o_proj(a)
 
         return x, qk
