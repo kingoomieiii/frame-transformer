@@ -31,14 +31,16 @@ class VoxAugDataset(torch.utils.data.Dataset):
             mixes = [os.path.join(mp, f) for f in os.listdir(mp) if os.path.isfile(os.path.join(mp, f))]
 
             for m in mixes:
-                self.curr_list.append(m)
+                if m.endswith('.npz'):
+                    self.curr_list.append(m)
             
         if not is_validation and len(vocal_lib) != 0:
             for vp in vocal_lib:
                 vox = [os.path.join(vp, f) for f in os.listdir(vp) if os.path.isfile(os.path.join(vp, f))]
 
                 for v in vox:
-                    self.vocal_list.append(v)
+                    if v.endswith('.npz'):
+                        self.vocal_list.append(v)
 
         def key(p):
             return os.path.basename(p)
@@ -157,11 +159,13 @@ class VoxAugDataset(torch.utils.data.Dataset):
         if not self.is_validation:
             Y = self._augment_instruments(Y, c)
             V, VP = self._get_vocals(idx)
-            scaling_factor = self.random.uniform(0, 1.25)
-            V.imag = V.imag * (ci * scaling_factor)
-            V.real = V.real * (cr * scaling_factor)
             X = Y + V
             c = np.max([np.abs(X).max(), c])
+
+        # XP = (np.angle(X) + np.pi) / (2 * np.pi)
+        # X = np.abs(X) / c
+        # Y = np.abs(Y) / c
+        # X = np.concatenate((X, XP), axis=0)
 
         Xr = X.real
         Xi = X.imag
