@@ -33,4 +33,4 @@ for key in tqdm(base_names.keys()):
         datas.append((file, data))
 
     for file, data in datas:
-        np.savez(file, **data)
+        np.savez(file, cr=cr, ci=ci, **data)
