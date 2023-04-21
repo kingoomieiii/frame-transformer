@@ -51,8 +51,7 @@ def train_epoch(dataloader, generator, discriminator, device, optimizer_gen, opt
         discriminator.zero_grad()
 
         with torch.cuda.amp.autocast_mode.autocast():
-            M = torch.sigmoid(generator(X)) * 2 - 1
-            Z = M
+            Z = torch.sigmoid(generator(X)) * 2 - 1
             disc_pred = discriminator(Z.detach())
             d_loss = bce_loss(disc_pred, VP) / accumulation_steps
             batch_disc_loss = batch_disc_loss + d_loss
@@ -67,8 +66,7 @@ def train_epoch(dataloader, generator, discriminator, device, optimizer_gen, opt
             optimizer_gen.zero_grad()
 
         with torch.cuda.amp.autocast_mode.autocast():
-            M = torch.sigmoid(generator(X)) * 2 - 1
-            Z = M
+            Z = torch.sigmoid(generator(X)) * 2 - 1
             disc_pred = discriminator(Z.detach())
             g_gan_loss = bce_loss(disc_pred, torch.zeros_like(VP)) / accumulation_steps
             g_l1_loss = F.l1_loss(Z, Y) / accumulation_steps
