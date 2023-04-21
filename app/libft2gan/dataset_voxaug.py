@@ -58,7 +58,6 @@ class VoxAugDataset(torch.utils.data.Dataset):
 
     def _get_vocals(self, idx):
         path = str(self.vocal_list[(self.epoch + idx) % len(self.vocal_list)])
-
         vdata = np.load(path, allow_pickle=True)
             
         V, Vc = vdata['X'], vdata['c']
@@ -110,8 +109,8 @@ class VoxAugDataset(torch.utils.data.Dataset):
 
         VCr = np.max([VCr, np.abs(V.real).max()])
         VCi = np.max([VCi, np.abs(V.imag).max()])
-        V.imag = V.imag / VCr
-        V.real = V.real / VCi
+        V.real = V.real / VCr
+        V.imag = V.imag / VCi
 
         return V, VP
 
@@ -159,13 +158,13 @@ class VoxAugDataset(torch.utils.data.Dataset):
         if not self.is_validation:
             Y = self._augment_instruments(Y, c)
             V, VP = self._get_vocals(idx)
+            V.real = V.real * cr
+            V.imag = V.imag * ci
             X = Y + V
-            c = np.max([np.abs(X).max(), c])
-
-        # XP = (np.angle(X) + np.pi) / (2 * np.pi)
-        # X = np.abs(X) / c
-        # Y = np.abs(Y) / c
-        # X = np.concatenate((X, XP), axis=0)
+        elif X.shape[2] > self.cropsize:
+            start = self.random.randint(0, X.shape[2] - self.cropsize - 1)
+            X = X[:, :, start:start+self.cropsize]
+            Y = Y[:, :, start:start+self.cropsize]
 
         Xr = X.real
         Xi = X.imag

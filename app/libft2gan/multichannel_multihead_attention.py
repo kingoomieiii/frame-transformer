@@ -15,16 +15,16 @@ class MultichannelMultiheadAttention(nn.Module):
         self.embedding = RotaryEmbedding(features // num_heads, dtype=dtype)
 
         self.q_proj = nn.Sequential(
-            nn.Conv2d(channels, channels, kernel_size=kernel_size, padding=padding, dtype=dtype),
-            MultichannelLinear(channels, channels, features, features, dtype=dtype))
+            MultichannelLinear(channels, channels, features, features, dtype=dtype),
+            nn.Conv2d(channels, channels, kernel_size=(1,kernel_size), padding=(0,padding), dtype=dtype))
         
         self.k_proj = nn.Sequential(
-            nn.Conv2d(channels, channels, kernel_size=kernel_size, padding=padding, dtype=dtype),
-            MultichannelLinear(channels, channels, features, features, dtype=dtype))
+            MultichannelLinear(channels, channels, features, features, dtype=dtype),
+            nn.Conv2d(channels, channels, kernel_size=(1,kernel_size), padding=(0,padding), dtype=dtype))
         
         self.v_proj = nn.Sequential(
-            nn.Conv2d(channels, channels, kernel_size=kernel_size, padding=padding, dtype=dtype),
-            MultichannelLinear(channels, channels, features, features, dtype=dtype))
+            MultichannelLinear(channels, channels, features, features, dtype=dtype),
+            nn.Conv2d(channels, channels, kernel_size=(1,kernel_size), padding=(0,padding), dtype=dtype))
         
         self.o_proj = MultichannelLinear(channels, channels, features, features, dtype=dtype)
         

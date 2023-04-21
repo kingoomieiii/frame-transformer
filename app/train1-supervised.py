@@ -9,9 +9,10 @@ import torch.utils.data
 import torch.distributed
 
 from tqdm import tqdm
+import wandb
 
 from libft2gan.dataset_voxaug import VoxAugDataset
-from libft2gan.frame_transformer3 import FrameTransformerGenerator
+from libft2gan.frame_transformer2 import FrameTransformerGenerator
 from libft2gan.lr_scheduler_linear_warmup import LinearWarmupScheduler
 from libft2gan.lr_scheduler_polynomial_decay import PolynomialDecayScheduler
 
@@ -23,7 +24,7 @@ def halve_tensor(X):
     X = torch.cat((X1, X2), dim=0)
     return X
 
-def train_epoch(dataloader, model, device, optimizer, accumulation_steps, progress_bar, lr_warmup=None, grad_scaler=None, step=0, max_bin=0):
+def train_epoch(dataloader, model, device, optimizer, accumulation_steps, progress_bar, lr_warmup=None, grad_scaler=None, step=0, max_bin=0, use_wandb=False):
     model.train()
 
     mag_loss = 0
@@ -31,6 +32,7 @@ def train_epoch(dataloader, model, device, optimizer, accumulation_steps, progre
     batches = 0
     
     model.zero_grad()
+    torch.cuda.empty_cache()
 
     pbar = tqdm(dataloader) if progress_bar else dataloader
     for itr, (X, Y, VR) in enumerate(pbar):
@@ -38,22 +40,16 @@ def train_epoch(dataloader, model, device, optimizer, accumulation_steps, progre
         Y = Y.to(device)[:, :, :max_bin]
         VR = VR.to(device)
 
-        if np.random.uniform() < 0.5:
-            X = halve_tensor(X)
-            Y = halve_tensor(Y)
-            VR = halve_tensor(VR)
-            
-            if np.random.uniform() < 0.5:
-                X = halve_tensor(X)
-                Y = halve_tensor(Y)
-                VR = halve_tensor(VR)
-
         with torch.cuda.amp.autocast_mode.autocast(enabled=grad_scaler is not None):
             pred = torch.sigmoid(model(X)) * 2 - 1
 
-        mae_loss = F.l1_loss(pred, Y) / accumulation_steps
+        pred_c = torch.complex(pred[:, :2].float(), pred[:, 2:].float())
+        pred_y = torch.complex(Y[:, :2].float(), Y[:, 2:].float())
+        mag_loss = F.l1_loss(torch.abs(pred_c), torch.abs(pred_y)) / accumulation_steps
+        phase_loss = F.l1_loss((torch.angle(pred_c) + np.pi) / (2 * torch.pi), (torch.angle(pred_y) + np.pi) / (2 * torch.pi)) / accumulation_steps
+        mae_loss = F.l1_loss((pred + 1) * 0.5, (Y + 1) * 0.5) / accumulation_steps
         accum_loss = mae_loss
-        batch_mag_loss = batch_mag_loss + mae_loss
+        # batch_mag_loss = batch_mag_loss + 
 
         if torch.logical_or(accum_loss.isnan(), accum_loss.isinf()):
             print('nan training loss; aborting')
@@ -66,11 +62,19 @@ def train_epoch(dataloader, model, device, optimizer, accumulation_steps, progre
 
         if (itr + 1) % accumulation_steps == 0:
             if progress_bar:
-                pbar.set_description(f'{step}: {batch_mag_loss.item()}')
+                pbar.set_description(f'{step}: {mae_loss.item()}|{mag_loss.item()}|{phase_loss.item() * 0.5}')
+            
+            if use_wandb:
+                wandb.log({
+                    't_mag_loss': mag_loss,
+                    't_phase_loss': phase_loss,
+                    't_complex_loss': mae_loss
+                })
+
 
             if grad_scaler is not None:
-                # grad_scaler.unscale_(optimizer)
-                # torch.nn.utils.clip_grad.clip_grad_norm_(model.parameters(), 0.5)
+                grad_scaler.unscale_(optimizer)
+                torch.nn.utils.clip_grad.clip_grad_norm_(model.parameters(), 0.5)
                 grad_scaler.step(optimizer)
                 grad_scaler.update()
             else:
@@ -83,16 +87,17 @@ def train_epoch(dataloader, model, device, optimizer, accumulation_steps, progre
 
             model.zero_grad()
             batches = batches + 1
-            mag_loss = mag_loss + batch_mag_loss.item()
+            mag_loss = mag_loss + mag_loss.item() # batch_mag_loss.item()
             batch_mag_loss = 0
 
     return mag_loss / batches, step
 
-def validate_epoch(dataloader, model, device, max_bin=0):
+def validate_epoch(dataloader, model, device, max_bin=0, use_wandb=False):
     model.train()
     crit = nn.L1Loss()
 
-    mag_loss = 0
+    sum_loss = 0
+    batches = 0
 
     with torch.no_grad():
         for X, Y, _ in dataloader:
@@ -100,19 +105,31 @@ def validate_epoch(dataloader, model, device, max_bin=0):
             Y = Y.to(device)[:, :, :max_bin]
 
             with torch.cuda.amp.autocast_mode.autocast():
-                pred = model(X)
-                pred = pred
+                pred = torch.sigmoid(model(X)) * 2 - 1
 
-            l1_mag = F.l1_loss(torch.abs(pred), torch.abs(Y))
-            loss = l1_mag
+            pred_c = torch.complex(pred[:, :2], pred[:, 2:])
+            pred_y = torch.complex(Y[:, :2], Y[:, 2:])
+            mag_loss = F.l1_loss(torch.abs(pred_c), torch.abs(pred_y))
+            phase_loss = F.l1_loss((torch.angle(pred_c) + np.pi) / (2 * torch.pi), (torch.angle(pred_y) + np.pi) / (2 * torch.pi))
+            mae_loss = F.l1_loss((pred + 1) * 0.5, (X + 1) * 0.5)
+            
+            if use_wandb:
+                wandb.log({
+                    'v_mag_loss': mag_loss,
+                    'v_phase_loss': phase_loss,
+                    'v_complex_loss': mae_loss
+                })
+
+            loss = mae_loss
 
             if torch.logical_or(loss.isnan(), loss.isinf()):
                 print('nan validation loss; aborting')
                 quit()
             else:
-                mag_loss += l1_mag.item() * len(X)
+                sum_loss += loss.item()
+                batches += 1
 
-    return mag_loss / len(dataloader.dataset)
+    return sum_loss / batches
 
 def main():
     p = argparse.ArgumentParser()
@@ -122,8 +139,8 @@ def main():
     p.add_argument('--hop_length', '-H', type=int, default=1024)
     p.add_argument('--n_fft', '-f', type=int, default=2048)
     p.add_argument('--pretrained_checkpoint', type=str, default=None)#"H://models/local.0.pre.pth")
-    p.add_argument('--checkpoint', type=str, default=None)
-    p.add_argument('--mixed_precision', type=str, default='false')
+    p.add_argument('--checkpoint', type=str, default=None)#"H://models/local.12.pre.pth")
+    p.add_argument('--mixed_precision', type=str, default='true')
     p.add_argument('--learning_rate', '-l', type=float, default=1e-4)
     p.add_argument('--lam', type=float, default=100)
     p.add_argument('--distributed', type=str, default="false")
@@ -142,8 +159,8 @@ def main():
     p.add_argument('--lr_scheduler_decay_power', type=float, default=0.1)
     p.add_argument('--lr_verbosity', type=int, default=1000)
     
-    p.add_argument('--num_bridge_layers', type=int, default=12)
-    p.add_argument('--num_attention_maps', type=int, default=1)
+    p.add_argument('--num_bridge_layers', type=int, default=2)
+    p.add_argument('--num_attention_maps', type=int, default=2)
     p.add_argument('--channels', type=int, default=8)
     p.add_argument('--expansion', type=int, default=4096)
     p.add_argument('--num_heads', type=int, default=8)
@@ -161,6 +178,11 @@ def main():
     p.add_argument('--progress_bar', '-pb', type=str, default='true')
     p.add_argument('--save_all', type=str, default='true')
     p.add_argument('--debug', action='store_true')
+    p.add_argument('--wandb', type=str, default='false')
+    p.add_argument('--wandb_project', type=str, default='VOCAL-REMOVER')
+    p.add_argument('--wandb_entity', type=str, default='carperbr')
+    p.add_argument('--wandb_run_id', type=str, default=None)
+
     args = p.parse_args()
 
     args.progress_bar = str.lower(args.progress_bar) == 'true'
@@ -173,8 +195,12 @@ def main():
     args.instrumental_lib = [p for p in args.instrumental_lib.split('|')]
     args.vocal_lib = [p for p in args.vocal_lib.split('|')]
     args.distributed = str.lower(args.distributed) == 'true'
+    args.wandb = str.lower(args.wandb) == 'true'
 
     args.model_dir = os.path.join(args.model_dir, "")
+
+    if args.wandb:
+        wandb.init(project=args.wandb_project, entity=args.wandb_entity, config=args, id=args.wandb_run_id, resume="must" if args.wandb_run_id is not None else None)
 
     print(args)
 
@@ -198,7 +224,6 @@ def main():
     val_dataset = VoxAugDataset(
         instrumental_lib=[args.validation_lib],
         vocal_lib=None,
-        cropsize=2048,
         is_validation=True
     )
 
@@ -231,12 +256,11 @@ def main():
 
     model_parameters = filter(lambda p: p.requires_grad, generator.parameters())
     params = sum([np.prod(p.size()) for p in model_parameters])
-    print(f'# num params: {params}')    
-    
+    print(f'# num params: {params}')
+
     optimizer_gen = torch.optim.AdamW(
         filter(lambda p: p.requires_grad, generator.parameters()),
-        lr=args.learning_rate,
-        betas=(0.5, 0.999)
+        lr=args.learning_rate
     )
 
     grad_scaler_gen = torch.cuda.amp.grad_scaler.GradScaler() if args.mixed_precision else None
@@ -267,7 +291,7 @@ def main():
             accum_steps = args.accumulation_steps[stage]
             print(f'setting cropsize to {cropsize}, batch size to {batch_size}, accum steps to {accum_steps}')
 
-            val_dataset.cropsize = cropsize
+            val_dataset.cropsize = 2048
             val_dataloader = torch.utils.data.DataLoader(
                 dataset=val_dataset,
                 batch_size=1,
@@ -288,7 +312,7 @@ def main():
 
         print('# epoch {}'.format(epoch))
         train_dataloader.dataset.set_epoch(epoch)
-        train_loss_mag, step = train_epoch(train_dataloader, generator, device, optimizer=optimizer_gen, accumulation_steps=accum_steps, progress_bar=args.progress_bar, lr_warmup=scheduler_gen, grad_scaler=grad_scaler_gen, step=step, max_bin=args.n_fft // 2)
+        train_loss_mag, step = train_epoch(train_dataloader, generator, device, optimizer=optimizer_gen, accumulation_steps=accum_steps, progress_bar=args.progress_bar, lr_warmup=scheduler_gen, grad_scaler=grad_scaler_gen, step=step, max_bin=args.n_fft // 2, use_wandb=args.wandb)
         val_loss_mag = validate_epoch(val_dataloader, generator, device, max_bin=args.n_fft // 2)
 
         print(
@@ -299,7 +323,7 @@ def main():
         if val_loss_mag < best_loss:
             best_loss = val_loss_mag
             print('  * best validation loss')
-
+            
         if args.world_rank == 0:
             model_path = f'{args.model_dir}models/local.{epoch}'
             torch.save(generator.state_dict(), f'{model_path}.pre.gen.pth')

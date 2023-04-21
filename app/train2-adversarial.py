@@ -11,7 +11,7 @@ import torch.utils.data
 from tqdm import tqdm
 
 from libft2gan.dataset_voxaug import VoxAugDataset
-from libft2gan.frame_transformer3 import FrameTransformerGenerator, FrameTransformerDiscriminator
+from libft2gan.frame_transformer2 import FrameTransformerGenerator, FrameTransformerDiscriminator
 from libft2gan.lr_scheduler_linear_warmup import LinearWarmupScheduler
 from libft2gan.lr_scheduler_polynomial_decay import PolynomialDecayScheduler
 
@@ -31,8 +31,6 @@ def train_epoch(dataloader, generator, discriminator, device, optimizer_gen, opt
 
     disc_loss = 0
     batch_disc_loss = 0
-    batch_disc_fake_loss = 0
-    batch_disc_real_loss = 0
 
     batches = 0
     
@@ -49,28 +47,14 @@ def train_epoch(dataloader, generator, discriminator, device, optimizer_gen, opt
         X = X.to(device)[:, :, :generator.max_bin]
         Y = Y.to(device)[:, :, :generator.max_bin]
         VP = VP.to(device)
-
-        if np.random.uniform() < 0.5:
-            X = halve_tensor(X)
-            Y = halve_tensor(Y)
-            VP = halve_tensor(VP)
-            
-            if np.random.uniform() < 0.5:
-                X = halve_tensor(X)
-                Y = halve_tensor(Y)
-                VP = halve_tensor(VP)
         
         discriminator.zero_grad()
 
         with torch.cuda.amp.autocast_mode.autocast():
             M = torch.sigmoid(generator(X)) * 2 - 1
             Z = M
-            fake_pred = discriminator(Z.detach())
-            d_vox_pred_real = bce_loss(fake_pred, VP) / accumulation_steps
-
-            d_loss = d_vox_pred_real
-            batch_disc_fake_loss = batch_disc_fake_loss + d_vox_pred_real
-            batch_disc_real_loss = batch_disc_real_loss + d_vox_pred_real
+            disc_pred = discriminator(Z.detach())
+            d_loss = bce_loss(disc_pred, VP) / accumulation_steps
             batch_disc_loss = batch_disc_loss + d_loss
             grad_scaler_disc.scale(d_loss).backward()
             
@@ -85,11 +69,8 @@ def train_epoch(dataloader, generator, discriminator, device, optimizer_gen, opt
         with torch.cuda.amp.autocast_mode.autocast():
             M = torch.sigmoid(generator(X)) * 2 - 1
             Z = M
-            pmax = torch.max(M)
-            pavg = torch.mean(M)
-            pmin = torch.min(M)
-            fake_pred = discriminator(Z.detach())
-            g_gan_loss = bce_loss(fake_pred, torch.zeros_like(VP)) / accumulation_steps
+            disc_pred = discriminator(Z.detach())
+            g_gan_loss = bce_loss(disc_pred, torch.zeros_like(VP)) / accumulation_steps
             g_l1_loss = F.l1_loss(Z, Y) / accumulation_steps
             g_loss = g_gan_loss + lam * g_l1_loss
             grad_scaler_gen.scale(g_loss).backward()
@@ -100,7 +81,7 @@ def train_epoch(dataloader, generator, discriminator, device, optimizer_gen, opt
 
         if (itr + 1) % accumulation_steps == 0:
             if progress_bar:
-                pbar.set_description(f'{step}: l1={str((batch_gen_loss_l1).item())}|gan={str((batch_gen_loss_gan).item())}|dfake={str((batch_disc_fake_loss).item())}|dreal={str((batch_disc_real_loss).item())}|max={pmax.item()}|avg={pavg.item()}|min={pmin.item()}')
+                pbar.set_description(f'{step}: l1-loss={str((batch_gen_loss_l1).item())}|g-loss={str((batch_gen_loss_gan).item())}|d-loss={str((batch_disc_loss).item())}')
 
             grad_scaler_gen.unscale_(optimizer_gen)
             torch.nn.utils.clip_grad.clip_grad_norm_(generator.parameters(), 0.5)
@@ -112,8 +93,6 @@ def train_epoch(dataloader, generator, discriminator, device, optimizer_gen, opt
             batch_gen_loss_l1 = 0
             batch_gen_loss_gan = 0
             batch_disc_loss = 0
-            batch_disc_real_loss = 0
-            batch_disc_fake_loss = 0
             step = step + 1
             batches = batches + 1
             
@@ -185,8 +164,8 @@ def main():
     p.add_argument('--lr_scheduler_decay_power', type=float, default=0.1)
     p.add_argument('--lr_verbosity', type=int, default=1000)
     
-    p.add_argument('--num_bridge_layers', type=int, default=12)
-    p.add_argument('--num_attention_maps', type=int, default=1)
+    p.add_argument('--num_bridge_layers', type=int, default=1)
+    p.add_argument('--num_attention_maps', type=int, default=2)
     p.add_argument('--channels', type=int, default=8)
     p.add_argument('--expansion', type=int, default=4096)
     p.add_argument('--num_heads', type=int, default=8)

@@ -11,7 +11,7 @@ import torch.distributed
 from tqdm import tqdm
 
 from libft2gan.dataset_pretrain import VoxAugDataset
-from libft2gan.frame_transformer3 import FrameTransformerGenerator
+from libft2gan.frame_transformer2 import FrameTransformerGenerator
 from libft2gan.lr_scheduler_linear_warmup import LinearWarmupScheduler
 from libft2gan.lr_scheduler_polynomial_decay import PolynomialDecayScheduler
 
@@ -37,16 +37,16 @@ def train_epoch(dataloader, model, device, optimizer, accumulation_steps, progre
         X = X.to(device)
         Y = Y.to(device)
 
-        if np.random.uniform() < 0.5:
-            X = halve_tensor(X)
-            Y = halve_tensor(Y)
-            
-            if np.random.uniform() < 0.5:
-                X = halve_tensor(X)
-                Y = halve_tensor(Y)
-
         with torch.cuda.amp.autocast_mode.autocast(enabled=grad_scaler is not None):
             pred = torch.sigmoid(model(X)) * 2 - 1
+
+        pred_c = torch.complex(pred[:, :2].float(), pred[:, 2:].float())
+        pred_y = torch.complex(Y[:, :2].float(), Y[:, 2:].float())
+        mag_loss = F.l1_loss(torch.abs(pred_c), torch.abs(pred_y)) / accumulation_steps
+        phase_loss = F.l1_loss((torch.angle(pred_c) + np.pi) / (2 * torch.pi), (torch.angle(pred_y) + np.pi) / (2 * torch.pi)) / accumulation_steps
+        mae_loss = F.l1_loss((pred + 1) * 0.5, (X + 1) * 0.5) / accumulation_steps
+        accum_loss = mae_loss
+        batch_mag_loss = batch_mag_loss + mae_loss
 
         pmax = torch.max(pred)
         ymax = torch.max(Y)
@@ -55,9 +55,6 @@ def train_epoch(dataloader, model, device, optimizer, accumulation_steps, progre
         pmin = torch.min(pred)
         ymin = torch.min(Y)
 
-        mae_loss = F.l1_loss(pred, Y) / accumulation_steps
-        accum_loss = mae_loss
-        batch_mag_loss = batch_mag_loss + mae_loss
 
         if torch.logical_or(accum_loss.isnan(), accum_loss.isinf()):
             print('nan training loss; aborting')
@@ -70,7 +67,7 @@ def train_epoch(dataloader, model, device, optimizer, accumulation_steps, progre
 
         if (itr + 1) % accumulation_steps == 0:
             if progress_bar:
-                pbar.set_description(f'{step}: {str(batch_mag_loss.item())}|max={pmax.item()}|ymax={ymax.item()}|min={pmin.item()}|ymin={ymin.item()}|pavg={pavg.item()}|yavg={yavg.item()}')
+                pbar.set_description(f'{step}: cmp=[{str(mae_loss.item())}, {mag_loss.item()}, {phase_loss.item()}] max=[{pmax.item()}, {ymax.item()}] min=[{pmin.item()}, {ymin.item()}]')
 
             if grad_scaler is not None:
                 grad_scaler.unscale_(optimizer)
@@ -104,7 +101,7 @@ def validate_epoch(dataloader, model, device, max_bin=0):
             Y = Y.to(device)[:, :, :max_bin]
 
             with torch.cuda.amp.autocast_mode.autocast():
-                pred = model(X)
+                pred = torch.sigmoid(model(X)) * 2 - 1
 
             l1_mag = F.l1_loss(pred, Y)
             loss = l1_mag
@@ -124,7 +121,7 @@ def main():
     p.add_argument('--sr', '-r', type=int, default=44100)
     p.add_argument('--hop_length', '-H', type=int, default=1024)
     p.add_argument('--n_fft', '-f', type=int, default=2048)
-    p.add_argument('--checkpoint', type=str, default=None)#"H://models/local.14.pre.pth")
+    p.add_argument('--checkpoint', type=str, default=None)#"H://models/local.12.pre.pth")
     p.add_argument('--checkpoint_disc', type=str, default=None)
     p.add_argument('--mixed_precision', type=str, default='true')
     p.add_argument('--learning_rate', '-l', type=float, default=1e-4)
@@ -141,16 +138,16 @@ def main():
     p.add_argument('--vocal_lib', type=str, default="C://cs2048_sr44100_hl1024_nf2048_of0_VOCALS|D://cs2048_sr44100_hl1024_nf2048_of0_VOCALS")
     p.add_argument('--validation_lib', type=str, default="C://cs2048_sr44100_hl1024_nf2048_of0_VALIDATION")
 
-    p.add_argument('--curr_step', type=int, default=0)#597932)
+    p.add_argument('--curr_step', type=int, default=0)
     p.add_argument('--curr_epoch', type=int, default=0)
-    p.add_argument('--warmup_steps', type=int, default=12000)
+    p.add_argument('--warmup_steps', type=int, default=8000)
     p.add_argument('--decay_steps', type=int, default=1000000)
     p.add_argument('--lr_scheduler_decay_target', type=int, default=1e-12)
     p.add_argument('--lr_scheduler_decay_power', type=float, default=0.1)
     p.add_argument('--lr_verbosity', type=int, default=1000)
     
-    p.add_argument('--num_bridge_layers', type=int, default=12)
-    p.add_argument('--num_attention_maps', type=int, default=1)
+    p.add_argument('--num_bridge_layers', type=int, default=1)
+    p.add_argument('--num_attention_maps', type=int, default=2)
     p.add_argument('--channels', type=int, default=8)
     p.add_argument('--expansion', type=int, default=4096)
     p.add_argument('--num_heads', type=int, default=8)
@@ -241,8 +238,7 @@ def main():
     
     optimizer_gen = torch.optim.AdamW(
         filter(lambda p: p.requires_grad, generator.parameters()),
-        lr=args.learning_rate,
-        betas=(0.5, 0.999)
+        lr=args.learning_rate
     )
 
     grad_scaler_gen = torch.cuda.amp.grad_scaler.GradScaler() if args.mixed_precision else None
@@ -305,7 +301,7 @@ def main():
         if val_loss_mag < best_loss:
             best_loss = val_loss_mag
             print('  * best validation loss')
-
+        quit()
         if args.world_rank == 0:
             model_path = f'{args.model_dir}models/local.{epoch}'
             torch.save(generator.state_dict(), f'{model_path}.pre.pth')

@@ -4,7 +4,7 @@ import numpy as np
 import torch
 import torch.utils.data
 import torch.nn.functional as F
-from libft2gan.dataset_utils import apply_channel_drop, apply_dynamic_range_mod, apply_frame_masking, apply_multiplicative_noise, apply_random_eq, apply_stereo_spatialization, apply_time_stretch, apply_random_phase_noise, apply_time_masking, apply_frequency_masking, apply_emphasis, apply_deemphasis, apply_pitch_shift, apply_masking, apply_harmonic_distortion, apply_random_volume
+from libft2gan.dataset_utils import apply_channel_drop, apply_dynamic_range_mod, apply_multiplicative_noise, apply_random_eq, apply_stereo_spatialization, apply_time_stretch, apply_random_phase_noise, apply_time_masking, apply_frequency_masking, apply_emphasis, apply_deemphasis, apply_pitch_shift, apply_masking, apply_harmonic_distortion, apply_random_volume, apply_frame_masking
 import librosa
 
 class VoxAugDataset(torch.utils.data.Dataset):
@@ -102,8 +102,8 @@ class VoxAugDataset(torch.utils.data.Dataset):
 
         VCr = np.max([VCr, np.abs(V.real).max()])
         VCi = np.max([VCi, np.abs(V.imag).max()])
-        V.imag = V.imag / VCr
-        V.real = V.real / VCi
+        V.imag = V.imag / VCi
+        V.real = V.real / VCr
 
         return V
 
@@ -115,8 +115,7 @@ class VoxAugDataset(torch.utils.data.Dataset):
         P = np.angle(X)
         M = np.abs(X)
 
-        M, P = apply_frame_masking(M, P, self.random, c, num_masks=np.random.randint(0, self.max_masks_per_item), max_mask_percentage=self.max_mask_percentage, alpha=np.random.uniform(), type=np.random.randint(0,7))
-
+        M, P = apply_frame_masking(M, P, self.random, c, num_masks=np.random.randint(0, self.max_masks_per_item), max_mask_percentage=self.max_mask_percentage, type=np.random.randint(0,7), alpha=self.random.uniform(0.5,1))
         X = M * np.exp(1.j * P)
 
         if self.random.uniform(0,1) < 0.5:
@@ -165,11 +164,12 @@ class VoxAugDataset(torch.utils.data.Dataset):
         if not self.is_validation and str.lower(path).find('pretraining') == -1:
             if np.random.uniform(0,1) < 0.2:
                 V = self._get_vocals(idx)
-                Y = Y + ((V.real * cr) + 1.j * (V.imag * ci))
+                V.real, V.imag = V.real * cr, V.imag * ci
+                Y = Y + V
                 
             c = np.max([c, np.abs(Y).max()])
 
-        X = Y if (self.random.uniform(0,1) < 0.08 and not self.is_validation) else self._augment_mix(Y, c)
+        X = Y if (self.random.uniform(0,1) < 0.075 and not self.is_validation) else self._augment_mix(Y, c)
 
         Xr = X.real
         Xi = X.imag
