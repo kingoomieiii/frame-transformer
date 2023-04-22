@@ -23,7 +23,7 @@ def halve_tensor(X):
     X = torch.cat((X1, X2), dim=0)
     return X
 
-def train_epoch(dataloader, generator, discriminator, device, optimizer_gen, optimizer_disc, accumulation_steps, progress_bar, scheduler_gen=None, scheduler_disc=None, grad_scaler_gen=None, grad_scaler_disc=None, step=0, lam=100):
+def train_epoch(dataloader, generator, discriminator, device, optimizer_gen, optimizer_disc, accumulation_steps, progress_bar, scheduler_gen=None, scheduler_disc=None, grad_scaler_gen=None, grad_scaler_disc=None, step=0, lam=100, predict_mask=True, predict_phase=False):
     gen_loss = 0
     batch_gen_loss = 0
     batch_gen_loss_l1 = 0
@@ -51,7 +51,14 @@ def train_epoch(dataloader, generator, discriminator, device, optimizer_gen, opt
         discriminator.zero_grad()
 
         with torch.cuda.amp.autocast_mode.autocast():
-            Z = torch.sigmoid(generator(X)) * 2 - 1
+            Z = torch.sigmoid(generator(X))
+
+            if predict_mask:
+                if predict_phase:
+                    Z = X[:, 2:] + Z * 2 - 1
+                else:
+                    Z = X[:, :2] * Z
+
             disc_pred = discriminator(Z.detach())
             d_loss = bce_loss(disc_pred, VP) / accumulation_steps
             batch_disc_loss = batch_disc_loss + d_loss
@@ -66,7 +73,14 @@ def train_epoch(dataloader, generator, discriminator, device, optimizer_gen, opt
             optimizer_gen.zero_grad()
 
         with torch.cuda.amp.autocast_mode.autocast():
-            Z = torch.sigmoid(generator(X)) * 2 - 1
+            Z = torch.sigmoid(generator(X))
+
+            if predict_mask:
+                if predict_phase:
+                    Z = X[:, 2:] + Z * 2 - 1
+                else:
+                    Z = X[:, :2] * Z
+                    
             disc_pred = discriminator(Z.detach())
             g_gan_loss = bce_loss(disc_pred, torch.zeros_like(VP)) / accumulation_steps
             g_l1_loss = F.l1_loss(Z, Y) / accumulation_steps
@@ -102,7 +116,7 @@ def train_epoch(dataloader, generator, discriminator, device, optimizer_gen, opt
 
     return gen_loss / batches, disc_loss / batches,  step
 
-def validate_epoch(dataloader, model, device):
+def validate_epoch(dataloader, model, device, predict_mask=True, predict_phase=False):
     model.train()
     crit = nn.L1Loss()
 
@@ -114,7 +128,13 @@ def validate_epoch(dataloader, model, device):
             Y = Y.to(device)[:, :, :model.max_bin]
 
             with torch.cuda.amp.autocast_mode.autocast():
-                pred = torch.sigmoid(model(X)) * 2 - 1
+                pred = torch.sigmoid(model(X))
+
+            if predict_mask:
+                if predict_phase:
+                    pred = X[:, 2:] + pred * 2 - 1
+                else:
+                    pred = X[:, :2] * pred
 
             l1_mag = crit(pred, Y)
             loss = l1_mag
@@ -142,6 +162,8 @@ def main():
     p.add_argument('--mixed_precision', type=str, default='true')
     p.add_argument('--learning_rate', '-l', type=float, default=1e-4)
     p.add_argument('--lam', type=float, default=100)
+
+    p.add_argument('--predict_mask', type=str, default='true')
     p.add_argument('--predict_phase', type=str, default='false')
     
     p.add_argument('--model_dir', type=str, default='/media/ben/internal-nvme-b')
@@ -194,6 +216,7 @@ def main():
     args.vocal_lib = [p for p in args.vocal_lib.split('|')]
     args.distributed = str.lower(args.distributed) == 'true'
     args.predict_phase = str.lower(args.predict_phase) == 'true'
+    args.predict_mask = str.lower(args.predict_mask) == 'true'
 
     args.model_dir = os.path.join(args.model_dir, "")
 
@@ -333,8 +356,8 @@ def main():
 
         print('# epoch {}'.format(epoch))
         train_dataloader.dataset.set_epoch(epoch)
-        train_loss_mag, disc_loss, step = train_epoch(train_dataloader, generator, discriminator, device, optimizer_gen=optimizer_gen, optimizer_disc=optimizer_disc, accumulation_steps=accum_steps, progress_bar=args.progress_bar, scheduler_gen=scheduler_gen, scheduler_disc=scheduler_disc, grad_scaler_gen=grad_scaler_gen, grad_scaler_disc=grad_scaler_disc, step=step, lam=args.lam)
-        val_loss_mag = validate_epoch(val_dataloader, generator, device)
+        train_loss_mag, disc_loss, step = train_epoch(train_dataloader, generator, discriminator, device, optimizer_gen=optimizer_gen, optimizer_disc=optimizer_disc, accumulation_steps=accum_steps, progress_bar=args.progress_bar, scheduler_gen=scheduler_gen, scheduler_disc=scheduler_disc, grad_scaler_gen=grad_scaler_gen, grad_scaler_disc=grad_scaler_disc, step=step, lam=args.lam, predict_mask=args.predict_mask, predict_phase=args.predict_phase)
+        val_loss_mag = validate_epoch(val_dataloader, generator, device, predict_mask=args.predict_mask, predict_phase=args.predict_phase)
 
         print(
             '  * training l1 loss = {:.6f}, training disc loss = {:6f}, validation loss = {:.6f}'

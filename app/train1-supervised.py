@@ -24,7 +24,7 @@ def halve_tensor(X):
     X = torch.cat((X1, X2), dim=0)
     return X
 
-def train_epoch(dataloader, model, device, optimizer, accumulation_steps, progress_bar, lr_warmup=None, grad_scaler=None, step=0, max_bin=0, use_wandb=False):
+def train_epoch(dataloader, model, device, optimizer, accumulation_steps, progress_bar, lr_warmup=None, grad_scaler=None, step=0, max_bin=0, use_wandb=False, predict_mask=True, predict_phase=False):
     model.train()
 
     mag_loss = 0
@@ -40,7 +40,13 @@ def train_epoch(dataloader, model, device, optimizer, accumulation_steps, progre
         VR = VR.to(device)
 
         with torch.cuda.amp.autocast_mode.autocast(enabled=grad_scaler is not None):
-            pred = torch.sigmoid(model(X)) * 2 - 1
+            pred = torch.sigmoid(model(X))
+
+            if predict_mask:
+                if predict_phase:
+                    pred = X[:, 2:] + pred * 2 - 1
+                else:
+                    pred = X[:, :2] * pred
 
         mae_loss = F.l1_loss(pred, Y) / accumulation_steps
         accum_loss = mae_loss
@@ -82,7 +88,7 @@ def train_epoch(dataloader, model, device, optimizer, accumulation_steps, progre
 
     return mag_loss / batches, step
 
-def validate_epoch(dataloader, model, device, max_bin=0, use_wandb=False):
+def validate_epoch(dataloader, model, device, max_bin=0, use_wandb=False, predict_mask=True, predict_phase=False):
     model.train()
     crit = nn.L1Loss()
 
@@ -95,7 +101,13 @@ def validate_epoch(dataloader, model, device, max_bin=0, use_wandb=False):
             Y = Y.to(device)[:, :, :max_bin]
 
             with torch.cuda.amp.autocast_mode.autocast():
-                pred = torch.sigmoid(model(X)) * 2 - 1
+                pred = torch.sigmoid(model(X))
+
+                if predict_mask:
+                    if predict_phase:
+                        pred = X[:, 2:] + pred * 2 - 1
+                    else:
+                        pred = X[:, :2] * pred
 
             mae_loss = F.l1_loss(pred, Y)
             
@@ -129,6 +141,8 @@ def main():
     p.add_argument('--lam', type=float, default=100)
     p.add_argument('--distributed', type=str, default="false")
     p.add_argument('--world_rank', type=int, default=0)
+
+    p.add_argument('--predict_mask', type=str, default='true')
     p.add_argument('--predict_phase', type=str, default='false')
 
     # p.add_argument('--model_dir', type=str, default='H://')
@@ -185,6 +199,8 @@ def main():
     args.instrumental_lib = [p for p in args.instrumental_lib.split('|')]
     args.vocal_lib = [p for p in args.vocal_lib.split('|')]
     args.distributed = str.lower(args.distributed) == 'true'
+    args.predict_phase = str.lower(args.predict_phase) == 'true'
+    args.predict_mask = str.lower(args.predict_mask) == 'true'
     args.wandb = str.lower(args.wandb) == 'true'
 
     args.model_dir = os.path.join(args.model_dir, "")
@@ -302,8 +318,8 @@ def main():
 
         print('# epoch {}'.format(epoch))
         train_dataloader.dataset.set_epoch(epoch)
-        train_loss_mag, step = train_epoch(train_dataloader, generator, device, optimizer=optimizer_gen, accumulation_steps=accum_steps, progress_bar=args.progress_bar, lr_warmup=scheduler_gen, grad_scaler=grad_scaler_gen, step=step, max_bin=args.n_fft // 2, use_wandb=args.wandb)
-        val_loss_mag = validate_epoch(val_dataloader, generator, device, max_bin=args.n_fft // 2)
+        train_loss_mag, step = train_epoch(train_dataloader, generator, device, optimizer=optimizer_gen, accumulation_steps=accum_steps, progress_bar=args.progress_bar, lr_warmup=scheduler_gen, grad_scaler=grad_scaler_gen, step=step, max_bin=args.n_fft // 2, use_wandb=args.wandb, predict_mask=args.predict_mask, predict_phase=args.predict_phase)
+        val_loss_mag = validate_epoch(val_dataloader, generator, device, max_bin=args.n_fft // 2, predict_mask=args.predict_mask, predict_phase=args.predict_phase)
 
         print(
             '  * training l1 loss = {:.6f}, validation loss = {:.6f}'

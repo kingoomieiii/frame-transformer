@@ -174,14 +174,14 @@ class VoxAugDataset(torch.utils.data.Dataset):
 
         X = Y if (self.random.uniform(0,1) < 0.075 and not self.is_validation) else self._augment_mix(Y, c)
 
-        XP = np.angle(X) / np.pi
-        YP = np.angle(Y) / np.pi
-        X = (np.abs(X) / c) * 2 - 1
-        Y = (np.abs(Y) / c) * 2 - 1
-
-        X = np.concatenate((X, XP), axis=0)
+        XP = (np.angle(X) + np.pi) / (2 * np.pi)
+        YP = (np.angle(Y) + np.pi) / (2 * np.pi)
+        X = np.abs(X) / c
+        Y = np.abs(Y) / c
 
         if self.predict_phase:
             Y = YP
+
+        X = np.concatenate((X, XP), axis=0)
 
         return X.astype(np.float32), Y.astype(np.float32)

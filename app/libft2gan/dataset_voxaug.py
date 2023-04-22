@@ -159,8 +159,8 @@ class VoxAugDataset(torch.utils.data.Dataset):
             X = X[:, :, start:start+self.cropsize]
             Y = Y[:, :, start:start+self.cropsize]
 
-        XP = np.angle(X) / np.pi
-        YP = np.angle(Y) / np.pi
+        XP = (np.angle(X) + np.pi) / (2 * np.pi)
+        YP = (np.angle(Y) + np.pi) / (2 * np.pi)
         X = np.abs(X) / c
         Y = np.abs(Y) / c
 
