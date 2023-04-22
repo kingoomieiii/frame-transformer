@@ -135,7 +135,7 @@ class FrameTransformerGenerator(nn.Module):
         return out
 
 class FrameTransformerDiscriminator(nn.Module):
-    def __init__(self, in_channels=2, channels=2, dropout=0.1, n_fft=2048, num_heads=4, expansion=4, num_bridge_layers=4, num_attention_maps=1):
+    def __init__(self, in_channels=2, out_channels=2, channels=2, dropout=0.1, n_fft=2048, num_heads=4, expansion=4, num_bridge_layers=4, num_attention_maps=1):
         super(FrameTransformerDiscriminator, self).__init__(),
         
         self.max_bin = n_fft // 2
@@ -173,7 +173,7 @@ class FrameTransformerDiscriminator(nn.Module):
         self.out = nn.Sequential(
             nn.Conv2d(channels * 16, channels * 32, 1),
             SquaredReLU(),
-            nn.Conv2d(channels * 32, in_channels, 1))
+            nn.Conv2d(channels * 32, out_channels, 1))
         
     def from_generator(self, gen: FrameTransformerGenerator):
         self.positional_embedding = gen.positional_embedding

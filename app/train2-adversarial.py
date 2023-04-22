@@ -59,7 +59,7 @@ def train_epoch(dataloader, generator, discriminator, device, optimizer_gen, opt
                 else:
                     Z = X[:, :2] * Z
 
-            disc_pred = discriminator(Z.detach())
+            disc_pred = discriminator(torch.cat((Z, Z), dim=1).detach())
             d_loss = bce_loss(disc_pred, VP) / accumulation_steps
             batch_disc_loss = batch_disc_loss + d_loss
             grad_scaler_disc.scale(d_loss).backward()
@@ -81,7 +81,7 @@ def train_epoch(dataloader, generator, discriminator, device, optimizer_gen, opt
                 else:
                     Z = X[:, :2] * Z
                     
-            disc_pred = discriminator(Z.detach())
+            disc_pred = discriminator(torch.cat((Z, Z), dim=1).detach())
             g_gan_loss = bce_loss(disc_pred, torch.zeros_like(VP)) / accumulation_steps
             g_l1_loss = F.l1_loss(Z, Y) / accumulation_steps
             g_loss = g_gan_loss + lam * g_l1_loss
@@ -166,15 +166,15 @@ def main():
     p.add_argument('--predict_mask', type=str, default='true')
     p.add_argument('--predict_phase', type=str, default='false')
     
-    p.add_argument('--model_dir', type=str, default='/media/ben/internal-nvme-b')
-    p.add_argument('--instrumental_lib', type=str, default="/home/ben/cs2048_sr44100_hl1024_nf2048_of0|/media/ben/internal-nvme-b/cs2048_sr44100_hl1024_nf2048_of0")
-    p.add_argument('--vocal_lib', type=str, default="/home/ben/cs2048_sr44100_hl1024_nf2048_of0_VOCALS")
-    p.add_argument('--validation_lib', type=str, default="/media/ben/internal-nvme-b/cs2048_sr44100_hl1024_nf2048_of0_VALIDATION")
+    # p.add_argument('--model_dir', type=str, default='/media/ben/internal-nvme-b')
+    # p.add_argument('--instrumental_lib', type=str, default="/home/ben/cs2048_sr44100_hl1024_nf2048_of0|/media/ben/internal-nvme-b/cs2048_sr44100_hl1024_nf2048_of0")
+    # p.add_argument('--vocal_lib', type=str, default="/home/ben/cs2048_sr44100_hl1024_nf2048_of0_VOCALS")
+    # p.add_argument('--validation_lib', type=str, default="/media/ben/internal-nvme-b/cs2048_sr44100_hl1024_nf2048_of0_VALIDATION")
 
-    # p.add_argument('--model_dir', type=str, default='H://')
-    # p.add_argument('--instrumental_lib', type=str, default="C://cs2048_sr44100_hl1024_nf2048_of0|D://cs2048_sr44100_hl1024_nf2048_of0|F://cs2048_sr44100_hl1024_nf2048_of0|H://cs2048_sr44100_hl1024_nf2048_of0")
-    # p.add_argument('--vocal_lib', type=str, default="C://cs2048_sr44100_hl1024_nf2048_of0_VOCALS|D://cs2048_sr44100_hl1024_nf2048_of0_VOCALS")
-    # p.add_argument('--validation_lib', type=str, default="C://cs2048_sr44100_hl1024_nf2048_of0_VALIDATION")
+    p.add_argument('--model_dir', type=str, default='H://')
+    p.add_argument('--instrumental_lib', type=str, default="C://cs2048_sr44100_hl1024_nf2048_of0|D://cs2048_sr44100_hl1024_nf2048_of0|F://cs2048_sr44100_hl1024_nf2048_of0|H://cs2048_sr44100_hl1024_nf2048_of0")
+    p.add_argument('--vocal_lib', type=str, default="C://cs2048_sr44100_hl1024_nf2048_of0_VOCALS|D://cs2048_sr44100_hl1024_nf2048_of0_VOCALS")
+    p.add_argument('--validation_lib', type=str, default="C://cs2048_sr44100_hl1024_nf2048_of0_VALIDATION")
 
     p.add_argument('--curr_step', type=int, default=0)
     p.add_argument('--curr_epoch', type=int, default=0)
@@ -184,7 +184,7 @@ def main():
     p.add_argument('--lr_scheduler_decay_power', type=float, default=0.1)
     p.add_argument('--lr_verbosity', type=int, default=1000)
      
-    p.add_argument('--num_bridge_layers', type=int, default=2)
+    p.add_argument('--num_bridge_layers', type=int, default=1)
     p.add_argument('--num_attention_maps', type=int, default=2)
     p.add_argument('--channels', type=int, default=8)
     p.add_argument('--expansion', type=int, default=4096)
@@ -261,7 +261,7 @@ def main():
 
     device = torch.device('cpu')
     generator = FrameTransformerGenerator(in_channels=4, out_channels=2, channels=args.channels, expansion=args.expansion, n_fft=args.n_fft, dropout=args.dropout, num_heads=args.num_heads, num_attention_maps=args.num_attention_maps, num_bridge_layers=args.num_bridge_layers)
-    discriminator = FrameTransformerDiscriminator(in_channels=2, channels=args.channels, expansion=args.expansion, n_fft=args.n_fft, dropout=args.dropout, num_heads=args.num_heads, num_attention_maps=args.num_attention_maps, num_bridge_layers=args.num_bridge_layers)
+    discriminator = FrameTransformerDiscriminator(in_channels=4, channels=args.channels, expansion=args.expansion, n_fft=args.n_fft, dropout=args.dropout, num_heads=args.num_heads, num_attention_maps=args.num_attention_maps, num_bridge_layers=args.num_bridge_layers)
     
     if torch.cuda.is_available() and args.gpu >= 0:
         device = torch.device('cuda:{}'.format(args.gpu))
