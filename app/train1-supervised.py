@@ -311,7 +311,7 @@ def main():
             
         if args.world_rank == 0:
             model_path = f'{args.model_dir}models/local.{epoch}'
-            torch.save(generator.state_dict(), f'{model_path}.pre.gen.pth')
+            torch.save(generator.state_dict(), f'{model_path}.stg1.{"phase" if args.predict_phase else "mag"}.pth')
 
         epoch += 1
 
