@@ -8,11 +8,13 @@ from libft2gan.dataset_utils import apply_channel_drop, apply_dynamic_range_mod,
 import librosa
 
 class VoxAugDataset(torch.utils.data.Dataset):
-    def __init__(self, instrumental_lib=[], pretraining_lib=[], vocal_lib=[], is_validation=False, n_fft=2048, hop_length=1024, cropsize=256, sr=44100, seed=0, data_limit=None, max_frames_per_mask=16, max_masks_per_item=16, max_mask_percentage=0.2, predict_phase=False):
+    def __init__(self, instrumental_lib=[], pretraining_lib=[], vocal_lib=[], is_validation=False, n_fft=2048, hop_length=1024, cropsize=256, sr=44100, seed=0, data_limit=None, max_frames_per_mask=16, max_masks_per_item=16, max_mask_percentage=0.2, predict_mask=True, predict_phase=False):
         self.is_validation = is_validation
         self.vocal_list = []
         self.curr_list = []
         self.epoch = 0
+
+        self.predict_mask = predict_mask
         self.predict_phase = predict_phase
 
         self.max_mask_percentage = max_mask_percentage
@@ -119,7 +121,7 @@ class VoxAugDataset(torch.utils.data.Dataset):
         if self.predict_phase:
             M, P = apply_frame_phase_masking(M, P, self.random, c, num_masks=np.random.randint(0, self.max_masks_per_item), max_mask_percentage=self.max_mask_percentage, type=np.random.randint(0,8), alpha=self.random.uniform(0.5,1))
         else:
-            M, P = apply_frame_mag_masking(M, P, self.random, c, num_masks=np.random.randint(0, self.max_masks_per_item), max_mask_percentage=self.max_mask_percentage, type=np.random.randint(0,8), alpha=self.random.uniform(0.5,1))
+            M, P = apply_frame_mag_masking(M, P, self.random, c, num_masks=np.random.randint(0, self.max_masks_per_item), max_mask_percentage=self.max_mask_percentage, type=np.random.randint(0,7), alpha=self.random.uniform(0.5,1), predict_mask=self.predict_mask)
         
         X = M * np.exp(1.j * P)
 

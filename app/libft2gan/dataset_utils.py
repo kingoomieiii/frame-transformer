@@ -237,36 +237,40 @@ def apply_frequency_masking2(M, P, random, num_masks=1, max_mask_percentage=0.2,
 
     return H, P
 
-def apply_frame_mag_masking(M, P, random, c, num_masks=1, max_mask_percentage=0.2, alpha=1, type=0):
-    M = (M / c) * 2 - 1
+def apply_frame_mag_masking(M, P, random, c, num_masks=1, max_mask_percentage=0.2, alpha=1, type=0, predict_mask=True):
+    M = M / c
     H = np.copy(M)
-    N = np.random.normal(loc=0, scale=1, size=H.shape)
+    N = np.random.uniform(size=H.shape)
 
     for _ in range(num_masks):
         mask_percentage = random.uniform(0.01, max_mask_percentage)
         w = int(M.shape[2] * mask_percentage)
         s = random.randint(0, H.shape[2] - w)
 
-        if type == 0:
-            m = N[:, :, s:s+w]
-        elif type == 1:
-            m = np.zeros_like(N[:, :, s:s+w])
-        elif type == 2:
-            m = np.ones_like(N[:, :, s:s+w])
-        elif type == 3:
-            m = np.ones_like(N[:, :, s:s+w]) * -1
-        elif type == 4:
-            m = np.full_like(N[:, :, s:s+w], fill_value=H[:, :, s:s+w].mean())
-        elif type == 5:
-            m = np.full_like(N[:, :, s:s+w], fill_value=H[:, :, s:s+w].min())
-        elif type == 6:
-            m = np.full_like(N[:, :, s:s+w], fill_value=H[:, :, s:s+w].max())
-        elif type == 7:
-            m = np.full_like(N[:, :, s:s+w], fill_value=H[:, :, s:s+w].var())
+        if predict_mask:
+            if type == 0:
+                H[:, :, s:s+w] = H[:, :, s:s+w] + N[:, :, s:s+w]
+            elif type == 2:
+                H[:, :, s:s+w] = np.ones_like(N[:, :, s:s+w])
+        else:
+            if type == 0:
+                m = N[:, :, s:s+w]
+            elif type == 1:
+                m = np.zeros_like(N[:, :, s:s+w])
+            elif type == 2:
+                m = np.ones_like(N[:, :, s:s+w])
+            elif type == 3:
+                m = np.full_like(N[:, :, s:s+w], fill_value=H[:, :, s:s+w].mean())
+            elif type == 4:
+                m = np.full_like(N[:, :, s:s+w], fill_value=H[:, :, s:s+w].min())
+            elif type == 5:
+                m = np.full_like(N[:, :, s:s+w], fill_value=H[:, :, s:s+w].max())
+            elif type == 6:
+                m = np.full_like(N[:, :, s:s+w], fill_value=H[:, :, s:s+w].var())
 
-        H[:, :, s:s+w] = alpha * m + (1 - alpha) * H[:, :, s:s+w]
+            H[:, :, s:s+w] = alpha * m + (1 - alpha) * H[:, :, s:s+w]
 
-    return (np.clip(H, -1, 1) + 1) * 0.5 * c, P
+    return np.clip(H, 0, 1) * c, P
 
 def apply_frame_phase_masking(M, P, random, c, num_masks=1, max_mask_percentage=0.2, alpha=1, type=0):
     P = P / np.pi
