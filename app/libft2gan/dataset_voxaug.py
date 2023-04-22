@@ -8,7 +8,7 @@ from libft2gan.dataset_utils import apply_channel_drop, apply_dynamic_range_mod,
 import librosa
 
 class VoxAugDataset(torch.utils.data.Dataset):
-    def __init__(self, instrumental_lib=[], vocal_lib=[], is_validation=False, n_fft=2048, hop_length=1024, cropsize=256, sr=44100, seed=0, inst_rate=0.01, data_limit=None, predict_vocals=False, time_scaling=True, vocal_threshold=0.00125, vout_bands=4, predict_phase=False):
+    def __init__(self, instrumental_lib=[], vocal_lib=[], is_validation=False, n_fft=2048, hop_length=1024, cropsize=256, sr=44100, seed=0, inst_rate=0.01, data_limit=None, predict_vocals=False, time_scaling=True, vocal_threshold=0.001, vout_bands=4, predict_phase=False):
         self.is_validation = is_validation
         self.vocal_list = []
         self.curr_list = []
@@ -106,7 +106,6 @@ class VoxAugDataset(torch.utils.data.Dataset):
         VP = (np.abs(VP) / Vc).reshape((VP.shape[0], self.vout_bands, VP.shape[1] // self.vout_bands, VP.shape[2]))
         VP = VP.mean(axis=2)
         VP = np.where(VP > self.vocal_threshold, 1, 0)
-        VP = np.stack((VP[0], VP[1], VP[0], VP[1]), axis=0)
 
         return V, VP
 

@@ -134,8 +134,8 @@ def main():
     p.add_argument('--lr_scheduler_decay_target', type=int, default=1e-12)
     p.add_argument('--lr_scheduler_decay_power', type=float, default=0.1)
     p.add_argument('--lr_verbosity', type=int, default=1000)
-    
-    p.add_argument('--num_bridge_layers', type=int, default=1)
+     
+    p.add_argument('--num_bridge_layers', type=int, default=2)
     p.add_argument('--num_attention_maps', type=int, default=2)
     p.add_argument('--channels', type=int, default=8)
     p.add_argument('--expansion', type=int, default=4096)

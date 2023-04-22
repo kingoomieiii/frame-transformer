@@ -114,10 +114,9 @@ def validate_epoch(dataloader, model, device):
             Y = Y.to(device)[:, :, :model.max_bin]
 
             with torch.cuda.amp.autocast_mode.autocast():
-                pred = model(X)
-                pred = torch.sigmoid(pred)
+                pred = torch.sigmoid(model(X)) * 2 - 1
 
-            l1_mag = crit(X[:, :2] * pred[:, :2], Y[:, :2])
+            l1_mag = crit(pred, Y)
             loss = l1_mag
 
             if torch.logical_or(loss.isnan(), loss.isinf()):
@@ -143,16 +142,17 @@ def main():
     p.add_argument('--mixed_precision', type=str, default='true')
     p.add_argument('--learning_rate', '-l', type=float, default=1e-4)
     p.add_argument('--lam', type=float, default=100)
+    p.add_argument('--predict_phase', type=str, default='false')
     
-    # p.add_argument('--model_dir', type=str, default='/media/ben/internal-nvme-b')
-    # p.add_argument('--instrumental_lib', type=str, default="/home/ben/cs2048_sr44100_hl1024_nf2048_of0|/media/ben/internal-nvme-b/cs2048_sr44100_hl1024_nf2048_of0")
-    # p.add_argument('--vocal_lib', type=str, default="/home/ben/cs2048_sr44100_hl1024_nf2048_of0_VOCALS")
-    # p.add_argument('--validation_lib', type=str, default="/media/ben/internal-nvme-b/cs2048_sr44100_hl1024_nf2048_of0_VALIDATION")
+    p.add_argument('--model_dir', type=str, default='/media/ben/internal-nvme-b')
+    p.add_argument('--instrumental_lib', type=str, default="/home/ben/cs2048_sr44100_hl1024_nf2048_of0|/media/ben/internal-nvme-b/cs2048_sr44100_hl1024_nf2048_of0")
+    p.add_argument('--vocal_lib', type=str, default="/home/ben/cs2048_sr44100_hl1024_nf2048_of0_VOCALS")
+    p.add_argument('--validation_lib', type=str, default="/media/ben/internal-nvme-b/cs2048_sr44100_hl1024_nf2048_of0_VALIDATION")
 
-    p.add_argument('--model_dir', type=str, default='H://')
-    p.add_argument('--instrumental_lib', type=str, default="C://cs2048_sr44100_hl1024_nf2048_of0|D://cs2048_sr44100_hl1024_nf2048_of0|F://cs2048_sr44100_hl1024_nf2048_of0|H://cs2048_sr44100_hl1024_nf2048_of0")
-    p.add_argument('--vocal_lib', type=str, default="C://cs2048_sr44100_hl1024_nf2048_of0_VOCALS|D://cs2048_sr44100_hl1024_nf2048_of0_VOCALS")
-    p.add_argument('--validation_lib', type=str, default="C://cs2048_sr44100_hl1024_nf2048_of0_VALIDATION")
+    # p.add_argument('--model_dir', type=str, default='H://')
+    # p.add_argument('--instrumental_lib', type=str, default="C://cs2048_sr44100_hl1024_nf2048_of0|D://cs2048_sr44100_hl1024_nf2048_of0|F://cs2048_sr44100_hl1024_nf2048_of0|H://cs2048_sr44100_hl1024_nf2048_of0")
+    # p.add_argument('--vocal_lib', type=str, default="C://cs2048_sr44100_hl1024_nf2048_of0_VOCALS|D://cs2048_sr44100_hl1024_nf2048_of0_VOCALS")
+    # p.add_argument('--validation_lib', type=str, default="C://cs2048_sr44100_hl1024_nf2048_of0_VALIDATION")
 
     p.add_argument('--curr_step', type=int, default=0)
     p.add_argument('--curr_epoch', type=int, default=0)
@@ -161,8 +161,8 @@ def main():
     p.add_argument('--lr_scheduler_decay_target', type=int, default=1e-12)
     p.add_argument('--lr_scheduler_decay_power', type=float, default=0.1)
     p.add_argument('--lr_verbosity', type=int, default=1000)
-    
-    p.add_argument('--num_bridge_layers', type=int, default=1)
+     
+    p.add_argument('--num_bridge_layers', type=int, default=2)
     p.add_argument('--num_attention_maps', type=int, default=2)
     p.add_argument('--channels', type=int, default=8)
     p.add_argument('--expansion', type=int, default=4096)
@@ -193,6 +193,7 @@ def main():
     args.instrumental_lib = [p for p in args.instrumental_lib.split('|')]
     args.vocal_lib = [p for p in args.vocal_lib.split('|')]
     args.distributed = str.lower(args.distributed) == 'true'
+    args.predict_phase = str.lower(args.predict_phase) == 'true'
 
     args.model_dir = os.path.join(args.model_dir, "")
 
@@ -210,7 +211,8 @@ def main():
         vocal_lib=args.vocal_lib,
         is_validation=False,
         n_fft=args.n_fft,
-        hop_length=args.hop_length
+        hop_length=args.hop_length,
+        predict_phase=args.predict_phase
     )
     
     train_sampler = torch.utils.data.DistributedSampler(train_dataset) if args.distributed else None
@@ -219,7 +221,8 @@ def main():
         instrumental_lib=[args.validation_lib],
         vocal_lib=None,
         cropsize=args.cropsizes[0],
-        is_validation=True
+        is_validation=True,
+        predict_phase=args.predict_phase
     )
 
     val_dataloader = torch.utils.data.DataLoader(
@@ -234,8 +237,8 @@ def main():
     torch.manual_seed(args.seed)
 
     device = torch.device('cpu')
-    generator = FrameTransformerGenerator(in_channels=4, out_channels=4, channels=args.channels, expansion=args.expansion, n_fft=args.n_fft, dropout=args.dropout, num_heads=args.num_heads, num_attention_maps=args.num_attention_maps, num_bridge_layers=args.num_bridge_layers)
-    discriminator = FrameTransformerDiscriminator(in_channels=4, channels=args.channels, expansion=args.expansion, n_fft=args.n_fft, dropout=args.dropout, num_heads=args.num_heads, num_attention_maps=args.num_attention_maps, num_bridge_layers=args.num_bridge_layers)
+    generator = FrameTransformerGenerator(in_channels=4, out_channels=2, channels=args.channels, expansion=args.expansion, n_fft=args.n_fft, dropout=args.dropout, num_heads=args.num_heads, num_attention_maps=args.num_attention_maps, num_bridge_layers=args.num_bridge_layers)
+    discriminator = FrameTransformerDiscriminator(in_channels=2, channels=args.channels, expansion=args.expansion, n_fft=args.n_fft, dropout=args.dropout, num_heads=args.num_heads, num_attention_maps=args.num_attention_maps, num_bridge_layers=args.num_bridge_layers)
     
     if torch.cuda.is_available() and args.gpu >= 0:
         device = torch.device('cuda:{}'.format(args.gpu))
