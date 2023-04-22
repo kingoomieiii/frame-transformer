@@ -8,7 +8,7 @@ from libft2gan.dataset_utils import apply_channel_drop, apply_dynamic_range_mod,
 import librosa
 
 class VoxAugDataset(torch.utils.data.Dataset):
-    def __init__(self, instrumental_lib=[], vocal_lib=[], is_validation=False, n_fft=2048, hop_length=1024, cropsize=256, sr=44100, seed=0, inst_rate=0.01, data_limit=None, predict_vocals=False, time_scaling=True, vocal_threshold=0.00125, vout_bands=4):
+    def __init__(self, instrumental_lib=[], vocal_lib=[], is_validation=False, n_fft=2048, hop_length=1024, cropsize=256, sr=44100, seed=0, inst_rate=0.01, data_limit=None, predict_vocals=False, time_scaling=True, vocal_threshold=0.00125, vout_bands=4, predict_phase=False):
         self.is_validation = is_validation
         self.vocal_list = []
         self.curr_list = []
@@ -18,6 +18,7 @@ class VoxAugDataset(torch.utils.data.Dataset):
         self.time_scaling = time_scaling
         self.vocal_threshold = vocal_threshold
         self.vout_bands = vout_bands
+        self.predict_phase = predict_phase
 
         self.max_bin = n_fft // 2
         self.sr = sr
@@ -107,11 +108,6 @@ class VoxAugDataset(torch.utils.data.Dataset):
         VP = np.where(VP > self.vocal_threshold, 1, 0)
         VP = np.stack((VP[0], VP[1], VP[0], VP[1]), axis=0)
 
-        VCr = np.max([VCr, np.abs(V.real).max()])
-        VCi = np.max([VCi, np.abs(V.imag).max()])
-        V.real = V.real / VCr
-        V.imag = V.imag / VCi
-
         return V, VP
 
     def _augment_instruments(self, X, c):
@@ -158,28 +154,20 @@ class VoxAugDataset(torch.utils.data.Dataset):
         if not self.is_validation:
             Y = self._augment_instruments(Y, c)
             V, VP = self._get_vocals(idx)
-            V.real = V.real * cr
-            V.imag = V.imag * ci
             X = Y + V
         elif X.shape[2] > self.cropsize:
             start = self.random.randint(0, X.shape[2] - self.cropsize - 1)
             X = X[:, :, start:start+self.cropsize]
             Y = Y[:, :, start:start+self.cropsize]
 
-        Xr = X.real
-        Xi = X.imag
-        Yr = Y.real
-        Yi = Y.imag
+        XP = np.angle(X) / np.pi
+        YP = np.angle(Y) / np.pi
+        X = np.abs(X) / c
+        Y = np.abs(Y) / c
 
-        cr = np.max([cr, np.abs(Xr).max(), np.abs(Yr).max()])
-        ci = np.max([ci, np.abs(Xi).max(), np.abs(Yi).max()])
+        if self.predict_phase:
+            Y = YP
 
-        Xr = Xr / cr
-        Xi = Xi / ci
-        Yr = Yr / cr
-        Yi = Yi / ci
-        
-        X = np.concatenate((Xr[:, :-1], Xi[:, :-1]), axis=0)
-        Y = np.concatenate((Yr[:, :-1], Yi[:, :-1]), axis=0)
+        X = np.concatenate((X, XP), axis=0)
 
         return X.astype(np.float32), Y.astype(np.float32), VP.astype(np.float32)

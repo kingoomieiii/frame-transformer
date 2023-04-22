@@ -34,27 +34,15 @@ def train_epoch(dataloader, model, device, optimizer, accumulation_steps, progre
 
     pbar = tqdm(dataloader) if progress_bar else dataloader
     for itr, (X, Y) in enumerate(pbar):
-        X = X.to(device)
-        Y = Y.to(device)
+        X = X.to(device)[:, :, :max_bin]
+        Y = Y.to(device)[:, :, :max_bin]
 
         with torch.cuda.amp.autocast_mode.autocast(enabled=grad_scaler is not None):
             pred = torch.sigmoid(model(X)) * 2 - 1
 
-        pred_c = torch.complex(pred[:, :2].float(), pred[:, 2:].float())
-        pred_y = torch.complex(Y[:, :2].float(), Y[:, 2:].float())
-        mag_loss = F.l1_loss(torch.abs(pred_c), torch.abs(pred_y)) / accumulation_steps
-        phase_loss = F.l1_loss((torch.angle(pred_c) + np.pi) / (2 * torch.pi), (torch.angle(pred_y) + np.pi) / (2 * torch.pi)) / accumulation_steps
-        mae_loss = F.l1_loss((pred + 1) * 0.5, (X + 1) * 0.5) / accumulation_steps
+        mae_loss = F.l1_loss(pred, Y) / accumulation_steps
         accum_loss = mae_loss
         batch_mag_loss = batch_mag_loss + mae_loss
-
-        pmax = torch.max(pred)
-        ymax = torch.max(Y)
-        pavg = torch.mean(pred)
-        yavg = torch.mean(Y)
-        pmin = torch.min(pred)
-        ymin = torch.min(Y)
-
 
         if torch.logical_or(accum_loss.isnan(), accum_loss.isinf()):
             print('nan training loss; aborting')
@@ -67,7 +55,7 @@ def train_epoch(dataloader, model, device, optimizer, accumulation_steps, progre
 
         if (itr + 1) % accumulation_steps == 0:
             if progress_bar:
-                pbar.set_description(f'{step}: cmp=[{str(mae_loss.item())}, {mag_loss.item()}, {phase_loss.item()}] max=[{pmax.item()}, {ymax.item()}] min=[{pmin.item()}, {ymin.item()}]')
+                pbar.set_description(f'{step}: {str(mae_loss.item())}')
 
             if grad_scaler is not None:
                 grad_scaler.unscale_(optimizer)
@@ -128,6 +116,7 @@ def main():
     p.add_argument('--lam', type=float, default=100)
     p.add_argument('--distributed', type=str, default="false")
     p.add_argument('--world_rank', type=int, default=0)
+    p.add_argument('--predict_phase', type=str, default='false')
 
     p.add_argument('--max_frames_per_mask', type=int, default=16)
     p.add_argument('--max_masks_per_item', type=int, default=32)
@@ -178,6 +167,7 @@ def main():
     args.pretraining_lib = [p for p in args.pretraining_lib.split('|')]
     args.vocal_lib = [p for p in args.vocal_lib.split('|')]
     args.distributed = str.lower(args.distributed) == 'true'
+    args.predict_phase = str.lower(args.predict_phase) == 'true'
 
     args.model_dir = os.path.join(args.model_dir, "")
 
@@ -196,7 +186,8 @@ def main():
         vocal_lib=args.vocal_lib,
         is_validation=False,
         n_fft=args.n_fft,
-        hop_length=args.hop_length
+        hop_length=args.hop_length,
+        predict_phase=args.predict_phase
     )
 
     train_sampler = torch.utils.data.DistributedSampler(train_dataset) if args.distributed else None
@@ -205,7 +196,8 @@ def main():
         instrumental_lib=[args.validation_lib],
         vocal_lib=None,
         cropsize=args.cropsizes[0],
-        is_validation=True
+        is_validation=True,
+        predict_phase=args.predict_phase
     )
 
     val_dataloader = torch.utils.data.DataLoader(
@@ -220,7 +212,7 @@ def main():
     torch.manual_seed(args.seed)
 
     device = torch.device('cpu')
-    generator = FrameTransformerGenerator(in_channels=4, out_channels=4, channels=args.channels, expansion=args.expansion, n_fft=args.n_fft, dropout=args.dropout, num_heads=args.num_heads, num_attention_maps=args.num_attention_maps, num_bridge_layers=args.num_bridge_layers)
+    generator = FrameTransformerGenerator(in_channels=4, out_channels=2, channels=args.channels, expansion=args.expansion, n_fft=args.n_fft, dropout=args.dropout, num_heads=args.num_heads, num_attention_maps=args.num_attention_maps, num_bridge_layers=args.num_bridge_layers)
 
     if torch.cuda.is_available() and args.gpu >= 0:
         device = torch.device('cuda:{}'.format(args.gpu))
@@ -301,7 +293,7 @@ def main():
         if val_loss_mag < best_loss:
             best_loss = val_loss_mag
             print('  * best validation loss')
-        quit()
+            
         if args.world_rank == 0:
             model_path = f'{args.model_dir}models/local.{epoch}'
             torch.save(generator.state_dict(), f'{model_path}.pre.pth')

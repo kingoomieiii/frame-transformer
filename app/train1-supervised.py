@@ -28,7 +28,6 @@ def train_epoch(dataloader, model, device, optimizer, accumulation_steps, progre
     model.train()
 
     mag_loss = 0
-    batch_mag_loss = 0
     batches = 0
     
     model.zero_grad()
@@ -43,13 +42,8 @@ def train_epoch(dataloader, model, device, optimizer, accumulation_steps, progre
         with torch.cuda.amp.autocast_mode.autocast(enabled=grad_scaler is not None):
             pred = torch.sigmoid(model(X)) * 2 - 1
 
-        pred_c = torch.complex(pred[:, :2].float(), pred[:, 2:].float())
-        pred_y = torch.complex(Y[:, :2].float(), Y[:, 2:].float())
-        mag_loss = F.l1_loss(torch.abs(pred_c), torch.abs(pred_y)) / accumulation_steps
-        phase_loss = F.l1_loss((torch.angle(pred_c) + np.pi) / (2 * torch.pi), (torch.angle(pred_y) + np.pi) / (2 * torch.pi)) / accumulation_steps
-        mae_loss = F.l1_loss((pred + 1) * 0.5, (Y + 1) * 0.5) / accumulation_steps
+        mae_loss = F.l1_loss(pred, Y) / accumulation_steps
         accum_loss = mae_loss
-        # batch_mag_loss = batch_mag_loss + 
 
         if torch.logical_or(accum_loss.isnan(), accum_loss.isinf()):
             print('nan training loss; aborting')
@@ -62,15 +56,12 @@ def train_epoch(dataloader, model, device, optimizer, accumulation_steps, progre
 
         if (itr + 1) % accumulation_steps == 0:
             if progress_bar:
-                pbar.set_description(f'{step}: {mae_loss.item()}|{mag_loss.item()}|{phase_loss.item() * 0.5}')
+                pbar.set_description(f'{step}: {mae_loss.item()}')
             
             if use_wandb:
                 wandb.log({
-                    't_mag_loss': mag_loss,
-                    't_phase_loss': phase_loss,
-                    't_complex_loss': mae_loss
+                    'l1_loss': mae_loss
                 })
-
 
             if grad_scaler is not None:
                 grad_scaler.unscale_(optimizer)
@@ -87,8 +78,7 @@ def train_epoch(dataloader, model, device, optimizer, accumulation_steps, progre
 
             model.zero_grad()
             batches = batches + 1
-            mag_loss = mag_loss + mag_loss.item() # batch_mag_loss.item()
-            batch_mag_loss = 0
+            mag_loss = mag_loss + mae_loss.item()
 
     return mag_loss / batches, step
 
@@ -107,17 +97,11 @@ def validate_epoch(dataloader, model, device, max_bin=0, use_wandb=False):
             with torch.cuda.amp.autocast_mode.autocast():
                 pred = torch.sigmoid(model(X)) * 2 - 1
 
-            pred_c = torch.complex(pred[:, :2], pred[:, 2:])
-            pred_y = torch.complex(Y[:, :2], Y[:, 2:])
-            mag_loss = F.l1_loss(torch.abs(pred_c), torch.abs(pred_y))
-            phase_loss = F.l1_loss((torch.angle(pred_c) + np.pi) / (2 * torch.pi), (torch.angle(pred_y) + np.pi) / (2 * torch.pi))
-            mae_loss = F.l1_loss((pred + 1) * 0.5, (X + 1) * 0.5)
+            mae_loss = F.l1_loss(pred, Y)
             
             if use_wandb:
                 wandb.log({
-                    'v_mag_loss': mag_loss,
-                    'v_phase_loss': phase_loss,
-                    'v_complex_loss': mae_loss
+                    'loss': mae_loss
                 })
 
             loss = mae_loss
@@ -145,6 +129,7 @@ def main():
     p.add_argument('--lam', type=float, default=100)
     p.add_argument('--distributed', type=str, default="false")
     p.add_argument('--world_rank', type=int, default=0)
+    p.add_argument('--predict_phase', type=str, default='false')
 
     p.add_argument('--model_dir', type=str, default='H://')
     p.add_argument('--instrumental_lib', type=str, default="C://cs2048_sr44100_hl1024_nf2048_of0|D://cs2048_sr44100_hl1024_nf2048_of0|F://cs2048_sr44100_hl1024_nf2048_of0|H://cs2048_sr44100_hl1024_nf2048_of0")
@@ -159,10 +144,10 @@ def main():
     p.add_argument('--lr_scheduler_decay_power', type=float, default=0.1)
     p.add_argument('--lr_verbosity', type=int, default=1000)
     
-    p.add_argument('--num_bridge_layers', type=int, default=2)
-    p.add_argument('--num_attention_maps', type=int, default=2)
+    p.add_argument('--num_bridge_layers', type=int, default=4)
+    p.add_argument('--num_attention_maps', type=int, default=1)
     p.add_argument('--channels', type=int, default=8)
-    p.add_argument('--expansion', type=int, default=4096)
+    p.add_argument('--expansion', type=int, default=10240)
     p.add_argument('--num_heads', type=int, default=8)
     p.add_argument('--dropout', type=float, default=0.1)
     
@@ -216,7 +201,8 @@ def main():
         vocal_lib=args.vocal_lib,
         is_validation=False,
         n_fft=args.n_fft,
-        hop_length=args.hop_length
+        hop_length=args.hop_length,
+        predict_phase=args.predict_phase
     )
 
     train_sampler = torch.utils.data.DistributedSampler(train_dataset) if args.distributed else None
@@ -224,7 +210,8 @@ def main():
     val_dataset = VoxAugDataset(
         instrumental_lib=[args.validation_lib],
         vocal_lib=None,
-        is_validation=True
+        is_validation=True,
+        predict_phase=args.predict_phase
     )
 
     val_dataloader = torch.utils.data.DataLoader(
@@ -240,7 +227,7 @@ def main():
 
     device = torch.device('cpu')
 
-    generator = FrameTransformerGenerator(in_channels=4, out_channels=4, channels=args.channels, expansion=args.expansion, n_fft=args.n_fft, dropout=args.dropout, num_heads=args.num_heads, num_attention_maps=args.num_attention_maps, num_bridge_layers=args.num_bridge_layers)
+    generator = FrameTransformerGenerator(in_channels=4, out_channels=2, channels=args.channels, expansion=args.expansion, n_fft=args.n_fft, dropout=args.dropout, num_heads=args.num_heads, num_attention_maps=args.num_attention_maps, num_bridge_layers=args.num_bridge_layers)
 
     if torch.cuda.is_available() and args.gpu >= 0:
         device = torch.device('cuda:{}'.format(args.gpu))
@@ -273,8 +260,6 @@ def main():
         LinearWarmupScheduler(optimizer_gen, target_lr=args.learning_rate, num_steps=args.warmup_steps, current_step=step, verbose_skip_steps=args.lr_verbosity),
         PolynomialDecayScheduler(optimizer_gen, target=args.lr_scheduler_decay_target, power=args.lr_scheduler_decay_power, num_decay_steps=args.decay_steps, start_step=args.warmup_steps, current_step=step, verbose_skip_steps=args.lr_verbosity)
     ])
-
-    #_ = validate_epoch(val_dataloader, generator, device, max_bin=args.n_fft // 2)
 
     best_loss = float('inf')
     while step < args.stages[-1]:

@@ -4,15 +4,16 @@ import numpy as np
 import torch
 import torch.utils.data
 import torch.nn.functional as F
-from libft2gan.dataset_utils import apply_channel_drop, apply_dynamic_range_mod, apply_multiplicative_noise, apply_random_eq, apply_stereo_spatialization, apply_time_stretch, apply_random_phase_noise, apply_time_masking, apply_frequency_masking, apply_emphasis, apply_deemphasis, apply_pitch_shift, apply_masking, apply_harmonic_distortion, apply_random_volume, apply_frame_masking
+from libft2gan.dataset_utils import apply_channel_drop, apply_dynamic_range_mod, apply_multiplicative_noise, apply_random_eq, apply_stereo_spatialization, apply_time_stretch, apply_random_phase_noise, apply_time_masking, apply_frequency_masking, apply_emphasis, apply_deemphasis, apply_pitch_shift, apply_masking, apply_harmonic_distortion, apply_random_volume, apply_frame_mag_masking, apply_frame_phase_masking
 import librosa
 
 class VoxAugDataset(torch.utils.data.Dataset):
-    def __init__(self, instrumental_lib=[], pretraining_lib=[], vocal_lib=[], is_validation=False, n_fft=2048, hop_length=1024, cropsize=256, sr=44100, seed=0, data_limit=None, max_frames_per_mask=16, max_masks_per_item=16, max_mask_percentage=0.2):
+    def __init__(self, instrumental_lib=[], pretraining_lib=[], vocal_lib=[], is_validation=False, n_fft=2048, hop_length=1024, cropsize=256, sr=44100, seed=0, data_limit=None, max_frames_per_mask=16, max_masks_per_item=16, max_mask_percentage=0.2, predict_phase=False):
         self.is_validation = is_validation
         self.vocal_list = []
         self.curr_list = []
         self.epoch = 0
+        self.predict_phase = predict_phase
 
         self.max_mask_percentage = max_mask_percentage
         self.max_frames_per_mask = max_frames_per_mask
@@ -115,7 +116,11 @@ class VoxAugDataset(torch.utils.data.Dataset):
         P = np.angle(X)
         M = np.abs(X)
 
-        M, P = apply_frame_masking(M, P, self.random, c, num_masks=np.random.randint(0, self.max_masks_per_item), max_mask_percentage=self.max_mask_percentage, type=np.random.randint(0,7), alpha=self.random.uniform(0.5,1))
+        if self.predict_phase:
+            M, P = apply_frame_phase_masking(M, P, self.random, c, num_masks=np.random.randint(0, self.max_masks_per_item), max_mask_percentage=self.max_mask_percentage, type=np.random.randint(0,8), alpha=self.random.uniform(0.5,1))
+        else:
+            M, P = apply_frame_mag_masking(M, P, self.random, c, num_masks=np.random.randint(0, self.max_masks_per_item), max_mask_percentage=self.max_mask_percentage, type=np.random.randint(0,8), alpha=self.random.uniform(0.5,1))
+        
         X = M * np.exp(1.j * P)
 
         if self.random.uniform(0,1) < 0.5:
@@ -154,7 +159,6 @@ class VoxAugDataset(torch.utils.data.Dataset):
         aug = 'Y' not in data.files
 
         X, c = data['X'], data['c']
-        cr, ci = data['cr'], data['ci']
         Y = X if aug else data['Y']
         V = None
         
@@ -164,27 +168,20 @@ class VoxAugDataset(torch.utils.data.Dataset):
         if not self.is_validation and str.lower(path).find('pretraining') == -1:
             if np.random.uniform(0,1) < 0.2:
                 V = self._get_vocals(idx)
-                V.real, V.imag = V.real * cr, V.imag * ci
                 Y = Y + V
                 
             c = np.max([c, np.abs(Y).max()])
 
         X = Y if (self.random.uniform(0,1) < 0.075 and not self.is_validation) else self._augment_mix(Y, c)
 
-        Xr = X.real
-        Xi = X.imag
-        Yr = Y.real
-        Yi = Y.imag
+        XP = np.angle(X) / np.pi
+        YP = np.angle(Y) / np.pi
+        X = (np.abs(X) / c) * 2 - 1
+        Y = (np.abs(Y) / c) * 2 - 1
 
-        cr = np.max([cr, np.abs(Xr).max(), np.abs(Yr).max()])
-        ci = np.max([ci, np.abs(Xi).max(), np.abs(Yi).max()])
+        X = np.concatenate((X, XP), axis=0)
 
-        Xr = Xr / cr
-        Xi = Xi / ci
-        Yr = Yr / cr
-        Yi = Yi / ci
-        
-        X = np.concatenate((Xr[:, :-1], Xi[:, :-1]), axis=0)
-        Y = np.concatenate((Yr[:, :-1], Yi[:, :-1]), axis=0)
+        if self.predict_phase:
+            Y = YP
 
         return X.astype(np.float32), Y.astype(np.float32)
