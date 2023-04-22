@@ -103,11 +103,6 @@ class VoxAugDataset(torch.utils.data.Dataset):
         if self.random.uniform(0,1) < 0.5:
             V = V[::-1]
 
-        VCr = np.max([VCr, np.abs(V.real).max()])
-        VCi = np.max([VCi, np.abs(V.imag).max()])
-        V.imag = V.imag / VCi
-        V.real = V.real / VCr
-
         return V
 
     def _augment_mix(self, X, c):
