@@ -169,7 +169,7 @@ class VoxAugDataset(torch.utils.data.Dataset):
                 
             c = np.max([c, np.abs(Y).max()])
 
-        X = Y if (self.random.uniform(0,1) < 0.075 and not self.is_validation) else self._augment_mix(Y, c)
+        X = Y if (self.random.uniform(0,1) < 0.025 and not self.is_validation) else self._augment_mix(Y, c)
 
         XP = (np.angle(X) + np.pi) / (2 * np.pi)
         YP = (np.angle(Y) + np.pi) / (2 * np.pi)
