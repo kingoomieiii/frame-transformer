@@ -114,7 +114,8 @@ class VoxAugDataset(torch.utils.data.Dataset):
 
         for p, aug in augmentations:
             if self.random.uniform(0,1) < p:
-                W = np.clip(aug.process(W, sample_rate=self.sr), -1, 1)
+                W = aug.process(W, sample_rate=self.sr)
+                W = W / np.max([1, np.abs(W).max()])
                 
         if self.random.uniform(0,1) < 0.5:
             W = W[::-1]
@@ -164,7 +165,8 @@ class VoxAugDataset(torch.utils.data.Dataset):
 
         for p, aug in augmentations:
             if self.random.uniform(0,1) < p:
-                W = np.clip(aug.process(W, sample_rate=self.sr), -1, 1)
+                W = aug.process(W, sample_rate=self.sr)
+                W = W / np.max([1, np.abs(W).max()])
 
         if self.random.uniform(0,1) < 0.5:
             W = W[::-1]
