@@ -11,8 +11,8 @@ import torch.distributed
 from tqdm import tqdm
 import wandb
 
-from libft2gan.dataset_voxaug import VoxAugDataset
-from libft2gan.frame_transformer2 import FrameTransformerGenerator
+from libft2gan.dataset_voxaug_new import VoxAugDataset
+from libft2gan.frame_transformer3 import FrameTransformerGenerator
 from libft2gan.lr_scheduler_linear_warmup import LinearWarmupScheduler
 from libft2gan.lr_scheduler_polynomial_decay import PolynomialDecayScheduler
 
@@ -24,9 +24,27 @@ def halve_tensor(X):
     X = torch.cat((X1, X2), dim=0)
     return X
 
+def magnitude_phase_loss_torch(predicted_waveform, target_waveform, n_fft, hop_length):
+    # Compute the spectrograms
+    predicted_spectrogram = torch.stft(predicted_waveform, n_fft=n_fft, hop_length=hop_length)
+    target_spectrogram = torch.stft(target_waveform, n_fft=n_fft, hop_length=hop_length)
+
+    # Compute the magnitude and phase components
+    predicted_magnitude = torch.abs(predicted_spectrogram)
+    predicted_phase = torch.angle(predicted_spectrogram)
+    target_magnitude = torch.abs(target_spectrogram)
+    target_phase = torch.angle(target_spectrogram)
+
+    # Compute the magnitude and phase losses
+    magnitude_loss = F.l1_loss(predicted_magnitude, target_magnitude)
+    phase_loss = 1 - torch.mean(torch.cos(predicted_phase - target_phase))
+
+    return magnitude_loss, phase_loss
+
 def train_epoch(dataloader, model, device, optimizer, accumulation_steps, progress_bar, lr_warmup=None, grad_scaler=None, step=0, max_bin=0, use_wandb=False, predict_mask=True, predict_phase=False):
     model.train()
 
+    batch_loss = 0
     mag_loss = 0
     batches = 0
     
@@ -34,22 +52,23 @@ def train_epoch(dataloader, model, device, optimizer, accumulation_steps, progre
     torch.cuda.empty_cache()
 
     pbar = tqdm(dataloader) if progress_bar else dataloader
-    for itr, (X, Y, VR) in enumerate(pbar):
-        X = X.to(device)[:, :, :max_bin]
-        Y = Y.to(device)[:, :, :max_bin]
-        VR = VR.to(device)
+    for itr, (XS, XP, XM, YS, YP, YM, VP) in enumerate(pbar):
+        XS = XS.to(device)[:, :, :max_bin]
+        XP = XP.to(device)[:, :, :max_bin]
+        XM = XM.to(device)
+
+        YS = YS.to(device)[:, :, :max_bin]
 
         with torch.cuda.amp.autocast_mode.autocast(enabled=grad_scaler is not None):
-            pred = torch.sigmoid(model(X))
+            pred = torch.sigmoid(model(XS, XP, XM))
+            mag = XS[:, :2] * pred[:, :2]
+            # phase = XS[:, 2:] + pred[:, 2:]
 
-            if predict_mask:
-                if predict_phase:
-                    pred = X[:, 2:] + pred * 2 - 1
-                else:
-                    pred = X[:, :2] * pred
+        spec_loss = F.l1_loss(mag, YS[:, :2]) / accumulation_steps
+        # phase_loss = 1 - torch.mean(torch.cos(phase - YS[:, 2:]))
 
-        mae_loss = F.l1_loss(pred, Y) / accumulation_steps
-        accum_loss = mae_loss
+        accum_loss = spec_loss
+        batch_loss = batch_loss + accum_loss.item()
 
         if torch.logical_or(accum_loss.isnan(), accum_loss.isinf()):
             print('nan training loss; aborting')
@@ -62,11 +81,11 @@ def train_epoch(dataloader, model, device, optimizer, accumulation_steps, progre
 
         if (itr + 1) % accumulation_steps == 0:
             if progress_bar:
-                pbar.set_description(f'{step}: {mae_loss.item()}')
+                pbar.set_description(f'{step}: {spec_loss.item()}')
             
             if use_wandb:
                 wandb.log({
-                    'l1_loss': mae_loss
+                    'spec_loss': spec_loss.item(),
                 })
 
             if grad_scaler is not None:
@@ -84,7 +103,8 @@ def train_epoch(dataloader, model, device, optimizer, accumulation_steps, progre
 
             model.zero_grad()
             batches = batches + 1
-            mag_loss = mag_loss + mae_loss.item()
+            mag_loss = mag_loss + batch_loss
+            batch_loss = 0
 
     return mag_loss / batches, step
 
@@ -96,27 +116,28 @@ def validate_epoch(dataloader, model, device, max_bin=0, use_wandb=False, predic
     batches = 0
 
     with torch.no_grad():
-        for X, Y, _ in dataloader:
-            X = X.to(device)[:, :, :max_bin]
-            Y = Y.to(device)[:, :, :max_bin]
+        for XS, XP, XM, YS, YP, YM, _ in dataloader:
+            XS = XS.to(device)[:, :, :max_bin]
+            YS = YS.to(device)[:, :, :max_bin]
+            XM = XM.to(device)
 
             with torch.cuda.amp.autocast_mode.autocast():
-                pred = torch.sigmoid(model(X))
+                pred = torch.sigmoid(model(XS, XM))
+                mag = XS[:, :2] * pred[:, :2]
+                # phase = XS[:, 2:] + pred[:, 2:]
 
-                if predict_mask:
-                    if predict_phase:
-                        pred = X[:, 2:] + pred * 2 - 1
-                    else:
-                        pred = X[:, :2] * pred
+            spec_loss = F.l1_loss(mag, YS[:, :2])
+            # phase_loss = 1 - torch.mean(torch.cos(phase - YS[:, 2:]))
 
-            mae_loss = F.l1_loss(pred, Y)
+            wave_loss = F.l1_loss(XS[:, 2:], YS[:, 2:])
             
             if use_wandb:
                 wandb.log({
-                    'loss': mae_loss
+                    'spec_loss_val': spec_loss.item(),
+                    'wave_loss_val': wave_loss.item()
                 })
 
-            loss = mae_loss
+            loss = spec_loss# + wave_loss
 
             if torch.logical_or(loss.isnan(), loss.isinf()):
                 print('nan validation loss; aborting')
@@ -134,7 +155,7 @@ def main():
     p.add_argument('--sr', '-r', type=int, default=44100)
     p.add_argument('--hop_length', '-H', type=int, default=1024)
     p.add_argument('--n_fft', '-f', type=int, default=2048)
-    p.add_argument('--pretrained_checkpoint', type=str, default=None)#"H://models/local.0.pre.pth")
+    p.add_argument('--pretrained_checkpoint', type=str, default=None)#"H://models/local.0.stg1.mag.pth")
     p.add_argument('--checkpoint', type=str, default=None)#"H://models/local.12.pre.pth")
     p.add_argument('--mixed_precision', type=str, default='true')
     p.add_argument('--learning_rate', '-l', type=float, default=1e-4)
@@ -166,7 +187,7 @@ def main():
     p.add_argument('--num_bridge_layers', type=int, default=1)
     p.add_argument('--num_attention_maps', type=int, default=2)
     p.add_argument('--channels', type=int, default=8)
-    p.add_argument('--expansion', type=int, default=4096)
+    p.add_argument('--expansion', type=int, default=4)
     p.add_argument('--num_heads', type=int, default=8)
     p.add_argument('--dropout', type=float, default=0.1)
     
@@ -248,8 +269,7 @@ def main():
 
     device = torch.device('cpu')
 
-    generator = FrameTransformerGenerator(in_channels=4, out_channels=2, channels=args.channels, expansion=args.expansion, n_fft=args.n_fft, dropout=args.dropout, num_heads=args.num_heads, num_attention_maps=args.num_attention_maps, num_bridge_layers=args.num_bridge_layers)
-
+    generator = FrameTransformerGenerator(in_channels=2, out_channels=2, channels=args.channels, expansion=args.expansion, n_fft=args.n_fft, dropout=args.dropout, num_heads=args.num_heads, num_attention_maps=args.num_attention_maps, num_bridge_layers=args.num_bridge_layers)
     if torch.cuda.is_available() and args.gpu >= 0:
         device = torch.device('cuda:{}'.format(args.gpu))
         generator.to(device)

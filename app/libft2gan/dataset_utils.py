@@ -97,6 +97,24 @@ def apply_time_stretch(M, random, target_size):
 
     return H
 
+def to_wave(X, n_fft=2048, hop_length=1024):
+    left_X = X[0]
+    right_X = X[1]
+
+    left_W = librosa.istft(left_X, hop_length=hop_length)
+    right_W = librosa.istft(right_X, hop_length=hop_length)
+
+    return np.stack([left_W, right_W], axis=0)
+
+def from_wave(W, n_fft=2048, hop_length=1024):
+    left_W = W[0]
+    right_W = W[1]
+
+    left_X = librosa.stft(left_W, n_fft=n_fft, hop_length=hop_length)
+    right_X = librosa.stft(right_W, n_fft=n_fft, hop_length=hop_length)
+
+    return np.stack([left_X, right_X], axis=0)
+
 def apply_harmonic_distortion(M, P, random, c, num_harmonics=2, gain=0.1, n_fft=2048, hop_length=1024):
     left_M = M[0] / c
     right_M = M[1] / c
@@ -105,6 +123,8 @@ def apply_harmonic_distortion(M, P, random, c, num_harmonics=2, gain=0.1, n_fft=
     
     left_X = left_M * np.exp(1.j * left_P)
     right_X = right_M * np.exp(1.j * right_P)
+
+    librosa.effects.pitch_shift()
 
     left_s = librosa.istft(left_X, hop_length=hop_length)
     right_s = librosa.istft(right_X, hop_length=hop_length)
