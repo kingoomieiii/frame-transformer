@@ -67,7 +67,7 @@ def train_epoch(dataloader, model, device, optimizer, accumulation_steps, progre
         phase_loss = (1 - torch.mean(torch.cos(PP - YP))) / accumulation_steps
         spectral_loss = F.l1_loss(PS, YS) / accumulation_steps
         wave_loss = F.l1_loss(PW, YW) / accumulation_steps
-        accum_loss = spectral_loss + mel_loss
+        accum_loss = mel_loss
         batch_loss = batch_loss + wave_loss.item()
 
         if torch.logical_or(accum_loss.isnan(), accum_loss.isinf()):
@@ -81,7 +81,7 @@ def train_epoch(dataloader, model, device, optimizer, accumulation_steps, progre
 
         if (itr + 1) % accumulation_steps == 0:
             if progress_bar:
-                pbar.set_description(f'{step}: mag={spectral_loss.item()}, mel={mel_loss.item()}, wave={wave_loss.item()}, phase={phase_loss.item()}')
+                pbar.set_description(f'{step}: mel={mel_loss.item()}, mag={spectral_loss.item()}, wave={wave_loss.item()}, phase={phase_loss.item()}')
             
             if use_wandb:
                 wandb.log({
