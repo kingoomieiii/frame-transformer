@@ -61,14 +61,14 @@ def train_epoch(dataloader, model, device, optimizer, accumulation_steps, progre
             YS = (YS / c)[:, :, :-1]
         
         with torch.cuda.amp.autocast_mode.autocast(enabled=grad_scaler is not None):
-            PW, PS, PP, PM = model(XW, c)
+            PW, PS, PP, PM, pmin, pmax = model(XW, c)
 
         mel_loss = F.l1_loss(PM, YM) / accumulation_steps
         phase_loss = (1 - torch.mean(torch.cos(PP - YP))) / accumulation_steps
         spectral_loss = F.l1_loss(PS, YS) / accumulation_steps
-        wave_loss = F.l1_loss(PW, YW) / accumulation_steps
+        # wave_loss = F.l1_loss(PW, YW) / accumulation_steps
         accum_loss = mel_loss
-        batch_loss = batch_loss + wave_loss.item()
+        batch_loss = batch_loss + accum_loss.item()
 
         if torch.logical_or(accum_loss.isnan(), accum_loss.isinf()):
             print('nan training loss; aborting')
@@ -81,13 +81,13 @@ def train_epoch(dataloader, model, device, optimizer, accumulation_steps, progre
 
         if (itr + 1) % accumulation_steps == 0:
             if progress_bar:
-                pbar.set_description(f'{step}: mel={mel_loss.item()}, mag={spectral_loss.item()}, wave={wave_loss.item()}, phase={phase_loss.item()}')
+                pbar.set_description(f'{step}: mel={mel_loss.item()}, mag={spectral_loss.item()}, wave={pmin.item()}, phase={pmax.item()}')
             
-            if use_wandb:
-                wandb.log({
-                    'spec_loss': wave_loss.item(),
-                    'wave_loss': wave_loss.item(),
-                })
+            # if use_wandb:
+            #     wandb.log({
+            #         'spec_loss': wave_loss.item(),
+            #         'wave_loss': wave_loss.item(),
+            #     })
 
             if grad_scaler is not None:
                 grad_scaler.unscale_(optimizer)
@@ -135,10 +135,10 @@ def validate_epoch(dataloader, model, device, max_bin=0, use_wandb=False, predic
             YS = (torch.abs(YS) / c)[:, :, :-1]
             
             with torch.cuda.amp.autocast_mode.autocast():
-                PW, PS, PP, PM = model(XW, c)
+                PW, PS, PP, PM, _, _ = model(XW, c)
 
             mag_loss = F.l1_loss(PS, YS)
-            wave_loss = F.l1_loss(PW, YW)
+            wave_loss = mag_loss #F.l1_loss(PW, YW)
             
             if use_wandb:
                 wandb.log({
@@ -324,7 +324,7 @@ def main():
         num_workers=args.num_workers
     )
 
-    wave, spec = validate_epoch(val_dataloader, generator, device, max_bin=args.n_fft // 2, predict_mask=args.predict_mask, predict_phase=args.predict_phase)
+    #wave, spec = validate_epoch(val_dataloader, generator, device, max_bin=args.n_fft // 2, predict_mask=args.predict_mask, predict_phase=args.predict_phase)
 
     best_loss = float('inf')
     while step < args.stages[-1]:
