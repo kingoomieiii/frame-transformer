@@ -56,15 +56,18 @@ def train_epoch(dataloader, model, device, optimizer, accumulation_steps, progre
         with torch.no_grad():
             YS = to_spec(YW)
             YP = ((torch.angle(YS) + torch.pi) / (2 * torch.pi))[:, :, :-1]
-            YS = (torch.abs(YS) / c)[:, :, :-1]
+            YS = torch.abs(YS)
+            YM = to_mel(YS) / c
+            YS = (YS / c)[:, :, :-1]
         
         with torch.cuda.amp.autocast_mode.autocast(enabled=grad_scaler is not None):
-            PW, PS, PP = model(XW, c)
+            PW, PS, PP, PM = model(XW, c)
 
+        mel_loss = F.l1_loss(PM, YM) / accumulation_steps
         phase_loss = (1 - torch.mean(torch.cos(PP - YP))) / accumulation_steps
         spectral_loss = F.l1_loss(PS, YS) / accumulation_steps
         wave_loss = F.l1_loss(PW, YW) / accumulation_steps
-        accum_loss = wave_loss + spectral_loss + phase_loss
+        accum_loss = spectral_loss + mel_loss
         batch_loss = batch_loss + wave_loss.item()
 
         if torch.logical_or(accum_loss.isnan(), accum_loss.isinf()):
@@ -78,7 +81,7 @@ def train_epoch(dataloader, model, device, optimizer, accumulation_steps, progre
 
         if (itr + 1) % accumulation_steps == 0:
             if progress_bar:
-                pbar.set_description(f'{step}: wave={wave_loss.item()}, mag={spectral_loss.item()}, phase={phase_loss.item()}')
+                pbar.set_description(f'{step}: mag={spectral_loss.item()}, mel={mel_loss.item()}, wave={wave_loss.item()}, phase={phase_loss.item()}')
             
             if use_wandb:
                 wandb.log({
@@ -132,7 +135,7 @@ def validate_epoch(dataloader, model, device, max_bin=0, use_wandb=False, predic
             YS = (torch.abs(YS) / c)[:, :, :-1]
             
             with torch.cuda.amp.autocast_mode.autocast():
-                PW, PS, PP = model(XW, c)
+                PW, PS, PP, PM = model(XW, c)
 
             mag_loss = F.l1_loss(PS, YS)
             wave_loss = F.l1_loss(PW, YW)
@@ -321,7 +324,7 @@ def main():
         num_workers=args.num_workers
     )
 
-    # wave, spec = validate_epoch(val_dataloader, generator, device, max_bin=args.n_fft // 2, predict_mask=args.predict_mask, predict_phase=args.predict_phase)
+    wave, spec = validate_epoch(val_dataloader, generator, device, max_bin=args.n_fft // 2, predict_mask=args.predict_mask, predict_phase=args.predict_phase)
 
     best_loss = float('inf')
     while step < args.stages[-1]:

@@ -75,8 +75,9 @@ class SpecWaveTransformer(nn.Module):
         self.wave_embedding = wave_embedding
         encoder_layers = 4
 
-        self.to_wave = InverseSpectrogram(n_fft=n_fft, hop_length=hop_length)
+        self.to_wave = T.InverseSpectrogram(n_fft=n_fft, hop_length=hop_length)
         self.to_spec = Spectrogram(n_fft=n_fft, hop_length=hop_length)
+        self.to_mel2 = T.MelScale(n_mels=n_mels, sample_rate=44100, n_stft=self.output_bin)
         self.to_mel = MelScale(n_mels=n_mels, sample_rate=44100, n_stft=self.output_bin)
 
         self.encode_wave1 = Encoder(wave_in_channels, wave_channels, 1, downsample=True, stride=(1,2), kernel_size=(1,3), padding=(0,1), channel_norm=True)
@@ -199,13 +200,13 @@ class SpecWaveTransformer(nn.Module):
         h = self.spec_out(h)
 
         mag = s * torch.sigmoid(h[:, :2])
+        mel = self.to_mel2(F.pad(input=mag * c, pad=(0, 0, 0, 1), mode='replicate')) / c
         phase = p + (torch.sigmoid(h[:, 2:]) * 2 - 1)
-        phase = (phase * 2 - 1) * torch.pi
-        spec = mag * c * torch.exp(1.j * phase)
+        spec = mag * c * torch.exp(1.j * (phase * 2 - 1) * torch.pi)
         spec = F.pad(input=spec, pad=(0, 0, 0, 1), mode='replicate')
         nw = self.to_wave(spec)
 
-        return nw, s, p
+        return nw, mag, phase, mel
     
 class WaveEncoder(nn.Module):
     def __init__(self, in_channels, out_channels, kernel_size=3, padding=1, stride=1):
