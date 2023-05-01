@@ -191,9 +191,9 @@ def main():
     p.add_argument('--lr_verbosity', type=int, default=1000)
      
     p.add_argument('--num_bridge_layers', type=int, default=8)
-    p.add_argument('--num_attention_maps', type=int, default=1)
-    p.add_argument('--wave_channels', type=int, default=8)
-    p.add_argument('--frame_channels', type=int, default=4)
+    p.add_argument('--num_attention_maps', type=int, default=3)
+    p.add_argument('--wave_channels', type=int, default=4)
+    p.add_argument('--frame_channels', type=int, default=8)
     p.add_argument('--wave_expansion', type=int, default=4)
     p.add_argument('--frame_expansion', type=int, default=4)
     p.add_argument('--num_heads', type=int, default=4)
@@ -321,7 +321,7 @@ def main():
         num_workers=args.num_workers
     )
 
-    wave, spec = validate_epoch(val_dataloader, generator, device, max_bin=args.n_fft // 2, predict_mask=args.predict_mask, predict_phase=args.predict_phase)
+    # wave, spec = validate_epoch(val_dataloader, generator, device, max_bin=args.n_fft // 2, predict_mask=args.predict_mask, predict_phase=args.predict_phase)
 
     best_loss = float('inf')
     while step < args.stages[-1]:

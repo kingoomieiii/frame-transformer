@@ -3,6 +3,7 @@ import torch
 from torch import nn
 import torch.nn.functional as F
 import torchaudio.transforms as T
+import torchaudio.functional as A
 
 from libft2gan.convolutional_multihead_attention import ConvolutionalMultiheadAttention
 from libft2gan.multichannel_multihead_attention import MultichannelMultiheadAttention2
@@ -13,6 +14,54 @@ from libft2gan.convolutional_embedding import ConvolutionalEmbedding
 from libft2gan.res_block import ResBlock, ResBlock1d
 from libft2gan.squared_relu import SquaredReLU
 from libft2gan.channel_norm import ChannelNorm
+
+class Spectrogram(nn.Module):
+    def __init__(self, n_fft=2048, hop_length=1024):
+        super().__init__()
+
+        self.n_fft = n_fft
+        self.hop_length = hop_length
+        self.window = nn.Parameter(torch.hann_window(self.n_fft))
+
+    def forward(self, x):
+        return A.spectrogram(
+            x,
+            pad=0,
+            window=self.window,
+            n_fft=self.n_fft,
+            hop_length=self.hop_length,
+            win_length=self.n_fft,
+            power=None,
+            normalized=False)
+
+class MelScale(nn.Module):
+    def __init__(self, n_mels=128, sample_rate=44100, n_stft=1025):        
+        super().__init__()
+        
+        self.fb = nn.Parameter(A.melscale_fbanks(n_stft, 0, float(sample_rate // 2), n_mels=n_mels, sample_rate=sample_rate))
+
+    def forward(self, x):
+        return torch.matmul(x.transpose(-1, -2), self.fb).transpose(-1, -2)
+
+class InverseSpectrogram(nn.Module):
+    def __init__(self, n_fft=2048, hop_length=1024):
+        super().__init__()
+        
+        self.n_fft = n_fft
+        self.hop_length = hop_length
+        self.window = nn.Parameter(torch.hann_window(self.n_fft))
+
+    def forward(self, x):
+        return A.inverse_spectrogram(
+            x,
+            length=None,
+            pad=0,
+            window=self.window,
+            n_fft=self.n_fft,
+            hop_length=self.hop_length,
+            win_length=self.n_fft,
+            normalized=False)
+
 
 class SpecWaveTransformer(nn.Module):
     def __init__(self, wave_in_channels=2, frame_in_channels=4, frame_out_channels=2, wave_out_channels=2, wave_channels=8, frame_channels=8, dropout=0.1, n_fft=2048, hop_length=1024, wave_embedding=256, wave_heads=8, wave_expansion=4, frame_heads=8, frame_expansion=4, num_attention_maps=1, n_mels=128):
@@ -26,9 +75,9 @@ class SpecWaveTransformer(nn.Module):
         self.wave_embedding = wave_embedding
         encoder_layers = 4
 
-        self.to_wave = T.InverseSpectrogram(n_fft=n_fft, hop_length=hop_length)
-        self.to_spec = T.Spectrogram(n_fft=n_fft, hop_length=hop_length, power=None, return_complex=True)
-        self.to_mel = T.MelScale(n_mels=n_mels, sample_rate=44100, n_stft=self.output_bin)
+        self.to_wave = InverseSpectrogram(n_fft=n_fft, hop_length=hop_length)
+        self.to_spec = Spectrogram(n_fft=n_fft, hop_length=hop_length)
+        self.to_mel = MelScale(n_mels=n_mels, sample_rate=44100, n_stft=self.output_bin)
 
         self.encode_wave1 = Encoder(wave_in_channels, wave_channels, 1, downsample=True, stride=(1,2), kernel_size=(1,3), padding=(0,1), channel_norm=True)
         self.encode_wave2 = Encoder(wave_channels, wave_channels * 2, 1, downsample=True, stride=(2,1), kernel_size=(1,3), padding=(0,1), channel_norm=True)
@@ -36,28 +85,28 @@ class SpecWaveTransformer(nn.Module):
         self.encode_mel = nn.Sequential(*[MultichannelTransformerEncoder(frame_in_channels, num_attention_maps, n_mels, dropout=dropout, expansion=wave_expansion, num_heads=wave_heads, kernel_size=3, padding=1) for _ in range(encoder_layers)])
         
         self.frame_enc1 = Encoder(wave_in_channels * 2, frame_channels * 1, self.max_bin, downsample=False)
-        self.enc1_wave_transformer = MultichannelTransformerEncoder(frame_channels * 1, num_attention_maps, self.max_bin, mem_channels=wave_channels * 2, mem_features=self.wave_embedding, mem2_channels=wave_in_channels, mem2_features=n_mels, dropout=dropout, expansion=wave_expansion, num_heads=wave_heads)
+        self.enc1_wave_transformer = MultichannelTransformerEncoder(frame_channels * 1, num_attention_maps, self.max_bin, mem_channels=wave_channels * 2, mem_features=self.wave_embedding, mem2_channels=wave_in_channels, mem2_features=n_mels, dropout=dropout, expansion=frame_expansion, num_heads=wave_heads)
 
         self.frame_enc2 = Encoder(frame_channels * 1, frame_channels * 2, self.max_bin)
-        self.enc2_wave_transformer = MultichannelTransformerEncoder(frame_channels * 2, num_attention_maps, self.max_bin // 2, mem_channels=wave_channels * 2, mem_features=self.wave_embedding, mem2_channels=wave_in_channels, mem2_features=n_mels, dropout=dropout, expansion=wave_expansion, num_heads=wave_heads)
+        self.enc2_wave_transformer = MultichannelTransformerEncoder(frame_channels * 2, num_attention_maps, self.max_bin // 2, mem_channels=wave_channels * 2, mem_features=self.wave_embedding, mem2_channels=wave_in_channels, mem2_features=n_mels, dropout=dropout, expansion=frame_expansion, num_heads=wave_heads)
 
         self.frame_enc3 = Encoder(frame_channels * 2, frame_channels * 4, self.max_bin // 2)
-        self.enc3_wave_transformer = MultichannelTransformerEncoder(frame_channels * 4, num_attention_maps, self.max_bin // 4, mem_channels=wave_channels * 2, mem_features=self.wave_embedding, mem2_channels=wave_in_channels, mem2_features=n_mels, dropout=dropout, expansion=wave_expansion, num_heads=wave_heads)
+        self.enc3_wave_transformer = MultichannelTransformerEncoder(frame_channels * 4, num_attention_maps, self.max_bin // 4, mem_channels=wave_channels * 2, mem_features=self.wave_embedding, mem2_channels=wave_in_channels, mem2_features=n_mels, dropout=dropout, expansion=frame_expansion, num_heads=wave_heads)
 
         self.frame_enc4 = Encoder(frame_channels * 4, frame_channels * 6, self.max_bin // 4)
-        self.enc4_wave_transformer = MultichannelTransformerEncoder(frame_channels * 6, num_attention_maps, self.max_bin // 8, mem_channels=wave_channels * 2, mem_features=self.wave_embedding, mem2_channels=wave_in_channels, mem2_features=n_mels, dropout=dropout, expansion=wave_expansion, num_heads=wave_heads)
+        self.enc4_wave_transformer = MultichannelTransformerEncoder(frame_channels * 6, num_attention_maps, self.max_bin // 8, mem_channels=wave_channels * 2, mem_features=self.wave_embedding, mem2_channels=wave_in_channels, mem2_features=n_mels, dropout=dropout, expansion=frame_expansion, num_heads=wave_heads)
 
         self.frame_enc5 = Encoder(frame_channels * 6, frame_channels * 8, self.max_bin // 8)
-        self.enc5_wave_transformer = MultichannelTransformerEncoder(frame_channels * 8, num_attention_maps, self.max_bin // 16, mem_channels=wave_channels * 2, mem_features=self.wave_embedding, mem2_channels=wave_in_channels, mem2_features=n_mels, dropout=dropout, expansion=wave_expansion, num_heads=wave_heads)
+        self.enc5_wave_transformer = MultichannelTransformerEncoder(frame_channels * 8, num_attention_maps, self.max_bin // 16, mem_channels=wave_channels * 2, mem_features=self.wave_embedding, mem2_channels=wave_in_channels, mem2_features=n_mels, dropout=dropout, expansion=frame_expansion, num_heads=wave_heads)
 
         self.frame_enc6 = Encoder(frame_channels * 8, frame_channels * 10, self.max_bin // 16)
-        self.enc6_wave_transformer = MultichannelTransformerEncoder(frame_channels * 10, num_attention_maps, self.max_bin // 32, mem_channels=wave_channels * 2, mem_features=self.wave_embedding, mem2_channels=wave_in_channels, mem2_features=n_mels, dropout=dropout, expansion=wave_expansion, num_heads=wave_heads)
+        self.enc6_wave_transformer = MultichannelTransformerEncoder(frame_channels * 10, num_attention_maps, self.max_bin // 32, mem_channels=wave_channels * 2, mem_features=self.wave_embedding, mem2_channels=wave_in_channels, mem2_features=n_mels, dropout=dropout, expansion=frame_expansion, num_heads=wave_heads)
 
         self.frame_enc7 = Encoder(frame_channels * 10, frame_channels * 12, self.max_bin // 32)
-        self.enc7_wave_transformer = MultichannelTransformerEncoder(frame_channels * 12, num_attention_maps, self.max_bin // 64, mem_channels=wave_channels * 2, mem_features=self.wave_embedding, mem2_channels=wave_in_channels, mem2_features=n_mels, dropout=dropout, expansion=wave_expansion, num_heads=wave_heads)
+        self.enc7_wave_transformer = MultichannelTransformerEncoder(frame_channels * 12, num_attention_maps, self.max_bin // 64, mem_channels=wave_channels * 2, mem_features=self.wave_embedding, mem2_channels=wave_in_channels, mem2_features=n_mels, dropout=dropout, expansion=frame_expansion, num_heads=wave_heads)
 
         self.frame_enc8 = Encoder(frame_channels * 12, frame_channels * 14, self.max_bin // 64)
-        self.enc8_wave_transformer = MultichannelTransformerEncoder(frame_channels * 14, num_attention_maps, self.max_bin // 128, mem_channels=wave_channels * 2, mem_features=self.wave_embedding, mem2_channels=wave_in_channels, mem2_features=n_mels, dropout=dropout, expansion=wave_expansion, num_heads=wave_heads)
+        self.enc8_wave_transformer = MultichannelTransformerEncoder(frame_channels * 14, num_attention_maps, self.max_bin // 128, mem_channels=wave_channels * 2, mem_features=self.wave_embedding, mem2_channels=wave_in_channels, mem2_features=n_mels, dropout=dropout, expansion=frame_expansion, num_heads=wave_heads)
         
         self.frame_dec7 = Decoder(frame_channels * 14, frame_channels * 12, self.max_bin // 64, dropout=0.5)
         self.dec7_wave_transformer = MultichannelTransformerDecoder(frame_channels * 12, num_attention_maps, self.max_bin // 64, mem_channels=wave_channels * 2, mem_features=self.wave_embedding, mem2_channels=wave_in_channels, mem2_features=n_mels, dropout=dropout, expansion=frame_expansion, num_heads=frame_heads)
