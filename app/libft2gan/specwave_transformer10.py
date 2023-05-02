@@ -112,7 +112,7 @@ class SpecWaveTransformer(nn.Module):
             *[self.to_mel[i](s) for i in range(self.num_mel_maps)],
             self.to_octave_fixed(s),
             *[self.to_octave[i](s) for i in range(self.num_octave_maps)]
-        ), dim=1)
+        ), dim=1) / c
 
         s = s[:, :, :-1] / c
         p = p[:, :, :-1]

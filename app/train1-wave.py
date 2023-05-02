@@ -187,7 +187,7 @@ def main():
 
     p.add_argument('--curr_step', type=int, default=0)
     p.add_argument('--curr_epoch', type=int, default=0)
-    p.add_argument('--warmup_steps', type=int, default=12000)
+    p.add_argument('--warmup_steps', type=int, default=16000)
     p.add_argument('--decay_steps', type=int, default=1000000)
     p.add_argument('--lr_scheduler_decay_target', type=int, default=1e-12)
     p.add_argument('--lr_scheduler_decay_power', type=float, default=0.1)
