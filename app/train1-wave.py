@@ -135,9 +135,9 @@ def validate_epoch(dataloader, model, device, max_bin=0, use_wandb=False, predic
             YS = (torch.abs(YS) / c)[:, :, :-1]
             
             with torch.cuda.amp.autocast_mode.autocast():
-                PW, PS, PP, PM, _, _ = model(XW, c)
+                mag, mel, pmin, pmax = model(XW, c)
 
-            mag_loss = F.l1_loss(PS, YS)
+            mag_loss = F.l1_loss(mag, YS)
             wave_loss = mag_loss #F.l1_loss(PW, YW)
             
             if use_wandb:
@@ -340,7 +340,7 @@ def main():
         num_workers=args.num_workers
     )
 
-    #wave, spec = validate_epoch(val_dataloader, generator, device, max_bin=args.n_fft // 2, predict_mask=args.predict_mask, predict_phase=args.predict_phase)
+    wave, spec = validate_epoch(val_dataloader, generator, device, max_bin=args.n_fft // 2, predict_mask=args.predict_mask, predict_phase=args.predict_phase)
 
     best_loss = float('inf')
     while step < args.stages[-1]:
