@@ -12,7 +12,7 @@ from tqdm import tqdm
 import wandb
 
 from libft2gan.dataset_voxaug3 import VoxAugDataset
-from libft2gan.specwave_transformer8 import SpecWaveTransformer
+from libft2gan.specwave_transformer10 import SpecWaveTransformer
 from libft2gan.lr_scheduler_linear_warmup import LinearWarmupScheduler
 from libft2gan.lr_scheduler_polynomial_decay import PolynomialDecayScheduler
 from libft2gan.signal_loss import sdr_loss
@@ -55,19 +55,19 @@ def train_epoch(dataloader, model, device, optimizer, accumulation_steps, progre
 
         with torch.no_grad():
             YS = to_spec(YW)
-            YP = ((torch.angle(YS) + torch.pi) / (2 * torch.pi))[:, :, :-1]
+            #YP = ((torch.angle(YS) + torch.pi) / (2 * torch.pi))[:, :, :-1]
             YS = torch.abs(YS)
             YM = to_mel(YS) / c
             YS = (YS / c)[:, :, :-1]
         
         with torch.cuda.amp.autocast_mode.autocast(enabled=grad_scaler is not None):
-            PW, PS, PP, PM, pmin, pmax = model(XW, c)
+            mag, mel, pmin, pmax = model(XW, c)
 
-        mel_loss = F.l1_loss(PM, YM) / accumulation_steps
-        phase_loss = (1 - torch.mean(torch.cos(PP - YP))) / accumulation_steps
-        spectral_loss = F.l1_loss(PS, YS) / accumulation_steps
+        mel_loss = F.l1_loss(mel, YM) / accumulation_steps
+        #phase_loss = (1 - torch.mean(torch.cos(phase - YP))) / accumulation_steps
+        spectral_loss = F.l1_loss(mag, YS) / accumulation_steps
         # wave_loss = F.l1_loss(PW, YW) / accumulation_steps
-        accum_loss = mel_loss
+        accum_loss = mel_loss# + phase_loss
         batch_loss = batch_loss + accum_loss.item()
 
         if torch.logical_or(accum_loss.isnan(), accum_loss.isinf()):
@@ -192,14 +192,17 @@ def main():
     p.add_argument('--lr_scheduler_decay_target', type=int, default=1e-12)
     p.add_argument('--lr_scheduler_decay_power', type=float, default=0.1)
     p.add_argument('--lr_verbosity', type=int, default=1000)
+
+    p.add_argument('--encoder_layers', type=int, default=8)
+    p.add_argument('--encoder_attention_maps', type=int, default=1)
+    p.add_argument('--encoder_expansion', type=int, default=4)
+    p.add_argument('--encoder_heads', type=int, default=8)
+
+    p.add_argument('--decoder_layers', type=int, default=8)
+    p.add_argument('--decoder_attention_maps', type=int, default=1)
+    p.add_argument('--decoder_expansion', type=int, default=4)
+    p.add_argument('--decoder_heads', type=int, default=8)
      
-    p.add_argument('--num_bridge_layers', type=int, default=8)
-    p.add_argument('--num_attention_maps', type=int, default=3)
-    p.add_argument('--wave_channels', type=int, default=4)
-    p.add_argument('--frame_channels', type=int, default=8)
-    p.add_argument('--wave_expansion', type=int, default=4)
-    p.add_argument('--frame_expansion', type=int, default=4)
-    p.add_argument('--num_heads', type=int, default=4)
     p.add_argument('--dropout', type=float, default=0.1)
     
     p.add_argument('--stages', type=str, default='900000,1108000')
@@ -280,7 +283,16 @@ def main():
 
     device = torch.device('cpu')
 
-    generator = SpecWaveTransformer(wave_in_channels=2, frame_in_channels=2, wave_out_channels=2, frame_out_channels=2, wave_channels=args.wave_channels, frame_channels=args.frame_channels, dropout=args.dropout, n_fft=args.n_fft, wave_heads=args.num_heads, wave_expansion=args.wave_expansion, frame_heads=args.num_heads, frame_expansion=args.frame_expansion, num_attention_maps=args.num_attention_maps)
+    generator = SpecWaveTransformer(
+        wave_in_channels=2,
+        dropout=args.dropout,
+        n_fft=args.n_fft,
+        hop_length=args.hop_length,
+        encoder_heads=args.encoder_heads,
+        encoder_expansion=args.encoder_expansion,
+    )
+
+    generator = SpecWaveTransformer(wave_in_channels=2, dropout=args.dropout, n_fft=args.n_fft, encoder_layers=args.encoder_layers, encoder_heads=args.encoder_heads, encoder_expansion=args.encoder_expansion, decoder_layers=args.decoder_layers, decoder_heads=args.decoder_heads, decoder_expansion=args.decoder_expansion, encoder_attention_maps=args.encoder_attention_maps, decoder_attention_maps=args.decoder_attention_maps)
 
     # generator = FrameWaveTransformer(wave_in_channels=2, frame_in_channels=4, wave_out_channels=2, frame_out_channels=2, wave_channels=args.wave_channels, frame_channels=args.frame_channels, dropout=args.dropout, n_fft=args.n_fft, wave_transformer_layers=args.num_bridge_layers, wave_heads=args.num_heads, wave_expansion=args.wave_expansion, frame_heads=args.num_heads, frame_expansion=args.frame_expansion, num_attention_maps=args.num_attention_maps)
 
