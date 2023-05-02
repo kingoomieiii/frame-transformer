@@ -193,6 +193,10 @@ def main():
     p.add_argument('--lr_scheduler_decay_power', type=float, default=0.1)
     p.add_argument('--lr_verbosity', type=int, default=1000)
 
+    p.add_argument('--num_octave_channels', type=int, default=4)
+    p.add_argument('--num_mel_channels', type=int, default=4)
+    p.add_argument('--num_band_channels', type=int, default=4)
+
     p.add_argument('--encoder_layers', type=int, default=8)
     p.add_argument('--encoder_attention_maps', type=int, default=1)
     p.add_argument('--encoder_expansion', type=int, default=4)
@@ -292,7 +296,7 @@ def main():
         encoder_expansion=args.encoder_expansion,
     )
 
-    generator = SpecWaveTransformer(wave_in_channels=2, dropout=args.dropout, n_fft=args.n_fft, encoder_layers=args.encoder_layers, encoder_heads=args.encoder_heads, encoder_expansion=args.encoder_expansion, decoder_layers=args.decoder_layers, decoder_heads=args.decoder_heads, decoder_expansion=args.decoder_expansion, encoder_attention_maps=args.encoder_attention_maps, decoder_attention_maps=args.decoder_attention_maps)
+    generator = SpecWaveTransformer(wave_in_channels=2, dropout=args.dropout, n_fft=args.n_fft, encoder_layers=args.encoder_layers, encoder_heads=args.encoder_heads, encoder_expansion=args.encoder_expansion, decoder_layers=args.decoder_layers, decoder_heads=args.decoder_heads, decoder_expansion=args.decoder_expansion, encoder_attention_maps=args.encoder_attention_maps, decoder_attention_maps=args.decoder_attention_maps, num_octave_maps=args.num_octave_channels, num_mel_maps=args.num_mel_channels, num_band_maps=args.num_band_channels)
 
     # generator = FrameWaveTransformer(wave_in_channels=2, frame_in_channels=4, wave_out_channels=2, frame_out_channels=2, wave_channels=args.wave_channels, frame_channels=args.frame_channels, dropout=args.dropout, n_fft=args.n_fft, wave_transformer_layers=args.num_bridge_layers, wave_heads=args.num_heads, wave_expansion=args.wave_expansion, frame_heads=args.num_heads, frame_expansion=args.frame_expansion, num_attention_maps=args.num_attention_maps)
 

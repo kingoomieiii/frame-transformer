@@ -55,7 +55,7 @@ class BandScale(nn.Module):
         return torch.matmul(x.transpose(-1, -2), self.fb).transpose(-1, -2)
 
 class SpecWaveTransformer(nn.Module):
-    def __init__(self, wave_in_channels=2, dropout=0.1, encoder_layers=8, encoder_heads=8, encoder_expansion=4, decoder_layers=8, decoder_heads=8, decoder_expansion=4, encoder_attention_maps=1, decoder_attention_maps=1, num_octave_maps=4, num_mel_maps=4, num_band_maps=4, n_mels=128, n_fft=2048, hop_length=1024, sr=44100):
+    def __init__(self, wave_in_channels=2, dropout=0.1, encoder_layers=8, encoder_heads=8, encoder_expansion=4, decoder_layers=8, decoder_heads=8, decoder_expansion=4, encoder_attention_maps=1, decoder_attention_maps=1, num_octave_maps=3, num_mel_maps=3, num_band_maps=3, n_mels=128, n_fft=2048, hop_length=1024, sr=44100):
         super(SpecWaveTransformer, self).__init__(),
         
         self.n_fft = n_fft
@@ -69,12 +69,12 @@ class SpecWaveTransformer(nn.Module):
         self.num_mel_maps = num_mel_maps
         self.num_band_maps = num_band_maps
         self.num_scale_channels = wave_in_channels * ((6 * self.num_band_maps) + self.num_mel_maps + self.num_octave_maps + 8)
-        self.to_lbass = BandScale(n_filters=n_mels, sample_rate=sr, n_stft=self.output_bin, min_freq=16.0, max_freq=60.0)
-        self.to_ubass = BandScale(n_filters=n_mels, sample_rate=sr, n_stft=self.output_bin, min_freq=60.0, max_freq=250.0)
-        self.to_lmids = BandScale(n_filters=n_mels, sample_rate=sr, n_stft=self.output_bin, min_freq=250.0, max_freq=2000.0)
-        self.to_umids = BandScale(n_filters=n_mels, sample_rate=sr, n_stft=self.output_bin, min_freq=2000.0, max_freq=4000.0)
-        self.to_presence = BandScale(n_filters=n_mels, sample_rate=sr, n_stft=self.output_bin, min_freq=4000.0, max_freq=6000.0)
-        self.to_brilliance = BandScale(n_filters=n_mels, sample_rate=sr, n_stft=self.output_bin, min_freq=6000.0, max_freq=16000.0)
+        self.to_lbass = nn.Sequential(*[BandScale(n_filters=n_mels, sample_rate=sr, n_stft=self.output_bin, min_freq=16.0, max_freq=60.0) for _ in range(self.num_band_maps)])
+        self.to_ubass = nn.Sequential(*[BandScale(n_filters=n_mels, sample_rate=sr, n_stft=self.output_bin, min_freq=60.0, max_freq=250.0) for _ in range(self.num_band_maps)])
+        self.to_lmids = nn.Sequential(*[BandScale(n_filters=n_mels, sample_rate=sr, n_stft=self.output_bin, min_freq=250.0, max_freq=2000.0) for _ in range(self.num_band_maps)])
+        self.to_umids = nn.Sequential(*[BandScale(n_filters=n_mels, sample_rate=sr, n_stft=self.output_bin, min_freq=2000.0, max_freq=4000.0) for _ in range(self.num_band_maps)])
+        self.to_presence = nn.Sequential(*[BandScale(n_filters=n_mels, sample_rate=sr, n_stft=self.output_bin, min_freq=4000.0, max_freq=6000.0) for _ in range(self.num_band_maps)])
+        self.to_brilliance = nn.Sequential(*[BandScale(n_filters=n_mels, sample_rate=sr, n_stft=self.output_bin, min_freq=6000.0, max_freq=16000.0) for _ in range(self.num_band_maps)])
         self.to_lbass2 = BandScale(n_filters=n_mels, sample_rate=sr, n_stft=self.output_bin, min_freq=16.0, max_freq=60.0, learned_filters=False)
         self.to_ubass2 = BandScale(n_filters=n_mels, sample_rate=sr, n_stft=self.output_bin, min_freq=60.0, max_freq=250.0, learned_filters=False)
         self.to_lmids2 = BandScale(n_filters=n_mels, sample_rate=sr, n_stft=self.output_bin, min_freq=250.0, max_freq=2000.0, learned_filters=False)
@@ -82,9 +82,9 @@ class SpecWaveTransformer(nn.Module):
         self.to_presence2 = BandScale(n_filters=n_mels, sample_rate=sr, n_stft=self.output_bin, min_freq=4000.0, max_freq=6000.0, learned_filters=False)
         self.to_brilliance2 = BandScale(n_filters=n_mels, sample_rate=sr, n_stft=self.output_bin, min_freq=6000.0, max_freq=16000.0, learned_filters=False)
         self.to_mel_fixed = MelScale(n_filters=n_mels, sample_rate=sr, n_stft=self.output_bin, learned_filters=False)
-        self.to_mel = MelScale(n_filters=n_mels, sample_rate=sr, n_stft=self.output_bin)
+        self.to_mel = nn.Sequential(*[MelScale(n_filters=n_mels, sample_rate=sr, n_stft=self.output_bin) for _ in range(self.num_mel_maps)])
         self.to_octave_fixed = OctaveScale(n_filters=n_mels, sample_rate=sr, n_stft=self.output_bin)
-        self.to_octave = OctaveScale(n_filters=n_mels, sample_rate=sr, n_stft=self.output_bin, learned_filters=True)
+        self.to_octave = nn.Sequential(*[OctaveScale(n_filters=n_mels, sample_rate=sr, n_stft=self.output_bin, learned_filters=True) for _ in range(self.num_octave_maps)])
 
         self.encode_scales = nn.Sequential(*[MultichannelTransformerEncoder(self.num_scale_channels, encoder_attention_maps, n_mels, dropout=dropout, expansion=encoder_expansion, num_heads=encoder_heads, kernel_size=3, padding=1) for _ in range(encoder_layers)])
         self.decode_spectrogram = nn.Sequential(*[MultichannelTransformerDecoder(wave_in_channels * 2, decoder_attention_maps, self.max_bin, mem_channels=self.num_scale_channels, mem_features=n_mels, dropout=dropout, expansion=decoder_expansion, num_heads=decoder_heads, kernel_size=3, padding=1 ) for _ in range(decoder_layers)])
@@ -96,12 +96,12 @@ class SpecWaveTransformer(nn.Module):
         s = torch.abs(s)
 
         m = torch.cat((
-            *[self.to_lbass(s) for _ in range(self.num_band_maps)],
-            *[self.to_ubass(s) for _ in range(self.num_band_maps)],
-            *[self.to_lmids(s) for _ in range(self.num_band_maps)],
-            *[self.to_umids(s) for _ in range(self.num_band_maps)],
-            *[self.to_presence(s) for _ in range(self.num_band_maps)],
-            *[self.to_brilliance(s) for _ in range(self.num_band_maps)],
+            *[self.to_lbass[i](s) for i in range(self.num_band_maps)],
+            *[self.to_ubass[i](s) for i in range(self.num_band_maps)],
+            *[self.to_lmids[i](s) for i in range(self.num_band_maps)],
+            *[self.to_umids[i](s) for i in range(self.num_band_maps)],
+            *[self.to_presence[i](s) for i in range(self.num_band_maps)],
+            *[self.to_brilliance[i](s) for i in range(self.num_band_maps)],
             self.to_lbass2(s),
             self.to_ubass2(s),
             self.to_lmids2(s),
@@ -109,9 +109,9 @@ class SpecWaveTransformer(nn.Module):
             self.to_presence2(s),
             self.to_brilliance2(s),
             self.to_mel_fixed(s),
-            *[self.to_mel(s) for _ in range(self.num_mel_maps)],
+            *[self.to_mel[i](s) for i in range(self.num_mel_maps)],
             self.to_octave_fixed(s),
-            *[self.to_octave(s) for _ in range(self.num_octave_maps)]
+            *[self.to_octave[i](s) for i in range(self.num_octave_maps)]
         ), dim=1)
 
         s = s[:, :, :-1] / c
