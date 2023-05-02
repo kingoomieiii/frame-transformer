@@ -83,8 +83,8 @@ class SpecWaveTransformer(nn.Module):
         self.to_brilliance2 = BandScale(n_filters=n_mels, sample_rate=sr, n_stft=self.output_bin, min_freq=6000.0, max_freq=16000.0, learned_filters=False)
         self.to_mel_fixed = MelScale(n_filters=n_mels, sample_rate=sr, n_stft=self.output_bin, learned_filters=False)
         self.to_mel = nn.Sequential(*[MelScale(n_filters=n_mels, sample_rate=sr, n_stft=self.output_bin) for _ in range(self.num_mel_maps)])
-        self.to_octave_fixed = OctaveScale(n_filters=n_mels, sample_rate=sr, n_stft=self.output_bin)
-        self.to_octave = nn.Sequential(*[OctaveScale(n_filters=n_mels, sample_rate=sr, n_stft=self.output_bin, learned_filters=True) for _ in range(self.num_octave_maps)])
+        self.to_octave_fixed = OctaveScale(n_filters=n_mels, sample_rate=sr, n_stft=self.output_bin, learned_filters=False)
+        self.to_octave = nn.Sequential(*[OctaveScale(n_filters=n_mels, sample_rate=sr, n_stft=self.output_bin) for _ in range(self.num_octave_maps)])
 
         self.encode_scales = nn.Sequential(*[MultichannelTransformerEncoder(self.num_scale_channels, encoder_attention_maps, n_mels, dropout=dropout, expansion=encoder_expansion, num_heads=encoder_heads, kernel_size=3, padding=1) for _ in range(encoder_layers)])
         self.decode_spectrogram = nn.Sequential(*[MultichannelTransformerDecoder(wave_in_channels * 2, decoder_attention_maps, self.max_bin, mem_channels=self.num_scale_channels, mem_features=n_mels, dropout=dropout, expansion=decoder_expansion, num_heads=decoder_heads, kernel_size=3, padding=1 ) for _ in range(decoder_layers)])
