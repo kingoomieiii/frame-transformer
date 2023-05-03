@@ -55,19 +55,19 @@ def train_epoch(dataloader, model, device, optimizer, accumulation_steps, progre
 
         with torch.no_grad():
             YS = to_spec(YW)
-            #YP = ((torch.angle(YS) + torch.pi) / (2 * torch.pi))[:, :, :-1]
+            YP = ((torch.angle(YS) + torch.pi) / (2 * torch.pi))[:, :, :-1]
             YS = torch.abs(YS)
             YM = to_mel(YS) / c
             YS = (YS / c)[:, :, :-1]
         
         with torch.cuda.amp.autocast_mode.autocast(enabled=grad_scaler is not None):
-            mag, mel, pmin, pmax = model(XW, c)
+            mag, mel, phase, wave, pmin, pmax = model(XW, c)
 
         mel_loss = F.l1_loss(mel, YM) / accumulation_steps
-        #phase_loss = (1 - torch.mean(torch.cos(phase - YP))) / accumulation_steps
-        spectral_loss = F.l1_loss(mag, YS) / accumulation_steps
-        # wave_loss = F.l1_loss(PW, YW) / accumulation_steps
-        accum_loss = mel_loss# + phase_loss
+        phase_loss = (1 - torch.mean(torch.cos(phase - YP))) / accumulation_steps
+        mag_loss = F.l1_loss(mag, YS) / accumulation_steps
+        wave_loss = F.l1_loss(wave, YW) / accumulation_steps
+        accum_loss = mag_loss + mel_loss + phase_loss + wave_loss
         batch_loss = batch_loss + accum_loss.item()
 
         if torch.logical_or(accum_loss.isnan(), accum_loss.isinf()):
@@ -81,7 +81,7 @@ def train_epoch(dataloader, model, device, optimizer, accumulation_steps, progre
 
         if (itr + 1) % accumulation_steps == 0:
             if progress_bar:
-                pbar.set_description(f'{step}: mel={mel_loss.item()}, mag={spectral_loss.item()}, wave={pmin.item()}, phase={pmax.item()}')
+                pbar.set_description(f'{step}: mel={mel_loss.item()}, mag={mag_loss.item()}, phase={phase_loss.item()}, wave={wave_loss.item()}, min={pmin.item()}, max={pmax.item()}')
             
             # if use_wandb:
             #     wandb.log({
@@ -135,7 +135,7 @@ def validate_epoch(dataloader, model, device, max_bin=0, use_wandb=False, predic
             YS = (torch.abs(YS) / c)[:, :, :-1]
             
             with torch.cuda.amp.autocast_mode.autocast():
-                mag, mel, pmin, pmax = model(XW, c)
+                mag, mel, phase, wave, pmin, pmax = model(XW, c)
 
             mag_loss = F.l1_loss(mag, YS)
             wave_loss = mag_loss #F.l1_loss(PW, YW)
@@ -193,8 +193,8 @@ def main():
     p.add_argument('--lr_scheduler_decay_power', type=float, default=0.1)
     p.add_argument('--lr_verbosity', type=int, default=1000)
 
-    p.add_argument('--num_octave_channels', type=int, default=5)
-    p.add_argument('--num_mel_channels', type=int, default=5)
+    p.add_argument('--num_octave_channels', type=int, default=3)
+    p.add_argument('--num_mel_channels', type=int, default=2)
     p.add_argument('--num_band_channels', type=int, default=2)
 
     p.add_argument('--encoder_layers', type=int, default=8)

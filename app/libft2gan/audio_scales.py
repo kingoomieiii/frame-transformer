@@ -16,6 +16,7 @@ def hertz_to_note(hz, ref_note=69, ref_freq=440.0):
     note = ref_note + 12 * math.log2(hz / ref_freq)
     return round(note)
 
+# condensed from torchaudio
 def _create_triangular_filterbank(
     all_freqs,
     f_pts):
@@ -31,6 +32,7 @@ def _create_triangular_filterbank(
 
     return fb
 
+# condensed from torchaudio
 def melscale_fbanks(
     n_freqs: int,
     f_min: float,
@@ -63,13 +65,36 @@ def melscale_fbanks(
 def octavescale_fbanks(
     n_freqs: int,
     n_filters: int,
-    sample_rate: int
+    sample_rate: int,
+    f_min = 0,
+    f_max = None,
+    limit_to_freqs = False
 ):
-    max_note = hertz_to_note(sample_rate // 2)
-    all_notes = torch.linspace(0, max_note, n_freqs)
+    all_freqs = torch.linspace(0, sample_rate // 2, n_freqs)
+
+    max_note = hertz_to_note(f_max if f_max is not None else sample_rate // 2)
+    min_note = hertz_to_note(f_min) if f_min is not 0 else f_min
+    octave_pts = torch.linspace(min_note, n_filters + 2 if (max_note - min_note) > n_filters and limit_to_freqs else max_note, n_filters + 2)
+    f_pts = note_to_hertz(octave_pts)
+
+    fb = _create_triangular_filterbank(all_freqs, f_pts)
+
+    return fb
+
+def octavescale_fbanks2(
+    n_freqs: int,
+    n_filters: int,
+    sample_rate: int,
+    f_min = 0,
+    f_max = None,
+    limit_to_freqs = False
+):
+    max_note = hertz_to_note(f_max if f_max is not None else sample_rate // 2)
+    min_note = hertz_to_note(f_min)
+    all_notes = torch.linspace(min_note, max_note if max_note < n_freqs or not limit_to_freqs else n_freqs, n_freqs)
     all_freqs = note_to_hertz(all_notes)
 
-    octave_pts = torch.linspace(0, max_note, n_filters + 2)
+    octave_pts = torch.linspace(min_note, max_note if max_note < n_freqs or not limit_to_freqs else n_freqs, n_filters + 2)
     f_pts = note_to_hertz(octave_pts)
 
     fb = _create_triangular_filterbank(all_freqs, f_pts)

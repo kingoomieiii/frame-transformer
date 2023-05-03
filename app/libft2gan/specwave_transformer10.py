@@ -31,16 +31,21 @@ class MelScale(nn.Module):
         return torch.matmul(x.transpose(-1, -2), self.fb).transpose(-1, -2)
 
 class OctaveScale(nn.Module):
-    def __init__(self, n_filters=128, sample_rate=44100, n_stft=1025, learned_filters=True):
+    def __init__(self, n_filters=128, sample_rate=44100, n_stft=1025, learned_filters=True, limit_to_freqs=False, min_freq=0, max_freq=None):
         super().__init__()
         
         if learned_filters:
-            self.fb = nn.Parameter(octavescale_fbanks(n_stft, n_filters=n_filters, sample_rate=sample_rate))
+            self.fb = nn.Parameter(octavescale_fbanks(n_stft, n_filters=n_filters, sample_rate=sample_rate, limit_to_freqs=limit_to_freqs, f_min=min_freq, f_max=max_freq))
         else:
-            self.register_buffer('fb', octavescale_fbanks(n_stft, n_filters=n_filters, sample_rate=sample_rate))
+            self.register_buffer('fb', octavescale_fbanks(n_stft, n_filters=n_filters, sample_rate=sample_rate, limit_to_freqs=limit_to_freqs, f_min=min_freq, f_max=max_freq))
 
-    def forward(self, x):
-        return torch.matmul(x.transpose(-1, -2), self.fb).transpose(-1, -2)
+    def forward(self, x, reshape_as=None):
+        x = torch.matmul(x.transpose(-1, -2), self.fb).transpose(-1, -2)
+
+        if reshape_as is not None:
+            x = x.reshape_as(reshape_as)
+
+        return x
 
 class BandScale(nn.Module):
     def __init__(self, n_filters, min_freq, max_freq, sample_rate=44100, n_stft=1025, learned_filters=True):
@@ -64,31 +69,38 @@ class SpecWaveTransformer(nn.Module):
         self.output_bin = n_fft // 2 + 1
 
         self.to_spec = T.Spectrogram(n_fft=n_fft, hop_length=hop_length, power=None)
+        self.to_wave = T.InverseSpectrogram(n_fft=n_fft, hop_length=hop_length)
 
         self.num_octave_maps = num_octave_maps
         self.num_mel_maps = num_mel_maps
         self.num_band_maps = num_band_maps
-        self.num_scale_channels = wave_in_channels * ((6 * self.num_band_maps) + self.num_mel_maps + self.num_octave_maps + 8)
+        self.num_scale_channels = wave_in_channels * ((12 * self.num_band_maps) + self.num_mel_maps + self.num_octave_maps + 2)
         self.to_lbass = nn.Sequential(*[BandScale(n_filters=n_mels, sample_rate=sr, n_stft=self.output_bin, min_freq=16.0, max_freq=60.0) for _ in range(self.num_band_maps)])
         self.to_ubass = nn.Sequential(*[BandScale(n_filters=n_mels, sample_rate=sr, n_stft=self.output_bin, min_freq=60.0, max_freq=250.0) for _ in range(self.num_band_maps)])
         self.to_lmids = nn.Sequential(*[BandScale(n_filters=n_mels, sample_rate=sr, n_stft=self.output_bin, min_freq=250.0, max_freq=2000.0) for _ in range(self.num_band_maps)])
         self.to_umids = nn.Sequential(*[BandScale(n_filters=n_mels, sample_rate=sr, n_stft=self.output_bin, min_freq=2000.0, max_freq=4000.0) for _ in range(self.num_band_maps)])
         self.to_presence = nn.Sequential(*[BandScale(n_filters=n_mels, sample_rate=sr, n_stft=self.output_bin, min_freq=4000.0, max_freq=6000.0) for _ in range(self.num_band_maps)])
         self.to_brilliance = nn.Sequential(*[BandScale(n_filters=n_mels, sample_rate=sr, n_stft=self.output_bin, min_freq=6000.0, max_freq=16000.0) for _ in range(self.num_band_maps)])
-        self.to_lbass2 = BandScale(n_filters=n_mels, sample_rate=sr, n_stft=self.output_bin, min_freq=16.0, max_freq=60.0, learned_filters=False)
-        self.to_ubass2 = BandScale(n_filters=n_mels, sample_rate=sr, n_stft=self.output_bin, min_freq=60.0, max_freq=250.0, learned_filters=False)
-        self.to_lmids2 = BandScale(n_filters=n_mels, sample_rate=sr, n_stft=self.output_bin, min_freq=250.0, max_freq=2000.0, learned_filters=False)
-        self.to_umids2 = BandScale(n_filters=n_mels, sample_rate=sr, n_stft=self.output_bin, min_freq=2000.0, max_freq=4000.0, learned_filters=False)
-        self.to_presence2 = BandScale(n_filters=n_mels, sample_rate=sr, n_stft=self.output_bin, min_freq=4000.0, max_freq=6000.0, learned_filters=False)
-        self.to_brilliance2 = BandScale(n_filters=n_mels, sample_rate=sr, n_stft=self.output_bin, min_freq=6000.0, max_freq=16000.0, learned_filters=False)
+        self.to_lbasso = nn.Sequential(*[OctaveScale(n_filters=n_mels, sample_rate=sr, n_stft=self.output_bin, min_freq=16.0, max_freq=60.0) for _ in range(self.num_band_maps)])
+        self.to_ubasso = nn.Sequential(*[OctaveScale(n_filters=n_mels, sample_rate=sr, n_stft=self.output_bin, min_freq=60.0, max_freq=250.0) for _ in range(self.num_band_maps)])
+        self.to_lmidso = nn.Sequential(*[OctaveScale(n_filters=n_mels, sample_rate=sr, n_stft=self.output_bin, min_freq=250.0, max_freq=2000.0) for _ in range(self.num_band_maps)])
+        self.to_umidso = nn.Sequential(*[OctaveScale(n_filters=n_mels, sample_rate=sr, n_stft=self.output_bin, min_freq=2000.0, max_freq=4000.0) for _ in range(self.num_band_maps)])
+        self.to_presenceo = nn.Sequential(*[OctaveScale(n_filters=n_mels, sample_rate=sr, n_stft=self.output_bin, min_freq=4000.0, max_freq=6000.0) for _ in range(self.num_band_maps)])
+        self.to_brillianceo = nn.Sequential(*[OctaveScale(n_filters=n_mels, sample_rate=sr, n_stft=self.output_bin, min_freq=6000.0, max_freq=16000.0) for _ in range(self.num_band_maps)])
+        # self.to_lbass2 = BandScale(n_filters=n_mels, sample_rate=sr, n_stft=self.output_bin, min_freq=16.0, max_freq=60.0, learned_filters=False)
+        # self.to_ubass2 = BandScale(n_filters=n_mels, sample_rate=sr, n_stft=self.output_bin, min_freq=60.0, max_freq=250.0, learned_filters=False)
+        # self.to_lmids2 = BandScale(n_filters=n_mels, sample_rate=sr, n_stft=self.output_bin, min_freq=250.0, max_freq=2000.0, learned_filters=False)
+        # self.to_umids2 = BandScale(n_filters=n_mels, sample_rate=sr, n_stft=self.output_bin, min_freq=2000.0, max_freq=4000.0, learned_filters=False)
+        # self.to_presence2 = BandScale(n_filters=n_mels, sample_rate=sr, n_stft=self.output_bin, min_freq=4000.0, max_freq=6000.0, learned_filters=False)
+        # self.to_brilliance2 = BandScale(n_filters=n_mels, sample_rate=sr, n_stft=self.output_bin, min_freq=6000.0, max_freq=16000.0, learned_filters=False)
         self.to_mel_fixed = MelScale(n_filters=n_mels, sample_rate=sr, n_stft=self.output_bin, learned_filters=False)
         self.to_mel = nn.Sequential(*[MelScale(n_filters=n_mels, sample_rate=sr, n_stft=self.output_bin) for _ in range(self.num_mel_maps)])
-        self.to_octave_fixed = OctaveScale(n_filters=n_mels, sample_rate=sr, n_stft=self.output_bin, learned_filters=False)
-        self.to_octave = nn.Sequential(*[OctaveScale(n_filters=n_mels, sample_rate=sr, n_stft=self.output_bin) for _ in range(self.num_octave_maps)])
+        self.to_octave_fixed = OctaveScale(n_filters=n_mels, sample_rate=sr, n_stft=self.output_bin, learned_filters=False, limit_to_freqs=True)
+        self.to_octave = nn.Sequential(*[OctaveScale(n_filters=n_mels, sample_rate=sr, n_stft=self.output_bin, limit_to_freqs=True) for _ in range(self.num_octave_maps)])
 
         self.encode_scales = nn.Sequential(*[MultichannelTransformerEncoder(self.num_scale_channels, encoder_attention_maps, n_mels, dropout=dropout, expansion=encoder_expansion, num_heads=encoder_heads, kernel_size=3, padding=1) for _ in range(encoder_layers)])
         self.decode_spectrogram = nn.Sequential(*[MultichannelTransformerDecoder(wave_in_channels * 2, decoder_attention_maps, self.max_bin, mem_channels=self.num_scale_channels, mem_features=n_mels, dropout=dropout, expansion=decoder_expansion, num_heads=decoder_heads, kernel_size=3, padding=1 ) for _ in range(decoder_layers)])
-        self.mask_out = nn.Conv2d(wave_in_channels * 2, wave_in_channels, 1)
+        # self.mask_out = nn.Conv2d(wave_in_channels * 2, wave_in_channels, 1)
 
     def forward(self, w, c):
         s = self.to_spec(w)
@@ -102,12 +114,18 @@ class SpecWaveTransformer(nn.Module):
             *[self.to_umids[i](s) for i in range(self.num_band_maps)],
             *[self.to_presence[i](s) for i in range(self.num_band_maps)],
             *[self.to_brilliance[i](s) for i in range(self.num_band_maps)],
-            self.to_lbass2(s),
-            self.to_ubass2(s),
-            self.to_lmids2(s),
-            self.to_umids2(s),
-            self.to_presence2(s),
-            self.to_brilliance2(s),
+            *[self.to_lbasso[i](s) for i in range(self.num_band_maps)],
+            *[self.to_ubasso[i](s) for i in range(self.num_band_maps)],
+            *[self.to_lmidso[i](s) for i in range(self.num_band_maps)],
+            *[self.to_umidso[i](s) for i in range(self.num_band_maps)],
+            *[self.to_presenceo[i](s) for i in range(self.num_band_maps)],
+            *[self.to_brillianceo[i](s) for i in range(self.num_band_maps)],
+            # self.to_lbass2(s),
+            # self.to_ubass2(s),
+            # self.to_lmids2(s),
+            # self.to_umids2(s),
+            # self.to_presence2(s),
+            # self.to_brilliance2(s),
             self.to_mel_fixed(s),
             *[self.to_mel[i](s) for i in range(self.num_mel_maps)],
             self.to_octave_fixed(s),
@@ -126,13 +144,23 @@ class SpecWaveTransformer(nn.Module):
         for i in range(len(self.decode_spectrogram)):
             x, prev_qk1, prev_qk2 = self.decode_spectrogram[i](x, cross=m, prev_qk1=prev_qk1, prev_qk2=prev_qk2)
 
-        mag = torch.sigmoid(self.mask_out(x))
+        mask = torch.sigmoid(x[:, :2])
+        phase_mask = torch.sigmoid(x[:, 2:]) * 2 - 1
+
+        mag = s * mask
+        phase = p + phase_mask
+
+        mag_p = F.pad(input=mag * c, pad=(0, 0, 0, 1), mode='replicate')
+        phase_p = (phase * 2 - 1) * torch.pi
+        phase_p = F.pad(input=phase, pad=(0, 0, 0, 1), mode='replicate')
+        spec = mag_p * torch.exp(1.j * phase_p)
+        wave = self.to_wave(spec)
+
         mmin = torch.min(mag)
         mmax = torch.max(mag)
-        mag = s * mag
         mel = self.to_mel_fixed(F.pad(input=mag * c, pad=(0, 0, 0, 1), mode='replicate')) / c
 
-        return mag, mel, mmin, mmax
+        return mag, mel, phase, wave, mmin, mmax
     
 class WaveEncoder(nn.Module):
     def __init__(self, in_channels, out_channels, kernel_size=3, padding=1, stride=1):
