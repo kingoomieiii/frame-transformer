@@ -12,7 +12,7 @@ from tqdm import tqdm
 import wandb
 
 from libft2gan.dataset_voxaug3 import VoxAugDataset
-from libft2gan.specwave_transformer10 import SpecWaveTransformer
+from libft2gan.specwave_transformer10 import SpecWaveTransformer, OctaveScale, BandScale
 from libft2gan.lr_scheduler_linear_warmup import LinearWarmupScheduler
 from libft2gan.lr_scheduler_polynomial_decay import PolynomialDecayScheduler
 from libft2gan.signal_loss import sdr_loss
@@ -46,6 +46,13 @@ def train_epoch(dataloader, model, device, optimizer, accumulation_steps, progre
 
     to_spec = T.Spectrogram(n_fft=2048, hop_length=1024, power=None, return_complex=True).to(device)
     to_mel = T.MelScale(n_mels=128, sample_rate=44100, n_stft=1025).to(device)
+    to_lbass = BandScale(n_filters=128, sample_rate=44100, n_stft=1025, min_freq=16.0, max_freq=60.0, learned_filters=False).to(device)
+    to_ubass = BandScale(n_filters=128, sample_rate=44100, n_stft=1025, min_freq=60.0, max_freq=250.0, learned_filters=False).to(device)
+    to_lmids = BandScale(n_filters=128, sample_rate=44100, n_stft=1025, min_freq=250.0, max_freq=2000.0, learned_filters=False).to(device)
+    to_umids = BandScale(n_filters=128, sample_rate=44100, n_stft=1025, min_freq=2000.0, max_freq=4000.0, learned_filters=False).to(device)
+    to_presence = BandScale(n_filters=128, sample_rate=44100, n_stft=1025, min_freq=4000.0, max_freq=6000.0, learned_filters=False).to(device)
+    to_brilliance = BandScale(n_filters=128, sample_rate=44100, n_stft=1025, min_freq=6000.0, max_freq=16000.0, learned_filters=False).to(device)
+    to_octave = OctaveScale(n_filters=128, sample_rate=44100, n_stft=1025, learned_filters=False, limit_to_freqs=True).to(device)
 
     pbar = tqdm(dataloader) if progress_bar else dataloader
     for itr, (XW, YW, c) in enumerate(pbar):
@@ -58,16 +65,39 @@ def train_epoch(dataloader, model, device, optimizer, accumulation_steps, progre
             YP = ((torch.angle(YS) + torch.pi) / (2 * torch.pi))[:, :, :-1]
             YS = torch.abs(YS)
             YM = to_mel(YS) / c
-            YS = (YS / c)[:, :, :-1]
+            ylbass = to_lbass(YS) / c
+            yubass = to_ubass(YS) / c
+            ylmids = to_lmids(YS) / c
+            yumids = to_umids(YS) / c
+            ypresence = to_presence(YS) / c
+            ybrilliance = to_brilliance(YS) / c
+            yoctave = to_octave(YS) / c
+            YS = (YS / c)
         
         with torch.cuda.amp.autocast_mode.autocast(enabled=grad_scaler is not None):
-            mag, mel, phase, wave, pmin, pmax = model(XW, c)
+            mag, phase, wave, pmin, pmax = model(XW, c)
 
+        mel = to_mel(mag) / c
+        lbass = to_lbass(mag) / c
+        ubass = to_ubass(mag) / c
+        lmids = to_lmids(mag) / c
+        umids = to_umids(mag) / c
+        presence = to_presence(mag) / c
+        brilliance = to_brilliance(mag) / c
+        octave = to_octave(mag) / c
+        
         mel_loss = F.l1_loss(mel, YM) / accumulation_steps
+        lb_loss = F.l1_loss(lbass, ylbass) / accumulation_steps
+        ub_loss = F.l1_loss(ubass, yubass) / accumulation_steps
+        lm_loss = F.l1_loss(lmids, ylmids) / accumulation_steps
+        um_loss = F.l1_loss(umids, yumids) / accumulation_steps
+        p_loss = F.l1_loss(presence, ypresence) / accumulation_steps
+        b_loss = F.l1_loss(brilliance, ybrilliance) / accumulation_steps
+        o_loss = F.l1_loss(octave, yoctave) / accumulation_steps
         phase_loss = (1 - torch.mean(torch.cos(phase - YP))) / accumulation_steps
-        mag_loss = F.l1_loss(mag, YS) / accumulation_steps
+        mag_loss = F.l1_loss(mag / c, YS) / accumulation_steps
         wave_loss = F.l1_loss(wave, YW) / accumulation_steps
-        accum_loss = mag_loss + mel_loss + phase_loss + wave_loss
+        accum_loss = mel_loss + o_loss + lb_loss + ub_loss + lm_loss + um_loss + p_loss + b_loss + phase_loss + wave_loss
         batch_loss = batch_loss + accum_loss.item()
 
         if torch.logical_or(accum_loss.isnan(), accum_loss.isinf()):
@@ -81,7 +111,7 @@ def train_epoch(dataloader, model, device, optimizer, accumulation_steps, progre
 
         if (itr + 1) % accumulation_steps == 0:
             if progress_bar:
-                pbar.set_description(f'{step}: mel={mel_loss.item()}, mag={mag_loss.item()}, phase={phase_loss.item()}, wave={wave_loss.item()}, min={pmin.item()}, max={pmax.item()}')
+                pbar.set_description(f'{step}: mag={mag_loss.item()}, mel={mel_loss.item()}, ol={o_loss.item()}, lb={lb_loss.item()}, ub={ub_loss.item()}, lm={lm_loss.item()}, um={um_loss.item()}, p={p_loss.item()}, b={b_loss.item()}, phase={phase_loss.item()}, wave={wave_loss.item()}, min={pmin.item()}, max={pmax.item()}')
             
             # if use_wandb:
             #     wandb.log({
@@ -132,12 +162,12 @@ def validate_epoch(dataloader, model, device, max_bin=0, use_wandb=False, predic
 
             YS = to_spec(YW)
             YP = ((torch.angle(YS) + torch.pi) / (2 * torch.pi))[:, :, :-1]
-            YS = (torch.abs(YS) / c)[:, :, :-1]
+            YS = (torch.abs(YS) / c)
             
             with torch.cuda.amp.autocast_mode.autocast():
-                mag, mel, phase, wave, pmin, pmax = model(XW, c)
+                mag, phase, wave, pmin, pmax = model(XW, c)
 
-            mag_loss = F.l1_loss(mag, YS)
+            mag_loss = F.l1_loss(mag / c, YS)
             wave_loss = mag_loss #F.l1_loss(PW, YW)
             
             if use_wandb:
@@ -193,7 +223,7 @@ def main():
     p.add_argument('--lr_scheduler_decay_power', type=float, default=0.1)
     p.add_argument('--lr_verbosity', type=int, default=1000)
 
-    p.add_argument('--num_octave_channels', type=int, default=3)
+    p.add_argument('--num_octave_channels', type=int, default=2)
     p.add_argument('--num_mel_channels', type=int, default=2)
     p.add_argument('--num_band_channels', type=int, default=2)
 

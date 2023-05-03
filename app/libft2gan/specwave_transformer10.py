@@ -60,9 +60,10 @@ class BandScale(nn.Module):
         return torch.matmul(x.transpose(-1, -2), self.fb).transpose(-1, -2)
 
 class SpecWaveTransformer(nn.Module):
-    def __init__(self, wave_in_channels=2, dropout=0.1, encoder_layers=8, encoder_heads=8, encoder_expansion=4, decoder_layers=8, decoder_heads=8, decoder_expansion=4, encoder_attention_maps=1, decoder_attention_maps=1, num_octave_maps=3, num_mel_maps=3, num_band_maps=3, n_mels=128, n_fft=2048, hop_length=1024, sr=44100):
+    def __init__(self, wave_in_channels=2, dropout=0.1, encoder_layers=8, encoder_heads=8, encoder_expansion=4, decoder_layers=8, decoder_heads=8, decoder_expansion=4, encoder_attention_maps=1, decoder_attention_maps=1, num_octave_maps=3, num_mel_maps=3, num_band_maps=3, n_mels=128, n_fft=2048, hop_length=1024, sr=44100, inferencing=False):
         super(SpecWaveTransformer, self).__init__(),
         
+        self.inferencing = inferencing
         self.n_fft = n_fft
         self.hop_length = hop_length
         self.max_bin = n_fft // 2
@@ -160,7 +161,10 @@ class SpecWaveTransformer(nn.Module):
         mmax = torch.max(mag)
         mel = self.to_mel_fixed(F.pad(input=mag * c, pad=(0, 0, 0, 1), mode='replicate')) / c
 
-        return mag, mel, phase, wave, mmin, mmax
+        if self.inferencing:
+            return wave
+        else:
+            return mag_p, phase, wave, mmin, mmax
     
 class WaveEncoder(nn.Module):
     def __init__(self, in_channels, out_channels, kernel_size=3, padding=1, stride=1):
