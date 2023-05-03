@@ -223,17 +223,17 @@ def main():
     p.add_argument('--lr_scheduler_decay_power', type=float, default=0.1)
     p.add_argument('--lr_verbosity', type=int, default=1000)
 
-    p.add_argument('--num_octave_channels', type=int, default=2)
-    p.add_argument('--num_mel_channels', type=int, default=2)
-    p.add_argument('--num_band_channels', type=int, default=2)
+    p.add_argument('--num_octave_channels', type=int, default=6)
+    p.add_argument('--num_mel_channels', type=int, default=6)
+    p.add_argument('--num_band_channels', type=int, default=3)
 
     p.add_argument('--encoder_layers', type=int, default=8)
-    p.add_argument('--encoder_attention_maps', type=int, default=2)
+    p.add_argument('--encoder_attention_maps', type=int, default=4)
     p.add_argument('--encoder_expansion', type=int, default=4)
     p.add_argument('--encoder_heads', type=int, default=8)
 
     p.add_argument('--decoder_layers', type=int, default=8)
-    p.add_argument('--decoder_attention_maps', type=int, default=2)
+    p.add_argument('--decoder_attention_maps', type=int, default=4)
     p.add_argument('--decoder_expansion', type=int, default=4)
     p.add_argument('--decoder_heads', type=int, default=8)
      

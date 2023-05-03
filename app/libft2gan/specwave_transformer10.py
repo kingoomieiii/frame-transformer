@@ -100,7 +100,8 @@ class SpecWaveTransformer(nn.Module):
         self.to_octave = nn.Sequential(*[OctaveScale(n_filters=n_mels, sample_rate=sr, n_stft=self.output_bin, limit_to_freqs=True) for _ in range(self.num_octave_maps)])
 
         self.encode_scales = nn.Sequential(*[MultichannelTransformerEncoder(self.num_scale_channels, encoder_attention_maps, n_mels, dropout=dropout, expansion=encoder_expansion, num_heads=encoder_heads, kernel_size=3, padding=1) for _ in range(encoder_layers)])
-        self.decode_spectrogram = nn.Sequential(*[MultichannelTransformerDecoder(wave_in_channels * 2, decoder_attention_maps, self.max_bin, mem_channels=self.num_scale_channels, mem_features=n_mels, dropout=dropout, expansion=decoder_expansion, num_heads=decoder_heads, kernel_size=3, padding=1 ) for _ in range(decoder_layers)])
+        self.positional_embedding = ConvolutionalEmbedding(wave_in_channels * 2, self.max_bin)
+        self.decode_spectrogram = nn.Sequential(*[MultichannelTransformerDecoder(wave_in_channels * 2 + 1, decoder_attention_maps, self.max_bin, mem_channels=self.num_scale_channels, mem_features=n_mels, dropout=dropout, expansion=decoder_expansion, num_heads=decoder_heads, kernel_size=3, padding=1 ) for _ in range(decoder_layers)])
         # self.mask_out = nn.Conv2d(wave_in_channels * 2, wave_in_channels, 1)
 
     def forward(self, w, c):
@@ -136,6 +137,7 @@ class SpecWaveTransformer(nn.Module):
         s = s[:, :, :-1] / c
         p = p[:, :, :-1]
         x = torch.cat((s, p), dim=1)
+        x = torch.cat((x, self.positional_embedding(x)), dim=1)
 
         prev_qk1 = None
         for i in range(len(self.encode_scales)):
@@ -146,7 +148,7 @@ class SpecWaveTransformer(nn.Module):
             x, prev_qk1, prev_qk2 = self.decode_spectrogram[i](x, cross=m, prev_qk1=prev_qk1, prev_qk2=prev_qk2)
 
         mask = torch.sigmoid(x[:, :2])
-        phase_mask = torch.sigmoid(x[:, 2:]) * 2 - 1
+        phase_mask = torch.sigmoid(x[:, 2:4]) * 2 - 1
 
         mag = s * mask
         phase = p + phase_mask
@@ -265,8 +267,8 @@ class MultichannelTransformerEncoder(nn.Module):
         self.attn1 = MultichannelMultiheadAttention(channels, out_channels, num_heads, features, kernel_size=kernel_size, padding=padding)
 
         self.norm5 = MultichannelLayerNorm(channels, features)
-        self.conv1 = MultichannelLinear(channels, channels, features, features * expansion, depthwise=True)
-        self.conv2 = MultichannelLinear(channels, channels, features * expansion, features)
+        self.conv1 = nn.Conv2d(channels, channels * expansion, kernel_size=3, padding=1)
+        self.conv2 = nn.Conv2d(channels * expansion, channels, kernel_size=3, padding=1)
         
     def forward(self, x, prev_qk1=None):
         z, prev_qk1 = self.attn1(self.norm1(x), prev_qk=prev_qk1)
@@ -291,8 +293,8 @@ class MultichannelTransformerDecoder(nn.Module):
         self.attn3 = MultichannelMultiheadAttention(channels, out_channels, num_heads, features, mem_channels=mem_channels, mem_features=mem_features, kernel_size=kernel_size, padding=padding)
 
         self.norm6 = MultichannelLayerNorm(channels, features)
-        self.conv1 = MultichannelLinear(channels, channels, features, features * expansion, depthwise=True)
-        self.conv2 = MultichannelLinear(channels, channels, features * expansion, features)
+        self.conv1 = nn.Conv2d(channels, channels * expansion, kernel_size=3, padding=1)
+        self.conv2 = nn.Conv2d(channels * expansion, channels, kernel_size=3, padding=1)
         
     def forward(self, x, cross, prev_qk1=None, prev_qk2=None):
         z, prev_qk1 = self.attn1(self.norm1(x), prev_qk=prev_qk1)
