@@ -97,7 +97,7 @@ def train_epoch(dataloader, model, device, optimizer, accumulation_steps, progre
         phase_loss = (1 - torch.mean(torch.cos(phase - YP))) / accumulation_steps
         mag_loss = F.l1_loss(mag / c, YS) / accumulation_steps
         wave_loss = F.l1_loss(wave, YW) / accumulation_steps
-        accum_loss = mel_loss + o_loss + lb_loss + ub_loss + lm_loss + um_loss + p_loss + b_loss + phase_loss + wave_loss
+        accum_loss = mel_loss + o_loss + lb_loss + ub_loss + lm_loss + um_loss + p_loss + b_loss# + phase_loss + wave_loss
         batch_loss = batch_loss + accum_loss.item()
 
         if torch.logical_or(accum_loss.isnan(), accum_loss.isinf()):
@@ -223,9 +223,9 @@ def main():
     p.add_argument('--lr_scheduler_decay_power', type=float, default=0.1)
     p.add_argument('--lr_verbosity', type=int, default=1000)
 
-    p.add_argument('--num_octave_channels', type=int, default=6)
-    p.add_argument('--num_mel_channels', type=int, default=6)
-    p.add_argument('--num_band_channels', type=int, default=3)
+    p.add_argument('--num_octave_channels', type=int, default=7)
+    p.add_argument('--num_mel_channels', type=int, default=7)
+    p.add_argument('--num_band_channels', type=int, default=4)
 
     p.add_argument('--encoder_layers', type=int, default=8)
     p.add_argument('--encoder_attention_maps', type=int, default=4)

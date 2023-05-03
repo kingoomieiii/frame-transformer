@@ -237,7 +237,8 @@ class MultichannelMultiheadAttention(nn.Module):
             nn.Conv2d(channels if mem_channels is None else mem_channels, attention_maps, kernel_size=kernel_size if mem_kernel_size is None else mem_kernel_size, padding=padding if mem_padding is None else mem_padding),
             MultichannelLinear(attention_maps, attention_maps, features if mem_features is None else mem_features, features))
         
-        self.o_proj = MultichannelLinear(channels + attention_maps, channels, features, features)
+        self.o_proj = MultichannelLinear(attention_maps, attention_maps, features, features)
+        self.o_cat = nn.Conv2d(channels + attention_maps, channels, kernel_size=kernel_size, padding=padding)
         
     def forward(self, x, mem=None, prev_qk=None):
         b,c,h,w = x.shape
@@ -252,7 +253,7 @@ class MultichannelMultiheadAttention(nn.Module):
             qk = qk + prev_qk
 
         a = torch.matmul(F.softmax(qk, dim=-1),v).transpose(2,3).reshape(b,self.attention_maps,w,-1).transpose(2,3)
-        x = self.o_proj(torch.cat((x, a), dim=1))
+        x = self.o_cat(torch.cat((x, self.o_proj(a)), dim=1))
 
         return x, qk
     
