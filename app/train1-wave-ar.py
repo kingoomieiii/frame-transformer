@@ -38,9 +38,10 @@ def apply_mixup(X, Y, c, alpha=1.0):
 
     return XM, YM, c
 
-def train_epoch(dataloader, model, device, optimizer, accumulation_steps, progress_bar, lr_warmup=None, grad_scaler=None, step=0, max_bin=0, use_wandb=False, predict_mask=True, predict_phase=False, mixup_rate=0.5):
+def train_epoch(dataloader, model, device, optimizer, accumulation_steps, progress_bar, lr_warmup=None, grad_scaler=None, step=0, max_bin=0, use_wandb=False, predict_mask=True, predict_phase=False, mixup_rate=0.5, num_quantizer_levels=256):
     model.train()
 
+    num_levels = 256
     batch_loss = 0
     batch_loss_phase = 0
     sum_loss = 0
@@ -58,9 +59,8 @@ def train_epoch(dataloader, model, device, optimizer, accumulation_steps, progre
         YW = YW.to(device)
         c = c.to(device).unsqueeze(-1)
 
-        XW, YW, c = apply_mixup(XW, YW, c)
-
         with torch.no_grad():
+            XW, YW, c = apply_mixup(XW, YW, c)
             tgt = to_spec(YW)
             tgt = torch.abs(tgt)
             tgt_mel = to_mel(tgt)
@@ -72,15 +72,28 @@ def train_epoch(dataloader, model, device, optimizer, accumulation_steps, progre
         csrc = torch.max(torch.cat((c, csrc), dim=1), dim=1, keepdim=True).values.unsqueeze(-1).unsqueeze(-1)
         ctgt = torch.max(torch.cat((c, ctgt), dim=1), dim=1, keepdim=True).values.unsqueeze(-1).unsqueeze(-1)
 
+        src = src / csrc
+        tgt = tgt / ctgt
+
+        tgt_quant = torch.round(tgt * (num_levels - 1))
+
         with torch.cuda.amp.autocast_mode.autocast(enabled=grad_scaler is not None):
-            mag = model(src / csrc, tgt / ctgt)
+            pred = model(src, tgt_quant / num_levels)
 
-        mel_loss = F.l1_loss(to_mel(F.pad(mag * ctgt, (0,0,0,1), mode='replicate')) / ctgt, tgt_mel / ctgt)
-        mag_loss = F.l1_loss(mag, tgt / ctgt)
+        ce_loss = F.cross_entropy(pred, tgt_quant.long())
 
-        accum_loss = (mag_loss + mel_loss) / accumulation_steps
-        batch_loss = batch_loss + mag_loss.item()
-        batch_loss_phase = batch_loss_phase + mel_loss.item()
+        pred = pred.permute(0,2,3,4,1)
+        pred_shape = pred.shape
+        pred_reshaped = pred.reshape(-1, pred_shape[-1])
+
+        samples = torch.multinomial(pred_reshaped, num_samples=1)
+        samples = samples.view(*pred_shape[:-1]).float()
+
+        mag_loss = F.l1_loss(samples / num_levels, tgt)
+
+        accum_loss = (ce_loss) / accumulation_steps
+        batch_loss = batch_loss + ce_loss.item()
+        batch_loss_phase = batch_loss_phase + mag_loss.item()
 
         if torch.logical_or(accum_loss.isnan(), accum_loss.isinf()):
             print('nan training loss; aborting')
@@ -123,7 +136,7 @@ def train_epoch(dataloader, model, device, optimizer, accumulation_steps, progre
 
     return sum_loss / batches, step
 
-def validate_epoch(dataloader, model, device, max_bin=0, use_wandb=False, predict_mask=True, predict_phase=False):
+def validate_epoch(dataloader, model, device, max_bin=0, use_wandb=False, predict_mask=True, predict_phase=False, num_quantizer_levels=256):
     model.train()
     crit = nn.L1Loss()
 
@@ -155,7 +168,13 @@ def validate_epoch(dataloader, model, device, max_bin=0, use_wandb=False, predic
 
             for frame in tqdm(range(src.shape[3])):
                 with torch.cuda.amp.autocast_mode.autocast():
-                    tgt[:, :, :, frame] = (model(src / csrc, F.pad(tgt, (1,0))[:, :, :, :-1]))[:, :, :, frame]
+                    pred = model(src / csrc, F.pad(tgt, (1,0))[:, :, :, :-1])
+                    pred = pred.permute(0,2,3,4,1)
+                    pred_shape = pred.shape
+                    pred_reshaped = pred.reshape(-1, pred_shape[-1])
+                    samples = torch.multinomial(pred_reshaped, num_samples=1)
+                    samples = samples.view(*pred_shape[:-1]).float() / num_quantizer_levels
+                    tgt[:, :, :, frame] = samples[:, :, :, frame]
 
             mag_loss = F.l1_loss(tgt, YS / c)
             
@@ -217,8 +236,9 @@ def main():
     p.add_argument('--num_mel_channels', type=int, default=1)
     p.add_argument('--num_band_channels', type=int, default=1)
 
+    p.add_argument('--num_quantizer_levels', type=int, default=256)
     p.add_argument('--channels', type=int, default=8)
-    p.add_argument('--num_attention_maps', type=int, default=10)
+    p.add_argument('--num_attention_maps', type=int, default=6)
     p.add_argument('--num_bridge_layers', type=int, default=4)
     p.add_argument('--latent_expansion', type=int, default=4)
     p.add_argument('--expansion', type=int, default=4)
@@ -299,7 +319,7 @@ def main():
 
     device = torch.device('cpu')
 
-    generator = FrameTransformerGenerator(in_channels=2, out_channels=2, channels=args.channels, expansion=args.expansion, n_fft=args.n_fft, dropout=args.dropout, num_heads=args.num_heads, num_attention_maps=args.num_attention_maps)
+    generator = FrameTransformerGenerator(in_channels=2, out_channels=2, channels=args.channels, expansion=args.expansion, n_fft=args.n_fft, dropout=args.dropout, num_heads=args.num_heads, num_attention_maps=args.num_attention_maps, num_quantizer_levels=args.num_quantizer_levels)
     
     # generator = FrameWaveTransformer(wave_in_channels=2, frame_in_channels=4, wave_out_channels=2, frame_out_channels=2, wave_channels=args.wave_channels, frame_channels=args.frame_channels, dropout=args.dropout, n_fft=args.n_fft, wave_transformer_layers=args.num_bridge_layers, wave_heads=args.num_heads, wave_expansion=args.wave_expansion, frame_heads=args.num_heads, frame_expansion=args.frame_expansion, num_attention_maps=args.num_attention_maps)
 
@@ -344,9 +364,8 @@ def main():
         num_workers=args.num_workers
     )
 
-    #_, _ = validate_epoch(val_dataloader, generator, device, max_bin=args.n_fft // 2, predict_mask=args.predict_mask, predict_phase=args.predict_phase)
+    _, _ = validate_epoch(val_dataloader, generator, device, max_bin=args.n_fft // 2, predict_mask=args.predict_mask, predict_phase=args.predict_phase, num_quantizer_levels=args.num_quantizer_levels)
     val_dataloader.dataset.cropsize = 256
-
     best_loss = float('inf')
     while step < args.stages[-1]:
         if train_sampler is not None:
@@ -375,8 +394,8 @@ def main():
 
         print('# epoch {}'.format(epoch))
         train_dataloader.dataset.set_epoch(epoch)
-        train_loss_mag, step = train_epoch(train_dataloader, generator, device, optimizer=optimizer_gen, accumulation_steps=accum_steps, progress_bar=args.progress_bar, lr_warmup=scheduler_gen, grad_scaler=grad_scaler_gen, step=step, max_bin=args.n_fft // 2, use_wandb=args.wandb, predict_mask=args.predict_mask, predict_phase=args.predict_phase)
-        wave, spec = validate_epoch(val_dataloader, generator, device, max_bin=args.n_fft // 2, predict_mask=args.predict_mask, predict_phase=args.predict_phase)
+        train_loss_mag, step = train_epoch(train_dataloader, generator, device, optimizer=optimizer_gen, accumulation_steps=accum_steps, progress_bar=args.progress_bar, lr_warmup=scheduler_gen, grad_scaler=grad_scaler_gen, step=step, max_bin=args.n_fft // 2, use_wandb=args.wandb, predict_mask=args.predict_mask, predict_phase=args.predict_phase, num_quantizer_levels=args.num_quantizer_levels)
+        wave, spec = validate_epoch(val_dataloader, generator, device, max_bin=args.n_fft // 2, predict_mask=args.predict_mask, predict_phase=args.predict_phase, num_quantizer_levels=args.num_quantizer_levels)
 
         print(
             '  * training l1 loss = {:.6f}, wave_loss = {:6f} spec loss = {:.6f}'

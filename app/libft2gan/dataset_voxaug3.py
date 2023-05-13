@@ -103,8 +103,8 @@ class VoxAugDataset(torch.utils.data.Dataset):
             (0., pedalboard.Limiter(threshold_db=np.random.uniform(-12,-3), release_ms=np.random.uniform(50,200))),
             (0.2, pedalboard.NoiseGate(threshold_db=np.random.uniform(-100,-20), ratio=np.random.uniform(1,10), attack_ms=np.random.uniform(0.1, 10), release_ms=np.random.uniform(20, 200))),
             (0.2, pedalboard.PitchShift(np.random.uniform(-12,12))),
-            # (0.2, pedalboard.MP3Compressor(vbr_quality=np.random.uniform(1,6))),
-            # (0.2, pedalboard.Invert())
+            (0.2, pedalboard.MP3Compressor(vbr_quality=np.random.uniform(1,6))),
+            (0.2, pedalboard.Invert())
         ] 
 
         random.shuffle(augmentations)
@@ -149,8 +149,8 @@ class VoxAugDataset(torch.utils.data.Dataset):
             W = W[:, ws:we]
 
         augmentations = [
-            # (0.1, pedalboard.Compressor(threshold_db=np.random.uniform(-30,-10), ratio=np.random.uniform(1.5, 10.0), attack_ms=np.random.uniform(1,50), release_ms=np.random.uniform(50,500))),
-            # (0.1, pedalboard.Distortion(drive_db=np.random.uniform(0,15))),
+            (0.1, pedalboard.Compressor(threshold_db=np.random.uniform(-30,-10), ratio=np.random.uniform(1.5, 10.0), attack_ms=np.random.uniform(1,50), release_ms=np.random.uniform(50,500))),
+            (0.1, pedalboard.Distortion(drive_db=np.random.uniform(0,15))),
             (0.1, pedalboard.HighpassFilter(cutoff_frequency_hz=np.random.uniform(0,1000))),
             (0.1, pedalboard.LowpassFilter(cutoff_frequency_hz=np.random.uniform(2000,10000))),
             (0.1, pedalboard.HighShelfFilter(cutoff_frequency_hz=np.random.uniform(1000, 16000), gain_db=np.random.uniform(-6,6), q=np.random.uniform(0.5, 2) )),
@@ -159,10 +159,11 @@ class VoxAugDataset(torch.utils.data.Dataset):
             (0.2, pedalboard.PeakFilter(cutoff_frequency_hz=np.random.uniform(300,1200), gain_db=np.random.uniform(-6,6), q=np.random.uniform(0.5,2))),
             (0.2, pedalboard.PeakFilter(cutoff_frequency_hz=np.random.uniform(1000,4000), gain_db=np.random.uniform(-6,6), q=np.random.uniform(0.5,2))),
             (0.2, pedalboard.PeakFilter(cutoff_frequency_hz=np.random.uniform(4000,12000), gain_db=np.random.uniform(-6,6), q=np.random.uniform(0.5,2))),
-            # (0.2, pedalboard.Invert()),
-            # (0.1, pedalboard.Limiter(threshold_db=np.random.uniform(-12,-3), release_ms=np.random.uniform(50,200))),
-            # (0.1, pedalboard.NoiseGate(threshold_db=np.random.unifmorm(-100,-20), ratio=np.random.uniform(1,10), attack_ms=np.random.uniform(0.1, 10), release_ms=np.random.uniform(20, 200))),
+            (0.2, pedalboard.Invert()),
+            (0.1, pedalboard.Limiter(threshold_db=np.random.uniform(-12,-3), release_ms=np.random.uniform(50,200))),
+            (0.1, pedalboard.NoiseGate(threshold_db=np.random.uniform(-100,-20), ratio=np.random.uniform(1,10), attack_ms=np.random.uniform(0.1, 10), release_ms=np.random.uniform(20, 200))),
             (0.2, pedalboard.PitchShift(np.random.uniform(-4,4))),
+            (0.2, pedalboard.MP3Compressor(vbr_quality=np.random.uniform(1,6))),
         ] 
 
         random.shuffle(augmentations)
@@ -197,7 +198,7 @@ class VoxAugDataset(torch.utils.data.Dataset):
         if not self.is_validation:
             YW = self._augment_instruments(XW)
             VW = self._get_vocals(idx)
-            XW = normalize_waveform(YW) + normalize_waveform(VW)
+            XW = normalize_waveform(normalize_waveform(YW) + normalize_waveform(VW))
             
         elif self.is_validation:
             if (XW.shape[1] // self.hop_length) > self.cropsize:
@@ -207,7 +208,6 @@ class VoxAugDataset(torch.utils.data.Dataset):
                 XW = XW[:, ws:we]
                 YW = YW[:, ws:we]
 
-        XW = normalize_waveform(XW)
         YW = normalize_waveform(YW)
         
         # XL = librosa.stft(XW[0], n_fft=self.n_fft, hop_length=self.hop_length)

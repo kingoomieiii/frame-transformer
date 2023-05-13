@@ -13,7 +13,7 @@ def generate_square_subsequent_mask(sz: int):
     return torch.triu(torch.ones(sz, sz) * float('-inf'), diagonal=1)
 
 class FrameTransformerGenerator(nn.Module):
-    def __init__(self, in_channels=2, out_channels=2, channels=2, dropout=0.1, n_fft=2048, num_heads=4, expansion=4, num_attention_maps=1):
+    def __init__(self, in_channels=2, out_channels=2, channels=2, dropout=0.1, n_fft=2048, num_heads=4, expansion=4, num_attention_maps=1, quantizer_dims=256):
         super(FrameTransformerGenerator, self).__init__(),
         
         self.max_bin = n_fft // 2
@@ -67,7 +67,7 @@ class FrameTransformerGenerator(nn.Module):
         self.src_enc9_transformer = FrameTransformerEncoder(channels * 16, num_attention_maps, self.max_bin // 256, dropout=dropout, expansion=expansion, num_heads=num_heads // 2, mem_causal=True)
         self.tgt_enc9_transformer = FrameTransformerEncoder(channels * 16, num_attention_maps, self.max_bin // 256, dropout=dropout, expansion=expansion, num_heads=num_heads // 2, causal=True, mem_causal=False)
 
-        self.tgt_dec8 = FrameDecoder(channels * 16, channels * 14, self.max_bin // 128, causal=True)
+        self.tgt_dec8 = FrameDecoder(channels * 32, channels * 14, self.max_bin // 128, causal=True)
         self.tgt_dec8_transformer = FrameTransformerDecoder(channels * 14, num_attention_maps, self.max_bin // 128, dropout=dropout, expansion=expansion, num_heads=num_heads, causal=True, mem1_causal=False, mem2_causal=True)
 
         self.tgt_dec7 = FrameDecoder(channels * 14, channels * 12, self.max_bin // 64, causal=True)
@@ -94,8 +94,7 @@ class FrameTransformerGenerator(nn.Module):
         self.out = nn.Sequential(
             nn.Conv2d(channels, channels * 2, 1),
             SquaredReLU(),
-            nn.Conv2d(channels * 2, out_channels, 1),
-            nn.Sigmoid())
+            nn.Conv2d(channels * 2, quantizer_dims * 2, 1))
         
     def forward(self, src, tgt):
         if self.mask is None or self.mask.shape[1] != src.shape[3]:
@@ -151,7 +150,7 @@ class FrameTransformerGenerator(nn.Module):
         se9, _, _ = self.src_enc9_transformer(se9, te9, mask2=self.mask)
         te9, _, _ = self.tgt_enc9_transformer(te9, se9, mask1=self.mask)
 
-        h = self.tgt_dec8(te9, torch.cat((se8, te8), dim=1))
+        h = self.tgt_dec8(torch.cat((se9, te9), dim=1), torch.cat((se8, te8), dim=1))
         h, pqk1, pqk2 = self.tgt_dec8_transformer(h, skip1=se8, skip2=te8, prev_qk1=None, prev_qk2=None, skip_qk=tqk8a, mask1=self.mask)
 
         h = self.tgt_dec7(h, torch.cat((se7, te7), dim=1))
@@ -177,9 +176,12 @@ class FrameTransformerGenerator(nn.Module):
              
         out = self.out(h)
 
-        return out
+        return torch.cat((
+            F.softmax(out[:, :(out.shape[1] // 2), :, :], dim=1).unsqueeze(-1),
+            F.softmax(out[:, (out.shape[1] // 2):, :, :], dim=1).unsqueeze(-1)
+        ), dim=-1).permute(0,1,4,2,3)  # B,C,H,W,num_levels
 
-class MultichannelMultiheadAttention2(nn.Module):
+class MultichannelMultiheadAttention2(nn.Module): 
     def __init__(self, channels, attention_maps, num_heads, features, kernel_size=3, padding=1, causal=False, mem_channels=None, mem_features=None, mem_causal=None):
         super().__init__()
 
