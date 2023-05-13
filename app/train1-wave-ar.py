@@ -41,7 +41,6 @@ def apply_mixup(X, Y, c, alpha=1.0):
 def train_epoch(dataloader, model, device, optimizer, accumulation_steps, progress_bar, lr_warmup=None, grad_scaler=None, step=0, max_bin=0, use_wandb=False, predict_mask=True, predict_phase=False, mixup_rate=0.5, num_quantizer_levels=256):
     model.train()
 
-    num_levels = 256
     batch_loss = 0
     batch_loss_phase = 0
     sum_loss = 0
@@ -75,10 +74,11 @@ def train_epoch(dataloader, model, device, optimizer, accumulation_steps, progre
         src = src / csrc
         tgt = tgt / ctgt
 
-        tgt_quant = torch.round(tgt * (num_levels - 1))
+        src_quant = torch.round(src * (num_quantizer_levels - 1)) / num_quantizer_levels
+        tgt_quant = torch.round(tgt * (num_quantizer_levels - 1))
 
         with torch.cuda.amp.autocast_mode.autocast(enabled=grad_scaler is not None):
-            pred = model(src, tgt_quant / num_levels)
+            pred = model(src_quant, tgt_quant / num_quantizer_levels)
 
         ce_loss = F.cross_entropy(pred, tgt_quant.long())
 
@@ -89,7 +89,7 @@ def train_epoch(dataloader, model, device, optimizer, accumulation_steps, progre
         samples = torch.multinomial(pred_reshaped, num_samples=1)
         samples = samples.view(*pred_shape[:-1]).float()
 
-        mag_loss = F.l1_loss(samples / num_levels, tgt)
+        mag_loss = F.l1_loss(samples / num_quantizer_levels, tgt)
 
         accum_loss = (ce_loss) / accumulation_steps
         batch_loss = batch_loss + ce_loss.item()
@@ -165,10 +165,12 @@ def validate_epoch(dataloader, model, device, max_bin=0, use_wandb=False, predic
 
             csrc = torch.max(src.reshape(XW.shape[0], -1), dim=1, keepdim=True).values
             csrc = torch.max(torch.cat((c, csrc), dim=1), dim=1, keepdim=True).values.unsqueeze(-1).unsqueeze(-1)
+            src = src / csrc
+            src_quant = torch.round(src * (num_quantizer_levels - 1)) / num_quantizer_levels
 
             for frame in tqdm(range(src.shape[3])):
                 with torch.cuda.amp.autocast_mode.autocast():
-                    pred = model(src / csrc, F.pad(tgt, (1,0))[:, :, :, :-1])
+                    pred = model(src_quant, F.pad(tgt, (1,0))[:, :, :, :-1])
                     pred = pred.permute(0,2,3,4,1)
                     pred_shape = pred.shape
                     pred_reshaped = pred.reshape(-1, pred_shape[-1])
