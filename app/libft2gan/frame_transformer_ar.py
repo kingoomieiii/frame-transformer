@@ -152,32 +152,32 @@ class FrameTransformerGenerator(nn.Module):
         te9, _, _ = self.tgt_enc9_transformer(te9, se9, mask1=self.mask)
 
         h = self.tgt_dec8(te9, torch.cat((se8, te8), dim=1))
-        h, pqk1, pqk2 = self.tgt_dec8_transformer(h, skip1=se8, skip2=te8, prev_qk1=None, prev_qk2=None, skip_qk=tqk8a)
+        h, pqk1, pqk2 = self.tgt_dec8_transformer(h, skip1=se8, skip2=te8, prev_qk1=None, prev_qk2=None, skip_qk=tqk8a, mask1=self.mask)
 
-        h = self.tgt_dec7(te8, torch.cat((se7, te7), dim=1))
-        h, pqk1, pqk2 = self.tgt_dec7_transformer(h, skip1=se7, skip2=te7, prev_qk1=pqk1, prev_qk2=pqk2, skip_qk=tqk7a)
+        h = self.tgt_dec7(h, torch.cat((se7, te7), dim=1))
+        h, pqk1, pqk2 = self.tgt_dec7_transformer(h, skip1=se7, skip2=te7, prev_qk1=pqk1, prev_qk2=pqk2, skip_qk=tqk7a, mask1=self.mask)
 
-        h = self.tgt_dec6(te7, torch.cat((se6, te6), dim=1))
-        h, pqk1, pqk2 = self.tgt_dec6_transformer(h, skip1=se6, skip2=te6, prev_qk1=pqk1, prev_qk2=pqk2, skip_qk=tqk6a)
+        h = self.tgt_dec6(h, torch.cat((se6, te6), dim=1))
+        h, pqk1, pqk2 = self.tgt_dec6_transformer(h, skip1=se6, skip2=te6, prev_qk1=pqk1, prev_qk2=pqk2, skip_qk=tqk6a, mask1=self.mask)
 
-        h = self.tgt_dec5(te6, torch.cat((se5, te5), dim=1))
-        h, pqk1, pqk2 = self.tgt_dec5_transformer(h, skip1=se5, skip2=te5, prev_qk1=pqk1, prev_qk2=pqk2, skip_qk=tqk5a)
+        h = self.tgt_dec5(h, torch.cat((se5, te5), dim=1))
+        h, pqk1, pqk2 = self.tgt_dec5_transformer(h, skip1=se5, skip2=te5, prev_qk1=pqk1, prev_qk2=pqk2, skip_qk=tqk5a, mask1=self.mask)
 
-        h = self.tgt_dec4(te5, torch.cat((se4, te4), dim=1))
-        h, pqk1, pqk2 = self.tgt_dec4_transformer(h, skip1=se4, skip2=te4, prev_qk1=pqk1, prev_qk2=pqk2, skip_qk=tqk4a)
+        h = self.tgt_dec4(h, torch.cat((se4, te4), dim=1))
+        h, pqk1, pqk2 = self.tgt_dec4_transformer(h, skip1=se4, skip2=te4, prev_qk1=pqk1, prev_qk2=pqk2, skip_qk=tqk4a, mask1=self.mask)
 
-        h = self.tgt_dec3(te4, torch.cat((se3, te3), dim=1))
-        h, pqk1, pqk2 = self.tgt_dec3_transformer(h, skip1=se3, skip2=te3, prev_qk1=pqk1, prev_qk2=pqk2, skip_qk=tqk3a)
+        h = self.tgt_dec3(h, torch.cat((se3, te3), dim=1))
+        h, pqk1, pqk2 = self.tgt_dec3_transformer(h, skip1=se3, skip2=te3, prev_qk1=pqk1, prev_qk2=pqk2, skip_qk=tqk3a, mask1=self.mask)
 
-        h = self.tgt_dec2(te3, torch.cat((se2, te2), dim=1))
-        h, pqk1, pqk2 = self.tgt_dec2_transformer(h, skip1=se2, skip2=te2, prev_qk1=pqk1, prev_qk2=pqk2, skip_qk=tqk2a)
+        h = self.tgt_dec2(h, torch.cat((se2, te2), dim=1))
+        h, pqk1, pqk2 = self.tgt_dec2_transformer(h, skip1=se2, skip2=te2, prev_qk1=pqk1, prev_qk2=pqk2, skip_qk=tqk2a, mask1=self.mask)
 
-        h = self.tgt_dec1(te2, torch.cat((se1, te1), dim=1))
-        h, pqk1, pqk2 = self.tgt_dec1_transformer(h, skip1=se1, skip2=te1, prev_qk1=pqk1, prev_qk2=pqk2, skip_qk=tqk1a)
+        h = self.tgt_dec1(h, torch.cat((se1, te1), dim=1))
+        h, pqk1, pqk2 = self.tgt_dec1_transformer(h, skip1=se1, skip2=te1, prev_qk1=pqk1, prev_qk2=pqk2, skip_qk=tqk1a, mask1=self.mask)
              
         out = self.out(h)
 
-        return src * out
+        return out
 
 class MultichannelMultiheadAttention2(nn.Module):
     def __init__(self, channels, attention_maps, num_heads, features, kernel_size=3, padding=1, causal=False, mem_channels=None, mem_features=None, mem_causal=None):
@@ -276,10 +276,10 @@ class FrameTransformerDecoder(nn.Module):
         z, _ = self.attn2(self.norm2(z), mem=skip1, prev_qk=skip_qk, mask=mask2)
         h = h + self.dropout(z)
 
-        z, prev_qk2 = self.attn2(self.norm2(z), mem=skip2, prev_qk=prev_qk2, mask=mask2)
+        z, prev_qk2 = self.attn2(self.norm3(z), mem=skip2, prev_qk=prev_qk2, mask=mask1)
         h = h + self.dropout(z)
 
-        z = self.conv2(self.activate(self.conv1(self.norm3(h))))
+        z = self.conv2(self.activate(self.conv1(self.norm4(h))))
         h = h + self.dropout(z)
 
         return h, prev_qk1, prev_qk2

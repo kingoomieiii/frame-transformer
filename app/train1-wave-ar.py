@@ -64,18 +64,19 @@ def train_epoch(dataloader, model, device, optimizer, accumulation_steps, progre
             tgt = to_spec(YW)
             tgt = torch.abs(tgt)
             tgt_mel = to_mel(tgt)
-            curr = F.pad(tgt, (1,0))[:, :, :-1, :-1]
+            tgt = F.pad(tgt, (1,0))[:, :, :-1, :-1]
         
         src = torch.abs(to_spec(XW))[:, :, :-1]
         csrc = torch.max(src.reshape(XW.shape[0], -1), dim=1, keepdim=True).values
         ctgt = torch.max(tgt.reshape(YW.shape[0], -1), dim=1, keepdim=True).values
-        c = torch.max(torch.cat((c, csrc, ctgt), dim=1), dim=1, keepdim=True).values.unsqueeze(-1).unsqueeze(-1)
+        csrc = torch.max(torch.cat((c, csrc), dim=1), dim=1, keepdim=True).values.unsqueeze(-1).unsqueeze(-1)
+        ctgt = torch.max(torch.cat((c, ctgt), dim=1), dim=1, keepdim=True).values.unsqueeze(-1).unsqueeze(-1)
 
         with torch.cuda.amp.autocast_mode.autocast(enabled=grad_scaler is not None):
-            mag = model(src / c, curr / c)
+            mag = model(src / csrc, tgt / ctgt)
 
-        mel_loss = F.l1_loss(to_mel(F.pad(mag * c, (0,0,0,1), mode='replicate')) / c, tgt_mel / c)
-        mag_loss = F.l1_loss(F.pad(mag, (0, 0, 0, 1), mode='replicate'), tgt / c)
+        mel_loss = F.l1_loss(to_mel(F.pad(mag * ctgt, (0,0,0,1), mode='replicate')) / ctgt, tgt_mel / ctgt)
+        mag_loss = F.l1_loss(mag, tgt / ctgt)
 
         accum_loss = (mag_loss + mel_loss) / accumulation_steps
         batch_loss = batch_loss + mag_loss.item()
@@ -150,12 +151,11 @@ def validate_epoch(dataloader, model, device, max_bin=0, use_wandb=False, predic
             tgt = torch.zeros_like(src)
 
             csrc = torch.max(src.reshape(XW.shape[0], -1), dim=1, keepdim=True).values
-            ctgt = torch.max(tgt.reshape(YW.shape[0], -1), dim=1, keepdim=True).values
-            c = torch.max(torch.cat((c, csrc, ctgt), dim=1), dim=1, keepdim=True).values.unsqueeze(-1).unsqueeze(-1)
+            csrc = torch.max(torch.cat((c, csrc), dim=1), dim=1, keepdim=True).values.unsqueeze(-1).unsqueeze(-1)
 
             for frame in tqdm(range(src.shape[3])):
                 with torch.cuda.amp.autocast_mode.autocast():
-                    tgt[:, :, :, frame] = (model(src / c, F.pad(tgt, (1,0))[:, :, :, :-1]))[:, :, :, frame]
+                    tgt[:, :, :, frame] = (model(src / csrc, F.pad(tgt, (1,0))[:, :, :, :-1]))[:, :, :, frame]
 
             mag_loss = F.l1_loss(tgt, YS / c)
             
@@ -218,7 +218,7 @@ def main():
     p.add_argument('--num_band_channels', type=int, default=1)
 
     p.add_argument('--channels', type=int, default=8)
-    p.add_argument('--num_attention_maps', type=int, default=11)
+    p.add_argument('--num_attention_maps', type=int, default=10)
     p.add_argument('--num_bridge_layers', type=int, default=4)
     p.add_argument('--latent_expansion', type=int, default=4)
     p.add_argument('--expansion', type=int, default=4)
@@ -344,7 +344,7 @@ def main():
         num_workers=args.num_workers
     )
 
-    _, _ = validate_epoch(val_dataloader, generator, device, max_bin=args.n_fft // 2, predict_mask=args.predict_mask, predict_phase=args.predict_phase)
+    #_, _ = validate_epoch(val_dataloader, generator, device, max_bin=args.n_fft // 2, predict_mask=args.predict_mask, predict_phase=args.predict_phase)
     val_dataloader.dataset.cropsize = 256
 
     best_loss = float('inf')
