@@ -8,17 +8,21 @@ import librosa
 
 import pedalboard
 
-def create_peak_filter(center_frequency, q_value, gain_db):
-    low_shelf_filter = pedalboard.LowShelfFilter()
-    low_shelf_filter.cutoff_frequency_hz = center_frequency / q_value
-    low_shelf_filter.gain_db = gain_db
+def normalize_waveform(W, W2=None):
+    if W2 is not None:
+        normalized_waveform = W / np.max([1, np.abs(W).max(), np.abs(W2).max()])
+    else:
+        normalized_waveform = W / np.max([1, np.abs(W).max()])
 
-    high_shelf_filter = pedalboard.HighShelfFilter()
-    high_shelf_filter.cutoff_frequency_hz = center_frequency * q_value
-    high_shelf_filter.gain_db = -gain_db
+    return normalized_waveform
 
-    peak_filter_board = pedalboard.Pedalboard([low_shelf_filter, high_shelf_filter])
-    return peak_filter_board
+def quantize_waveform(waveform, num_levels=256):
+    quantized_waveform = np.round(waveform * (num_levels - 1)).astype(np.int)
+    return quantized_waveform
+
+def one_hot_encode_waveform(quantized_waveform, num_levels=256):
+    one_hot_waveform = np.eye(num_levels)[quantized_waveform]
+    return one_hot_waveform
 
 class VoxAugDataset(torch.utils.data.Dataset):
     def __init__(self, instrumental_lib=[], vocal_lib=[], is_validation=False, n_fft=2048, hop_length=1024, cropsize=256, sr=44100, seed=0, inst_rate=0.01, data_limit=None, predict_vocals=False, time_scaling=True, vocal_threshold=0.001, vout_bands=4, predict_phase=False, n_mels=256):
@@ -99,8 +103,8 @@ class VoxAugDataset(torch.utils.data.Dataset):
             (0., pedalboard.Limiter(threshold_db=np.random.uniform(-12,-3), release_ms=np.random.uniform(50,200))),
             (0.2, pedalboard.NoiseGate(threshold_db=np.random.uniform(-100,-20), ratio=np.random.uniform(1,10), attack_ms=np.random.uniform(0.1, 10), release_ms=np.random.uniform(20, 200))),
             (0.2, pedalboard.PitchShift(np.random.uniform(-12,12))),
-            (0.2, pedalboard.MP3Compressor(vbr_quality=np.random.uniform(1,6))),
-            (0.2, pedalboard.Invert())
+            # (0.2, pedalboard.MP3Compressor(vbr_quality=np.random.uniform(1,6))),
+            # (0.2, pedalboard.Invert())
         ] 
 
         random.shuffle(augmentations)
@@ -108,7 +112,7 @@ class VoxAugDataset(torch.utils.data.Dataset):
         for p, aug in augmentations:
             if self.random.uniform(0,1) < p:
                 W = aug.process(W, sample_rate=self.sr)
-                W = W / np.max([1, np.abs(W).max()])
+                W = normalize_waveform(W)
                 
         if np.random.uniform() < 0.04:
             if np.random.uniform() < 0.5:
@@ -119,23 +123,23 @@ class VoxAugDataset(torch.utils.data.Dataset):
         if self.random.uniform(0,1) < 0.5:
             W = W[::-1]
 
-        VL = librosa.stft(W[0], n_fft=self.n_fft, hop_length=self.hop_length)
-        VR = librosa.stft(W[1], n_fft=self.n_fft, hop_length=self.hop_length)
-        V = np.stack([VL, VR], axis=0)
+        # VL = librosa.stft(W[0], n_fft=self.n_fft, hop_length=self.hop_length)
+        # VR = librosa.stft(W[1], n_fft=self.n_fft, hop_length=self.hop_length)
+        # V = np.stack([VL, VR], axis=0)
 
-        VP = V[:, :-1, :]
-        VP = (np.abs(VP) / Vc).reshape((VP.shape[0], self.vout_bands, VP.shape[1] // self.vout_bands, VP.shape[2]))
-        VP = VP.mean(axis=2)
-        VP = np.where(VP > self.vocal_threshold, 1, 0)
+        # VP = V[:, :-1, :]
+        # VP = (np.abs(VP) / Vc).reshape((VP.shape[0], self.vout_bands, VP.shape[1] // self.vout_bands, VP.shape[2]))
+        # VP = VP.mean(axis=2)
+        # VP = np.where(VP > self.vocal_threshold, 1, 0)
 
-        VPmax = np.max(VP, axis=1)
-        WP = np.zeros((W.shape[0], W.shape[1]))
-        for n in range(VPmax.shape[1]):
-            start = n * self.hop_length
-            end = start + self.hop_length
-            WP[:, start:end] = VPmax[:, n, None]
+        # VPmax = np.max(VP, axis=1)
+        # WP = np.zeros((W.shape[0], W.shape[1]))
+        # for n in range(VPmax.shape[1]):
+        #     start = n * self.hop_length
+        #     end = start + self.hop_length
+        #     WP[:, start:end] = VPmax[:, n, None]
 
-        return W, WP, VP
+        return W#, WP, VP
 
     def _augment_instruments(self, W):
         if (W.shape[1] // self.hop_length) > self.cropsize:
@@ -145,8 +149,8 @@ class VoxAugDataset(torch.utils.data.Dataset):
             W = W[:, ws:we]
 
         augmentations = [
-            (0.1, pedalboard.Compressor(threshold_db=np.random.uniform(-30,-10), ratio=np.random.uniform(1.5, 10.0), attack_ms=np.random.uniform(1,50), release_ms=np.random.uniform(50,500))),
-            (0.1, pedalboard.Distortion(drive_db=np.random.uniform(0,15))),
+            # (0.1, pedalboard.Compressor(threshold_db=np.random.uniform(-30,-10), ratio=np.random.uniform(1.5, 10.0), attack_ms=np.random.uniform(1,50), release_ms=np.random.uniform(50,500))),
+            # (0.1, pedalboard.Distortion(drive_db=np.random.uniform(0,15))),
             (0.1, pedalboard.HighpassFilter(cutoff_frequency_hz=np.random.uniform(0,1000))),
             (0.1, pedalboard.LowpassFilter(cutoff_frequency_hz=np.random.uniform(2000,10000))),
             (0.1, pedalboard.HighShelfFilter(cutoff_frequency_hz=np.random.uniform(1000, 16000), gain_db=np.random.uniform(-6,6), q=np.random.uniform(0.5, 2) )),
@@ -155,8 +159,9 @@ class VoxAugDataset(torch.utils.data.Dataset):
             (0.2, pedalboard.PeakFilter(cutoff_frequency_hz=np.random.uniform(300,1200), gain_db=np.random.uniform(-6,6), q=np.random.uniform(0.5,2))),
             (0.2, pedalboard.PeakFilter(cutoff_frequency_hz=np.random.uniform(1000,4000), gain_db=np.random.uniform(-6,6), q=np.random.uniform(0.5,2))),
             (0.2, pedalboard.PeakFilter(cutoff_frequency_hz=np.random.uniform(4000,12000), gain_db=np.random.uniform(-6,6), q=np.random.uniform(0.5,2))),
-            (0.1, pedalboard.Limiter(threshold_db=np.random.uniform(-12,-3), release_ms=np.random.uniform(50,200))),
-            (0.1, pedalboard.NoiseGate(threshold_db=np.random.uniform(-100,-20), ratio=np.random.uniform(1,10), attack_ms=np.random.uniform(0.1, 10), release_ms=np.random.uniform(20, 200))),
+            # (0.2, pedalboard.Invert()),
+            # (0.1, pedalboard.Limiter(threshold_db=np.random.uniform(-12,-3), release_ms=np.random.uniform(50,200))),
+            # (0.1, pedalboard.NoiseGate(threshold_db=np.random.unifmorm(-100,-20), ratio=np.random.uniform(1,10), attack_ms=np.random.uniform(0.1, 10), release_ms=np.random.uniform(20, 200))),
             (0.2, pedalboard.PitchShift(np.random.uniform(-4,4))),
         ] 
 
@@ -165,7 +170,7 @@ class VoxAugDataset(torch.utils.data.Dataset):
         for p, aug in augmentations:
             if self.random.uniform(0,1) < p:
                 W = aug.process(W, sample_rate=self.sr)
-                W = W / np.max([1, np.abs(W).max()])
+                W = np.clip(W, -1, 1)
 
         if np.random.uniform() < 0.04:
             if np.random.uniform() < 0.5:
@@ -191,9 +196,9 @@ class VoxAugDataset(torch.utils.data.Dataset):
 
         if not self.is_validation:
             YW = self._augment_instruments(XW)
-            VW, WP, VP = self._get_vocals(idx)
-            XW = YW + VW
-            cw = np.max([1, np.abs(XW).max(), np.abs(YW).max()])
+            VW = self._get_vocals(idx)
+            XW = normalize_waveform(YW) + normalize_waveform(VW)
+            
         elif self.is_validation:
             if (XW.shape[1] // self.hop_length) > self.cropsize:
                 start = self.random.randint(0, (XW.shape[1] // self.hop_length) - self.cropsize - 1)
@@ -202,10 +207,8 @@ class VoxAugDataset(torch.utils.data.Dataset):
                 XW = XW[:, ws:we]
                 YW = YW[:, ws:we]
 
-            cw = np.max([1, np.abs(XW).max(), np.abs(YW).max()])
-
-        XW = XW / cw
-        YW = YW / cw
+        XW = normalize_waveform(XW)
+        YW = normalize_waveform(YW)
         
         # XL = librosa.stft(XW[0], n_fft=self.n_fft, hop_length=self.hop_length)
         # XR = librosa.stft(XW[1], n_fft=self.n_fft, hop_length=self.hop_length)
@@ -232,3 +235,4 @@ class VoxAugDataset(torch.utils.data.Dataset):
         # YW = (YW + 1) * 0.5
 
         return XW.astype(np.float32), YW.astype(np.float32), c.astype(np.float32)
+        
