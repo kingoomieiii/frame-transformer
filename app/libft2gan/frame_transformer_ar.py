@@ -3,6 +3,7 @@ import torch
 from torch import nn
 import torch.nn.functional as F
 
+from libft2.channel_norm import ChannelNorm
 from libft2gan.rotary_embedding_torch import RotaryEmbedding
 from libft2gan.multichannel_layernorm import MultichannelLayerNorm
 from libft2gan.multichannel_linear import MultichannelLinear
@@ -13,7 +14,7 @@ def generate_square_subsequent_mask(sz: int):
     return torch.triu(torch.ones(sz, sz) * float('-inf'), diagonal=1)
 
 class FrameTransformerGenerator(nn.Module):
-    def __init__(self, in_channels=2, out_channels=2, channels=2, dropout=0.1, n_fft=2048, num_heads=4, expansion=4, num_attention_maps=1, quantizer_dims=256):
+    def __init__(self, in_channels=2, out_channels=2, channels=2, dropout=0.1, n_fft=2048, num_heads=4, expansion=4, num_attention_maps=1, num_quantizer_levels=256):
         super(FrameTransformerGenerator, self).__init__(),
         
         self.max_bin = n_fft // 2
@@ -91,10 +92,8 @@ class FrameTransformerGenerator(nn.Module):
         self.tgt_dec1 = FrameDecoder(channels * 2, channels * 1, self.max_bin // 1, causal=True)
         self.tgt_dec1_transformer = FrameTransformerDecoder(channels * 1, num_attention_maps, self.max_bin, dropout=dropout, expansion=expansion, num_heads=num_heads, causal=True, mem1_causal=False, mem2_causal=True)
         
-        self.out = nn.Sequential(
-            nn.Conv2d(channels, channels * 2, 1),
-            SquaredReLU(),
-            nn.Conv2d(channels * 2, quantizer_dims * 2, 1))
+        self.out = nn.Conv2d(channels, num_quantizer_levels * 2, 1)        
+        self.out_norm = ChannelNorm(num_quantizer_levels)
         
     def forward(self, src, tgt):
         if self.mask is None or self.mask.shape[1] != src.shape[3]:
@@ -177,9 +176,9 @@ class FrameTransformerGenerator(nn.Module):
         out = self.out(h)
 
         return torch.cat((
-            F.softmax(out[:, :(out.shape[1] // 2), :, :], dim=1).unsqueeze(-1),
-            F.softmax(out[:, (out.shape[1] // 2):, :, :], dim=1).unsqueeze(-1)
-        ), dim=-1).permute(0,1,4,2,3)  # B,C,H,W,num_levels
+            F.softmax(self.out_norm(out[:, :(out.shape[1] // 2), :, :]), dim=1).unsqueeze(-1),
+            F.softmax(self.out_norm(out[:, (out.shape[1] // 2):, :, :]), dim=1).unsqueeze(-1)
+        ), dim=-1).permute(0,1,4,2,3)
 
 class MultichannelMultiheadAttention2(nn.Module): 
     def __init__(self, channels, attention_maps, num_heads, features, kernel_size=3, padding=1, causal=False, mem_channels=None, mem_features=None, mem_causal=None):
