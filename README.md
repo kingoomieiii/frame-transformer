@@ -1,6 +1,6 @@
 # FrameTransformer / AsymUNetMCT
 
-Quick update on project: I'm have a new trained frame transformer that is working better than the GAN (I think the GAN overfit unfortunately). I have shifted to training a generative autoregressive music model for the time being which I will use as a stepping stone for downstream tasks. I'll be updating this repo in the coming week with new checkpoints for both of these, pretraining is currently at 500k optimization steps although I want to take it to 2.5 million.
+Quick update on project: I have a new trained frame transformer that is working better than the GAN (I think the GAN overfit unfortunately). I have shifted to training a generative autoregressive music model for the time being which I will use as a stepping stone for downstream tasks. I'll be updating this repo in the coming week with new checkpoints for both of these, pretraining is currently at 500k optimization steps although I want to take it to 2.5 million.
 
 I'm shifting work into the app folder for docker related reasons, other folders will no longer be updated and will eventually be deleted. The app folder contains scripts that are able to run using DistributedDataParallel, the dockerfile for this is located in the root directory with a build.sh script to build it for convenience. You can run these directly without docker, however.
 
