@@ -1,6 +1,6 @@
 # FrameTransformer / AsymUNetMCT
 
-Quick update on project: I have a new trained frame transformer that is working better than the GAN (I think the GAN overfit unfortunately). I have shifted to training a generative autoregressive music model for the time being which I will use as a stepping stone for downstream tasks. I'll be updating this repo in the coming week with new checkpoints for both of these, pretraining is currently at 500k optimization steps although I want to take it to 2.5 million.
+Snapshots folder has been updated with a new version. I have a third new version finishing up now that is doing even better, and a fourth model training on my second workstation which is doing even better than these. All checkpoints are found in the inference.py file in the corresponding snapshot folder, left as a comment with a mega.nz link that leads to a model.pth. If anyone has any issues with the checkpoints please let me know.
 
 I'm shifting work into the app folder for docker related reasons, other folders will no longer be updated and will eventually be deleted. The app folder contains scripts that are able to run using DistributedDataParallel, the dockerfile for this is located in the root directory with a build.sh script to build it for convenience. You can run these directly without docker, however.
 
