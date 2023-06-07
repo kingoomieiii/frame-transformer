@@ -1,6 +1,7 @@
 
 import math
 import torch
+import torch.nn as nn
 
 def _hz_to_mel(freq: float):
     return 2595.0 * math.log10(1.0 + (freq / 700.0))
@@ -114,3 +115,65 @@ def linear_fbanks(n_freqs: int, f_min: float, f_max: float, n_filters: int, samp
     fb = _create_triangular_filterbank(all_freqs, f_pts)
 
     return fb
+    
+class Tempogram(nn.Module):
+    def __init__(self, n_fft, win_length=None, learnable=False):
+        super(Tempogram, self).__init__()
+
+        self.n_fft = n_fft
+        self.win_length = n_fft if win_length is None else win_length
+        self.tempo_bins = torch.arange(n_fft // 2 + 1, dtype=torch.float).unsqueeze(0).unsqueeze(1)
+        self.learnable = learnable
+
+        if learnable:
+            self.tempo_kernel = nn.Parameter(torch.abs(torch.exp(-2j * torch.pi * self.tempo_bins * torch.arange(n_fft // 2 + 1, dtype=torch.float).unsqueeze(0).unsqueeze(2) / (n_fft // 2 + 1))))
+        else:
+            self.register_buffer('tempo_kernel', torch.exp(-2j * torch.pi * self.tempo_bins * torch.arange(n_fft // 2 + 1, dtype=torch.float).unsqueeze(0).unsqueeze(2) / (n_fft // 2 + 1)))
+
+    def forward(self, magnitude, phase):
+        phase_diff = torch.zeros_like(phase)
+        phase_diff[:, :, :, 1:] = torch.diff(phase, dim=3)
+        onset_strength = torch.sum(magnitude * torch.maximum(torch.zeros_like(phase_diff), -phase_diff), dim=1)
+        tempogram = torch.abs(torch.matmul(onset_strength.to(dtype=torch.complex64 if not self.learnable else None).transpose(1,2).unsqueeze(1), self.tempo_kernel).transpose(2,3))
+        return tempogram
+
+class MelScale(nn.Module):
+    def __init__(self, n_filters=128, sample_rate=44100, n_stft=1025, min_freq=0, max_freq=None, learned_filters=True):
+        super().__init__()
+        
+        if learned_filters:
+            self.fb = nn.Parameter(melscale_fbanks(n_stft, min_freq, max_freq if max_freq is not None else float(sample_rate // 2), n_mels=n_filters, sample_rate=sample_rate))
+        else:
+            self.register_buffer('fb', melscale_fbanks(n_stft, min_freq, max_freq if max_freq is not None else float(sample_rate // 2), n_mels=n_filters, sample_rate=sample_rate))
+
+    def forward(self, x):
+        return torch.matmul(x.transpose(-1, -2), self.fb).transpose(-1, -2)
+
+class OctaveScale(nn.Module):
+    def __init__(self, n_filters=128, sample_rate=44100, n_stft=1025, learned_filters=True, limit_to_freqs=False, min_freq=0, max_freq=None):
+        super().__init__()
+        
+        if learned_filters:
+            self.fb = nn.Parameter(octavescale_fbanks(n_stft, n_filters=n_filters, sample_rate=sample_rate, limit_to_freqs=limit_to_freqs, f_min=min_freq, f_max=max_freq))
+        else:
+            self.register_buffer('fb', octavescale_fbanks(n_stft, n_filters=n_filters, sample_rate=sample_rate, limit_to_freqs=limit_to_freqs, f_min=min_freq, f_max=max_freq))
+
+    def forward(self, x, reshape_as=None):
+        x = torch.matmul(x.transpose(-1, -2), self.fb).transpose(-1, -2)
+
+        if reshape_as is not None:
+            x = x.reshape_as(reshape_as)
+
+        return x
+
+class BandScale(nn.Module):
+    def __init__(self, n_filters, min_freq, max_freq, sample_rate=44100, n_stft=1025, learned_filters=True):
+        super().__init__()
+        
+        if learned_filters:
+            self.fb = nn.Parameter(linear_fbanks(n_stft, f_min=min_freq, f_max=max_freq, n_filters=n_filters, sample_rate=sample_rate))
+        else:
+            self.register_buffer('fb', linear_fbanks(n_stft, f_min=min_freq, f_max=max_freq, n_filters=n_filters, sample_rate=sample_rate))
+
+    def forward(self, x):
+        return torch.matmul(x.transpose(-1, -2), self.fb).transpose(-1, -2)

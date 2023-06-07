@@ -1,2 +1,0 @@
-print('wat')
-quit()

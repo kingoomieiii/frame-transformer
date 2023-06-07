@@ -3,19 +3,19 @@ import torch
 from torch import nn
 import torch.nn.functional as F
 
-from libft2.convolutional_multihead_attention import ConvolutionalMultiheadAttention
-from libft2.multichannel_multihead_attention import MultichannelMultiheadAttention
-from libft2.multichannel_layernorm import MultichannelLayerNorm
-from libft2.multichannel_linear import MultichannelLinear
-from libft2.frame_conv import FrameConv
-from libft2.convolutional_embedding import ConvolutionalEmbedding
-from libft2.res_block import ResBlock
-from libft2.squared_relu import SquaredReLU
-from libft2.channel_norm import ChannelNorm
+from libft2gan.convolutional_multihead_attention import ConvolutionalMultiheadAttention
+from libft2gan.multichannel_multihead_attention import MultichannelMultiheadAttention
+from libft2gan.multichannel_layernorm import MultichannelLayerNorm
+from libft2gan.multichannel_linear import MultichannelLinear
+from libft2gan.frame_conv import FrameConv
+from libft2gan.convolutional_embedding import ConvolutionalEmbedding
+from libft2gan.res_block import ResBlock
+from libft2gan.squared_relu import SquaredReLU
+from libft2gan.channel_norm import ChannelNorm
 
-class FrameTransformer(nn.Module):
-    def __init__(self, in_channels=2, out_channels=2, channels=2, dropout=0.1, n_fft=2048, num_heads=4, expansion=4, num_bridge_layers=4, num_attention_maps=4):
-        super(FrameTransformer, self).__init__(),
+class FrameTransformerGenerator(nn.Module):
+    def __init__(self, in_channels=2, out_channels=2, channels=2, dropout=0.1, n_fft=2048, num_heads=4, expansion=4, latent_expansion=4, num_bridge_layers=4, num_attention_maps=1):
+        super(FrameTransformerGenerator, self).__init__(),
         
         self.max_bin = n_fft // 2
         self.output_bin = n_fft // 2 + 1
@@ -47,18 +47,18 @@ class FrameTransformer(nn.Module):
         self.enc8_transformer = FrameTransformerEncoder(channels * 14, num_attention_maps, self.max_bin // 128, dropout=dropout, expansion=expansion, num_heads=num_heads)
 
         self.enc9 = FrameEncoder(channels * 14 + num_attention_maps, channels * 16, self.max_bin // 128)
-        self.enc9_transformer = nn.Sequential(*[ConvolutionalTransformerEncoder(channels * 16, dropout=dropout, expansion=4, num_heads=num_heads) for _ in range(num_bridge_layers)])
+        self.enc9_transformer = FrameTransformerEncoder(channels * 16, num_attention_maps, self.max_bin // 256, dropout=dropout, expansion=expansion, num_heads=num_heads // 2)
 
-        self.dec8 = FrameDecoder(channels * 16 + num_attention_maps, channels * 14, self.max_bin // 128)
-        self.dec8_transformer = FrameTransformerDecoder(channels * 14, num_attention_maps, self.max_bin // 128, dropout=dropout, expansion=expansion, num_heads=num_heads, has_prev_skip=False)
+        self.dec8 = FrameDecoder(channels * 16 + num_attention_maps + num_attention_maps, channels * 14, self.max_bin // 128, dropout=0.5)
+        self.dec8_transformer = FrameTransformerDecoder(channels * 14, num_attention_maps, self.max_bin // 128, dropout=dropout, expansion=expansion, num_heads=num_heads)
 
-        self.dec7 = FrameDecoder(channels * 14 + num_attention_maps + num_attention_maps, channels * 12, self.max_bin // 64)
+        self.dec7 = FrameDecoder(channels * 14 + num_attention_maps + num_attention_maps, channels * 12, self.max_bin // 64, dropout=0.5)
         self.dec7_transformer = FrameTransformerDecoder(channels * 12, num_attention_maps, self.max_bin // 64, dropout=dropout, expansion=expansion, num_heads=num_heads)
 
-        self.dec6 = FrameDecoder(channels * 12 + num_attention_maps + num_attention_maps, channels * 10, self.max_bin // 32)
+        self.dec6 = FrameDecoder(channels * 12 + num_attention_maps + num_attention_maps, channels * 10, self.max_bin // 32, dropout=0.5)
         self.dec6_transformer = FrameTransformerDecoder(channels * 10, num_attention_maps, self.max_bin // 32, dropout=dropout, expansion=expansion, num_heads=num_heads)
 
-        self.dec5 = FrameDecoder(channels * 10 + num_attention_maps + num_attention_maps, channels * 8, self.max_bin // 16)
+        self.dec5 = FrameDecoder(channels * 10 + num_attention_maps + num_attention_maps, channels * 8, self.max_bin // 16, dropout=0.5)
         self.dec5_transformer = FrameTransformerDecoder(channels * 8, num_attention_maps, self.max_bin // 16, dropout=dropout, expansion=expansion, num_heads=num_heads)
 
         self.dec4 = FrameDecoder(channels * 8 + num_attention_maps + num_attention_maps, channels * 6, self.max_bin // 8)
@@ -102,9 +102,8 @@ class FrameTransformer(nn.Module):
         e8 = self.enc8(e7)
         e8, a8, qk8 = self.enc8_transformer(e8, prev_qk=qk7)
 
-        e9, pqk = self.enc9(e8), None
-        for encoder in self.enc9_transformer:
-            e9, pqk = encoder(e9, prev_qk=pqk)
+        e9 = self.enc9(e8)
+        e9, _, _ = self.enc9_transformer(e9)
             
         h = self.dec8(e9, e8)
         h, pqk1, pqk2 = self.dec8_transformer(h, a8, prev_qk1=None, prev_qk2=None, skip_qk=qk8)
@@ -144,42 +143,19 @@ class FrameTransformerEncoder(nn.Module):
         self.embed = nn.Conv2d(channels, out_channels, 1) if channels != out_channels else nn.Identity()
 
         self.norm1 = MultichannelLayerNorm(out_channels, features)
-        self.glu = nn.Sequential(
-            MultichannelLinear(out_channels, out_channels, features, features * 2),
-            nn.GLU(dim=-2))
-        
-        self.norm2 = MultichannelLayerNorm(out_channels, features)
-        self.conv1a = MultichannelLinear(out_channels, out_channels, features, features)
-        self.conv1b = FrameConv(out_channels, out_channels, features, features, kernel_size=3, padding=1, groups=out_channels)
-
-        self.norm3 = MultichannelLayerNorm(out_channels, features)
-        self.conv2 = FrameConv(out_channels, out_channels, features, features, kernel_size=9, padding=4, groups=out_channels)
-
-        self.norm4 = MultichannelLayerNorm(out_channels, features)
         self.attn = MultichannelMultiheadAttention(out_channels, num_heads, features, kernel_size=3, padding=1)
 
-        self.norm5 = MultichannelLayerNorm(out_channels, features)
-        self.conv3 = MultichannelLinear(out_channels, out_channels, features, expansion)
-        self.conv4 = MultichannelLinear(out_channels, out_channels, expansion, features)
+        self.norm2 = MultichannelLayerNorm(out_channels, features)
+        self.conv1 = MultichannelLinear(out_channels, out_channels, features, expansion, depthwise=True)
+        self.conv2 = MultichannelLinear(out_channels, out_channels, expansion, features)
         
     def forward(self, x, prev_qk=None):
         h = self.embed(x)
 
-        z = self.glu(self.norm1(h))
+        z, prev_qk = self.attn(self.norm1(h), prev_qk=prev_qk)
         h = h + self.dropout(z)
 
-        z = self.norm2(h)
-        za = self.activate(self.conv1a(z))
-        zb = self.activate(self.conv1b(z))
-        h = h + self.dropout(za) + self.dropout(zb)
-
-        z = self.conv2(self.norm3(h))
-        h = h + self.dropout(z)
-
-        z, prev_qk = self.attn(self.norm4(h), prev_qk=prev_qk)
-        h = h + self.dropout(z)
-
-        z = self.conv4(self.activate(self.conv3(self.norm5(h))))
+        z = self.conv2(self.activate(self.conv1(self.norm2(h))))
         h = h + self.dropout(z)
 
         return torch.cat((x, h), dim=1), h, prev_qk
@@ -191,129 +167,37 @@ class FrameTransformerDecoder(nn.Module):
         self.activate = SquaredReLU()
         self.dropout = nn.Dropout(dropout)
 
-        self.gate1 = None if not has_prev_skip else nn.Sequential(
-            nn.Conv3d(out_channels * 2, out_channels, kernel_size=3, padding=1),
-            SquaredReLU(),
-            nn.Conv3d(out_channels, 1, kernel_size=3, padding=1),
-            nn.Sigmoid())
-
-        self.gate2 = nn.Sequential(
-            nn.Conv3d(out_channels * 2, out_channels, kernel_size=3, padding=1),
-            SquaredReLU(),
-            nn.Conv3d(out_channels, 1, kernel_size=3, padding=1),
-            nn.Sigmoid())
-
         self.embed = nn.Conv2d(channels, out_channels, 1) if channels != out_channels else nn.Identity()
 
         self.norm1 = MultichannelLayerNorm(out_channels, features)
-        self.attn1a = MultichannelMultiheadAttention(out_channels, num_heads, features, kernel_size=3, padding=1)
-        self.attn1b = MultichannelMultiheadAttention(out_channels, num_heads, features, kernel_size=3, padding=1)
+        self.attn1 = MultichannelMultiheadAttention(out_channels, num_heads, features, kernel_size=3, padding=1)
 
         self.norm2 = MultichannelLayerNorm(out_channels, features)
-        self.conv1a = FrameConv(out_channels, out_channels, features, features, kernel_size=11, padding=5, groups=out_channels)
-        self.conv1b = FrameConv(out_channels, out_channels, features, features, kernel_size=7, padding=3, groups=out_channels)
-        self.norm3 = MultichannelLayerNorm(out_channels, features)
-        self.conv2 = FrameConv(out_channels, out_channels, features, features, kernel_size=7, padding=3, groups=out_channels)
-
-        self.norm4 = MultichannelLayerNorm(out_channels, features)
         self.attn2 = MultichannelMultiheadAttention(out_channels, num_heads, features, kernel_size=3, padding=1)
 
-        self.norm5 = MultichannelLayerNorm(out_channels, features)
-        self.attn3 = MultichannelMultiheadAttention(out_channels, num_heads, features, kernel_size=3, padding=1)
-
-        self.norm6 = MultichannelLayerNorm(out_channels, features)
-        self.conv3 = MultichannelLinear(out_channels, out_channels, features, expansion)
-        self.conv4 = MultichannelLinear(out_channels, out_channels, expansion, features)
+        self.norm3 = MultichannelLayerNorm(out_channels, features)
+        self.conv1 = MultichannelLinear(out_channels, out_channels, features, expansion, depthwise=True)
+        self.conv2 = MultichannelLinear(out_channels, out_channels, expansion, features)
         
     def forward(self, x, skip, prev_qk1=None, prev_qk2=None, skip_qk=None):
         h = self.embed(x)
 
-        z = self.norm1(h)
-        za, prev_qk1 = self.attn1a(z, prev_qk=prev_qk1)
-
-        if self.gate1 is not None:
-            g = self.gate1(torch.cat((prev_qk2, skip_qk), dim=1))
-            prev_qk2 = g * prev_qk2 + (1 - g) * skip_qk
-        elif skip_qk is not None:
-            prev_qk2 = skip_qk
-
-        zb, prev_qk2 = self.attn1b(z, mem=skip, prev_qk=prev_qk2)
-        h = h + self.dropout(za) + self.dropout(zb)
-
-        z = self.norm2(h)
-        za = self.activate(self.conv1a(z))
-        zb = self.conv1b(z)
-        z = self.conv2(self.norm3(za + zb))
+        z, prev_qk1 = self.attn1(self.norm1(h), prev_qk=prev_qk1)
         h = h + self.dropout(z)
 
-        z, prev_qk1 = self.attn2(self.norm4(h), prev_qk=prev_qk1)
+        z, prev_qk2 = self.attn2(self.norm2(h), mem=skip, prev_qk=prev_qk2)
         h = h + self.dropout(z)
 
-        g = self.gate2(torch.cat((prev_qk2, skip_qk), dim=1))
-        prev_qk2 = g * prev_qk2 + (1 - g) * skip_qk
-        z, prev_qk2 = self.attn3(self.norm5(h), mem=skip, prev_qk=prev_qk2)
-        h = h + self.dropout(z)
-
-        z = self.conv4(self.activate(self.conv3(self.norm6(h))))
+        z = self.conv2(self.activate(self.conv1(self.norm3(h))))
         h = h + self.dropout(z)
 
         return torch.cat((x, h), dim=1), prev_qk1, prev_qk2
-        
-class ConvolutionalTransformerEncoder(nn.Module):
-    def __init__(self, channels, dropout=0.1, expansion=4, num_heads=8):
-        super(ConvolutionalTransformerEncoder, self).__init__()
-
-        self.activate = SquaredReLU()
-        self.dropout = nn.Dropout2d(dropout)
-
-        self.norm1 = ChannelNorm(channels)
-        self.glu = nn.Sequential(
-            nn.Conv2d(channels, channels * 2, kernel_size=1, padding=0),
-            nn.GLU(dim=1))
-        
-        self.norm2 = ChannelNorm(channels)
-        self.conv1a = nn.Conv2d(channels, channels, kernel_size=1, padding=0)
-        self.conv1b = nn.Sequential(
-            nn.Conv2d(channels, channels, kernel_size=3, padding=1, groups=channels),
-            nn.Conv2d(channels, channels, kernel_size=1, padding=0))
-
-        self.norm3 = ChannelNorm(channels)
-        self.conv2 = nn.Sequential(
-            nn.Conv2d(channels, channels, kernel_size=9, padding=4, groups=channels),
-            nn.Conv2d(channels, channels, kernel_size=1, padding=0))
-
-        self.norm4 = ChannelNorm(channels)
-        self.attn = ConvolutionalMultiheadAttention(channels, num_heads, kernel_size=3, padding=1)
-
-        self.norm5 = ChannelNorm(channels)
-        self.conv3 = nn.Conv2d(channels, channels * expansion, kernel_size=3, padding=1)
-        self.conv4 = nn.Conv2d(channels * expansion, channels, kernel_size=3, padding=1)
-        
-    def forward(self, x, prev_qk=None):
-        z = self.glu(self.norm1(x))
-        h = x + self.dropout(z)
-
-        z = self.norm2(h)
-        za = self.activate(self.conv1a(z))
-        zb = self.activate(self.conv1b(z))
-        h = h + self.dropout(za) + self.dropout(zb)
-
-        z = self.conv2(self.norm3(h))
-        h = h + self.dropout(z)
-
-        z, prev_qk = self.attn(self.norm4(h), prev_qk=prev_qk)
-        h = x + self.dropout(z)
-
-        z = self.conv4(self.activate(self.conv3(self.norm5(h))))
-        h = h + self.dropout(z)
-
-        return h, prev_qk
 
 class FrameEncoder(nn.Module):
-    def __init__(self, in_channels, out_channels, features, downsample=True):
+    def __init__(self, in_channels, out_channels, features, downsample=True, stride=(2,1)):
         super(FrameEncoder, self).__init__()
 
-        self.body = ResBlock(in_channels, out_channels, features, downsample=downsample)
+        self.body = ResBlock(in_channels, out_channels, features, downsample=downsample, stride=stride)
 
     def forward(self, x):
         x = self.body(x)
@@ -321,11 +205,11 @@ class FrameEncoder(nn.Module):
         return x
 
 class FrameDecoder(nn.Module):
-    def __init__(self, in_channels, out_channels, features):
+    def __init__(self, in_channels, out_channels, features, dropout=0):
         super(FrameDecoder, self).__init__()
 
         self.upsample = nn.Upsample(scale_factor=(2,1), mode='bilinear', align_corners=True)
-        self.body = ResBlock(in_channels + out_channels, out_channels, features)
+        self.body = ResBlock(in_channels + out_channels, out_channels, features, dropout=dropout)
 
     def forward(self, x, skip):
         x = torch.cat((self.upsample(x), skip), dim=1)

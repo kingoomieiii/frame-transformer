@@ -199,6 +199,21 @@ def apply_deemphasis(M, P, random, coef):
 
     return np.array([left_M, right_M]), P
 
+def apply_masking(M, num_masks=1, max_mask_percentage=0.2):
+    N = torch.randn_like(M)
+    b = M.shape[0]
+
+    for i in range(b):
+        for _ in range(num_masks):
+            mask_percentage = np.random.uniform(0, max_mask_percentage)
+            mask_height = int(M.shape[1] * mask_percentage)
+            mask_start_h = np.random.randint(0, M.shape[1] - mask_height)
+            mask_width = int(M.shape[2] * mask_percentage)
+            mask_start_w = np.random.randint(0, M.shape[2] - mask_width)
+            M[i, :, mask_start_h:mask_start_h+mask_height, mask_start_w:mask_start_w+mask_width] = N[i, :, mask_start_h:mask_start_h+mask_height, mask_start_w:mask_start_w+mask_width]
+
+    return M
+
 def apply_masking(M, P, random, c, num_masks=1, max_mask_percentage=0.2, alpha=1):
     H = np.copy(M) / c
     N = np.random.uniform(size=H.shape)
@@ -209,7 +224,7 @@ def apply_masking(M, P, random, c, num_masks=1, max_mask_percentage=0.2, alpha=1
         mask_start_h = random.randint(0, M.shape[1] - mask_height)
         mask_width = int(M.shape[2] * mask_percentage)
         mask_start_w = random.randint(0, M.shape[2] - mask_width)
-        H[:, mask_start_h:mask_start_h+mask_height, mask_start_w:mask_start_w+mask_width] = (alpha * N[:, mask_start_h:mask_start_h+mask_height, mask_start_w:mask_start_w+mask_width]) + (1 - alpha) * H[:, mask_start_h:mask_start_h+mask_height, mask_start_w:mask_start_w+mask_width]
+        H[:, mask_start_h:mask_start_h+mask_height, mask_start_w:mask_start_w+mask_width] = N[:, mask_start_h:mask_start_h+mask_height, mask_start_w:mask_start_w+mask_width]
 
     return H * c, P
 

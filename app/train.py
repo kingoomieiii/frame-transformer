@@ -11,23 +11,15 @@ import torch.distributed
 from tqdm import tqdm
 import wandb
 
-from libft2gan.dataset_voxaug3 import VoxAugDataset
-from libft2gan.baseline_phase_difference import BasebandPhaseDifference
-from libft2gan.frame_transformer3q2 import FrameTransformerGenerator
+from libft2gan.dataset_voxaug_new import VoxAugDataset
+from libft2gan.frame_transformer4 import FrameTransformerGenerator
 from libft2gan.lr_scheduler_linear_warmup import LinearWarmupScheduler
 from libft2gan.lr_scheduler_polynomial_decay import PolynomialDecayScheduler
-from libft2gan.signal_loss import sdr_loss
+
+from libft2gan.audio_scales import MelScale
 
 from torch.nn import functional as F
-
-import torchaudio
 import torchaudio.transforms as T
-
-def halve_tensor(X):
-    X1 = X[:, :, :, (X.shape[3] // 2):]
-    X2 = X[:, :, :, :(X.shape[3] // 2)]
-    X = torch.cat((X1, X2), dim=0)
-    return X
 
 def apply_mixup(X, Y, c, alpha=1.0):
     if alpha > 0:
@@ -44,17 +36,10 @@ def apply_mixup(X, Y, c, alpha=1.0):
 
     return XM, YM, c
 
-# def to_spec(W):
-#     SL = torch.stft(W[0].float(), n_fft=2048, hop_length=1024, normalized=True, return_complex=True)
-#     SR = torch.stft(W[1].float(), n_fft=2048, hop_length=1024, normalized=True, return_complex=True)
-#     S = torch.cat((SL.unsqueeze(1), SR.unsqueeze(1)), dim=1)
-#     return S
-
 def train_epoch(dataloader, model, device, optimizer, accumulation_steps, progress_bar, lr_warmup=None, grad_scaler=None, step=0, max_bin=0, use_wandb=False, predict_mask=True, predict_phase=False, quantizer_levels=128):
     model.train()
 
     batch_loss = 0
-    batch_loss_phase = 0
     sum_loss = 0
     batches = 0
     
@@ -62,6 +47,7 @@ def train_epoch(dataloader, model, device, optimizer, accumulation_steps, progre
     torch.cuda.empty_cache()
 
     to_spec = T.Spectrogram(n_fft=2048, hop_length=1024, power=None, return_complex=True).to(device)
+    to_mel = MelScale(n_filters=128, sample_rate=44100, n_stft=1024).to(device)
 
     pbar = tqdm(dataloader) if progress_bar else dataloader
     for itr, (XW, YW, c) in enumerate(pbar):
@@ -70,35 +56,29 @@ def train_epoch(dataloader, model, device, optimizer, accumulation_steps, progre
         c = c.to(device).unsqueeze(-1)
 
         with torch.no_grad():
-            #XW, YW = apply_mixup(XW, YW, c)
-            XS = torch.abs(to_spec(XW))[:, :, :-1]
-            YS = torch.abs(to_spec(YW))[:, :, :-1]
+            XW, YW, c = apply_mixup(XW, YW, c)
+            XC = to_spec(XW)[:, :, :-1]
+            YC = to_spec(YW)[:, :, :-1]
+            XS = torch.abs(XC)
+            YS = torch.abs(YC)
+            XP = (torch.angle(XC) + torch.pi) / (2 * torch.pi)
             csrc = torch.max(XS.reshape(XS.shape[0], -1), dim=1, keepdim=True).values
             ctgt = torch.max(YS.reshape(YS.shape[0], -1), dim=1, keepdim=True).values
             c = torch.max(torch.cat((c, csrc, ctgt), dim=1), dim=1, keepdim=True).values.unsqueeze(-1).unsqueeze(-1)
             YS = YS / c
             XS = XS / c
-            #XS_quant = torch.round(XS * (quantizer_levels - 1))
-            YS_quant = torch.round(YS * (quantizer_levels - 1))
         
         with torch.cuda.amp.autocast_mode.autocast(enabled=grad_scaler is not None):
-            pred, lmi, lma, rmi, rma, lsu, rsu = model(XS)
+            pred = torch.sigmoid(model(torch.cat((XS, XP), dim=1)))
 
-        ce_loss = F.cross_entropy(pred, YS_quant.long())
+        pred = XS * pred
 
-        pred = pred.permute(0,2,3,4,1)
-        pred_shape = pred.shape
-        pred_reshaped = pred.reshape(-1, pred_shape[-1])
+        mag_loss = F.l1_loss(pred, YS)
+        mag_loss2 = F.l1_loss(to_mel(pred), to_mel(YS))
 
-        samples = torch.multinomial(pred_reshaped, num_samples=1)
-        samples = samples.view(*pred_shape[:-1]).float()
-
-        mag_loss = F.l1_loss(samples / (quantizer_levels - 1), YS_quant / (quantizer_levels - 1))
-        mag_loss2 = F.l1_loss(samples / (quantizer_levels - 1), YS)
-        accum_loss = ce_loss / accumulation_steps
+        accum_loss = (mag_loss + mag_loss2) / accumulation_steps
 
         batch_loss = batch_loss + mag_loss.item()
-        batch_loss_phase = batch_loss_phase + mag_loss2.item()
 
         if torch.logical_or(accum_loss.isnan(), accum_loss.isinf()):
             print('nan training loss; aborting')
@@ -111,14 +91,7 @@ def train_epoch(dataloader, model, device, optimizer, accumulation_steps, progre
 
         if (itr + 1) % accumulation_steps == 0:
             if progress_bar:                
-                pbar.set_description(f'{step}: mag={batch_loss / accumulation_steps}, phase={batch_loss_phase / accumulation_steps}, lmi={lmi.item()}, lma={lma.item()}, rmi={rmi.item()}, rma={rma.item()}, lsu={lsu.item()} rsu={rsu.item()}')
-                # pbar.set_description(f'{step}: mag={mag_loss.item()}, mel={mel_loss.item()}, ol={o_loss.item()}, lb={lb_loss.item()}, ub={ub_loss.item()}, lm={lm_loss.item()}, um={um_loss.item()}, p={p_loss.item()}, b={b_loss.item()}, phase={phase_loss.item()}, wave={wave_loss.item()}, min={pmin.item()}, avg={pavg.item()}, max={pmax.item()}')
-            
-            # if use_wandb:
-            #     wandb.log({
-            #         'spec_loss': wave_loss.item(),
-            #         'wave_loss': wave_loss.item(),
-            #     })
+                pbar.set_description(f'{step}: mag={batch_loss / accumulation_steps}')
 
             if grad_scaler is not None:
                 grad_scaler.unscale_(optimizer)
@@ -137,7 +110,6 @@ def train_epoch(dataloader, model, device, optimizer, accumulation_steps, progre
             batches = batches + 1
             sum_loss = sum_loss + batch_loss
             batch_loss = 0
-            batch_loss_phase = 0
 
     return sum_loss / batches, step
 
@@ -148,7 +120,6 @@ def validate_epoch(dataloader, model, device, max_bin=0, use_wandb=False, predic
     sum_spec = 0
     sum_wave = 0
 
-    sum_loss = 0
     batches = 0
 
     model.zero_grad()
@@ -161,43 +132,30 @@ def validate_epoch(dataloader, model, device, max_bin=0, use_wandb=False, predic
             YW = YW.to(device)
             c = c.to(device).unsqueeze(-1).unsqueeze(-1).unsqueeze(-1)
             YS = torch.abs(to_spec(YW))[:, :, :-1]
-            XS = torch.abs(to_spec(XW))[:, :, :-1]
-
-            # ctgt = torch.max(YS.reshape(YS.shape[0], -1), dim=1, keepdim=True).values
-            # csrc = torch.max(XS.reshape(XS.shape[0], -1), dim=1, keepdim=True).values
-            # c = torch.max(torch.cat((c, ctgt, csrc), dim=1), dim=1, keepdim=True).values.unsqueeze(-1).unsqueeze(-1)
+            XC = to_spec(XW)[:, :, :-1]
+            XS = torch.abs(XC)
+            XP = (torch.angle(XC) + torch.pi) / (2 * torch.pi)
             
             XS = XS / c
             YS = YS / c
             
             with torch.cuda.amp.autocast_mode.autocast():
-                pred, _, _, _, _, _, _ = model(XS)
-                pred = pred.permute(0,2,3,4,1)
-                pred_shape = pred.shape
-                pred_reshaped = pred.reshape(-1, pred_shape[-1])
-                samples = torch.multinomial(pred_reshaped, num_samples=1)
-                samples = samples.view(*pred_shape[:-1]).float() / (quantizer_levels - 1)
+                pred = torch.sigmoid(model(torch.cat((XS, XP), dim=1)))
 
             # wave_loss = F.cross_entropy(PQ.reshape(-1, 256), YQ.long().reshape(-1))
-            mag_loss = F.l1_loss(samples, YS)
+            mag_loss = F.l1_loss(XS * pred, YS)
             # wave_loss = mag_loss #F.l1_loss(PW, YW)
             
-            if use_wandb:
-                wandb.log({
-                    'wave_loss_val': mag_loss.item()
-                })
-
             loss = mag_loss
 
             if torch.logical_or(loss.isnan(), loss.isinf()):
                 print('nan validation loss; aborting')
                 quit()
             else:
-                sum_spec += mag_loss.item()
                 sum_wave += mag_loss.item()
                 batches += 1
 
-    return sum_wave / batches, sum_spec / batches
+    return sum_wave / batches
 
 def main():
     p = argparse.ArgumentParser()
@@ -207,7 +165,7 @@ def main():
     p.add_argument('--hop_length', '-H', type=int, default=1024)
     p.add_argument('--n_fft', '-f', type=int, default=2048)
     p.add_argument('--pretrained_checkpoint', type=str, default=None)#"H://models/local.0.pre.pth")
-    p.add_argument('--checkpoint', type=str, default="H://models/local.0.stg1.mag.pth")
+    p.add_argument('--checkpoint', type=str, default=None)#"H://models/local.0.stg1.mag.pth")
     p.add_argument('--mixed_precision', type=str, default='true')
     p.add_argument('--learning_rate', '-l', type=float, default=1e-4)
     p.add_argument('--lam', type=float, default=100)
@@ -227,21 +185,22 @@ def main():
     # p.add_argument('--vocal_lib', type=str, default="/home/ben/cs2048_sr44100_hl1024_nf2048_of0_VOCALS")
     # p.add_argument('--validation_lib', type=str, default="/media/ben/internal-nvme-b/cs2048_sr44100_hl1024_nf2048_of0_VALIDATION")
 
-    p.add_argument('--curr_step', type=int, default=9000)
+    p.add_argument('--curr_step', type=int, default=0)#9000)
     p.add_argument('--curr_epoch', type=int, default=1)
     p.add_argument('--warmup_steps', type=int, default=16000)
     p.add_argument('--decay_steps', type=int, default=1000000)
     p.add_argument('--lr_scheduler_decay_target', type=int, default=1e-12)
     p.add_argument('--lr_scheduler_decay_power', type=float, default=0.5)
     p.add_argument('--lr_verbosity', type=int, default=1000)
-     
-    p.add_argument('--quantizer_levels', type=int, default=128)
-    p.add_argument('--num_bridge_layers', type=int, default=1)
-    p.add_argument('--num_attention_maps', type=int, default=10)
-    p.add_argument('--channels', type=int, default=8)
-    p.add_argument('--expansion', type=int, default=4)
+    
+    p.add_argument('--num_attention_maps', type=int, default=4)
+    p.add_argument('--channels', type=int, default=32)
+    p.add_argument('--num_bridge_layers', type=int, default=4)
+    p.add_argument('--latent_expansion', type=int, default=4)
+    p.add_argument('--expansion', type=int, default=4096)
     p.add_argument('--num_heads', type=int, default=8)
-    p.add_argument('--dropout', type=float, default=0.1)
+    p.add_argument('--dropout', type=float, default=0.35)
+    p.add_argument('--weight_decay', type=float, default=1e-2)
     
     p.add_argument('--stages', type=str, default='900000,1108000')
     p.add_argument('--cropsizes', type=str, default='256,512')
@@ -321,9 +280,8 @@ def main():
 
     device = torch.device('cpu')
 
-    generator = FrameTransformerGenerator(in_channels=2, out_channels=2, channels=args.channels, expansion=args.expansion, n_fft=args.n_fft, dropout=args.dropout, num_heads=args.num_heads, num_attention_maps=args.num_attention_maps, num_bridge_layers=args.num_bridge_layers, quantizer_levels=args.quantizer_levels)
-    # generator = FrameWaveTransformer(wave_in_channels=2, frame_in_channels=4, wave_out_channels=2, frame_out_channels=2, wave_channels=args.wave_channels, frame_channels=args.frame_channels, dropout=args.dropout, n_fft=args.n_fft, wave_transformer_layers=args.num_bridge_layers, wave_heads=args.num_heads, wave_expansion=args.wave_expansion, frame_heads=args.num_heads, frame_expansion=args.frame_expansion, num_attention_maps=args.num_attention_maps)
-
+    generator = FrameTransformerGenerator(in_channels=4, out_channels=2, channels=args.channels, expansion=args.expansion, n_fft=args.n_fft, dropout=args.dropout, num_heads=args.num_heads, num_attention_maps=args.num_attention_maps, num_bridge_layers=args.num_bridge_layers, latent_expansion=args.latent_expansion)
+    
     if torch.cuda.is_available() and args.gpu >= 0:
         device = torch.device('cuda:{}'.format(args.gpu))
         generator.to(device)
@@ -364,7 +322,7 @@ def main():
         num_workers=args.num_workers
     )
 
-    wave, spec = validate_epoch(val_dataloader, generator, device, max_bin=args.n_fft // 2, predict_mask=args.predict_mask, predict_phase=args.predict_phase)
+    #wave, spec = validate_epoch(val_dataloader, generator, device, max_bin=args.n_fft // 2, predict_mask=args.predict_mask, predict_phase=args.predict_phase)
 
     best_loss = float('inf')
     while step < args.stages[-1]:

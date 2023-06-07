@@ -84,10 +84,10 @@ class VoxAugDataset(torch.utils.data.Dataset):
             (0.2, apply_multiplicative_noise, { "loc": 1, "scale": self.random.uniform(0,0.25), }),
             (0.2, apply_random_eq, { "min": self.random.uniform(0, 1), "max": self.random.uniform(1, 2), }),
             (0.2, apply_stereo_spatialization, { "c": Vc, "alpha": self.random.uniform(0, 2) }),
-            (0.2, apply_random_phase_noise, { "strength": self.random.uniform(0, 0.5)}),
+            # (0.2, apply_random_phase_noise, { "strength": self.random.uniform(0, 0.5)}),
             (0.2, apply_pitch_shift, { "pitch_shift": self.random.uniform(-12, 12) }),
-            (0.2, apply_emphasis, { "coef": self.random.uniform(0.8, 1) }),
-            (0.2, apply_deemphasis, { "coef": self.random.uniform(0.8, 1) })
+            # (0.2, apply_emphasis, { "coef": self.random.uniform(0.8, 1) }),
+            # (0.2, apply_deemphasis, { "coef": self.random.uniform(0.8, 1) })
         ]
 
         random.shuffle(augmentations)
@@ -122,8 +122,8 @@ class VoxAugDataset(torch.utils.data.Dataset):
             (0.2, apply_dynamic_range_mod, { "c": c, "threshold": self.random.uniform(0,1), "gain": self.random.uniform(0,0.125), }),
             (0.2, apply_random_eq, { "min": self.random.uniform(0.5, 1), "max": self.random.uniform(1, 1.5), }),
             (0.2, apply_stereo_spatialization, { "c": c, "alpha": self.random.uniform(0.5, 1.5) }),
-            (0.2, apply_random_phase_noise, { "strength": self.random.uniform(0, 0.125)}),
-            (0.2, apply_pitch_shift, { "pitch_shift": self.random.uniform(-6, 6) }),
+            # (0.2, apply_random_phase_noise, { "strength": self.random.uniform(0, 0.125)}),
+            # (0.2, apply_pitch_shift, { "pitch_shift": self.random.uniform(-6, 6) }),
         ]
 
         random.shuffle(augmentations)
@@ -163,9 +163,6 @@ class VoxAugDataset(torch.utils.data.Dataset):
         YP = (np.angle(Y) + np.pi) / (2 * np.pi)
         X = np.abs(X) / c
         Y = np.abs(Y) / c
-
-        if self.predict_phase:
-            Y = YP
 
         X = np.concatenate((X, XP), axis=0)
 
