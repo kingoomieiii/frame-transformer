@@ -16,8 +16,8 @@ from libft2gan.dataset_voxaug import VoxAugDataset
 from libft2gan.frame_transformer4 import FrameTransformerGenerator as FrameTransformer
 
 from torch.nn import functional as F
-from libft2.lr_scheduler_linear_warmup import LinearWarmupScheduler
-from libft2.lr_scheduler_polynomial_decay import PolynomialDecayScheduler
+from libft2gan.lr_scheduler_linear_warmup import LinearWarmupScheduler
+from libft2gan.lr_scheduler_polynomial_decay import PolynomialDecayScheduler
 
 def apply_mixup(X, Y, alpha=1.0):
     if alpha > 0:

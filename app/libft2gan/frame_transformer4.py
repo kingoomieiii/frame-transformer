@@ -3,15 +3,12 @@ import torch
 from torch import nn
 import torch.nn.functional as F
 
-from libft2gan.convolutional_multihead_attention import ConvolutionalMultiheadAttention
 from libft2gan.multichannel_multihead_attention import MultichannelMultiheadAttention
 from libft2gan.multichannel_layernorm import MultichannelLayerNorm
 from libft2gan.multichannel_linear import MultichannelLinear
-from libft2gan.frame_conv import FrameConv
 from libft2gan.convolutional_embedding import ConvolutionalEmbedding
 from libft2gan.res_block import ResBlock
 from libft2gan.squared_relu import SquaredReLU
-from libft2gan.channel_norm import ChannelNorm
 
 class FrameTransformerGenerator(nn.Module):
     def __init__(self, in_channels=2, out_channels=2, channels=2, dropout=0.1, n_fft=2048, num_heads=4, expansion=4, latent_expansion=4, num_bridge_layers=4, num_attention_maps=1):
