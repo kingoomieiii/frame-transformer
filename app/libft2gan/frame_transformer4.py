@@ -46,16 +46,16 @@ class FrameTransformerGenerator(nn.Module):
         self.enc9 = FrameEncoder(channels * 14 + num_attention_maps, channels * 16, self.max_bin // 128)
         self.enc9_transformer = FrameTransformerEncoder(channels * 16, num_attention_maps, self.max_bin // 256, dropout=dropout, expansion=expansion, num_heads=num_heads // 2)
 
-        self.dec8 = FrameDecoder(channels * 16 + num_attention_maps + num_attention_maps, channels * 14, self.max_bin // 128, dropout=0.5)
+        self.dec8 = FrameDecoder(channels * 16 + num_attention_maps + num_attention_maps, channels * 14, self.max_bin // 128)
         self.dec8_transformer = FrameTransformerDecoder(channels * 14, num_attention_maps, self.max_bin // 128, dropout=dropout, expansion=expansion, num_heads=num_heads)
 
-        self.dec7 = FrameDecoder(channels * 14 + num_attention_maps + num_attention_maps, channels * 12, self.max_bin // 64, dropout=0.5)
+        self.dec7 = FrameDecoder(channels * 14 + num_attention_maps + num_attention_maps, channels * 12, self.max_bin // 64)
         self.dec7_transformer = FrameTransformerDecoder(channels * 12, num_attention_maps, self.max_bin // 64, dropout=dropout, expansion=expansion, num_heads=num_heads)
 
-        self.dec6 = FrameDecoder(channels * 12 + num_attention_maps + num_attention_maps, channels * 10, self.max_bin // 32, dropout=0.5)
+        self.dec6 = FrameDecoder(channels * 12 + num_attention_maps + num_attention_maps, channels * 10, self.max_bin // 32)
         self.dec6_transformer = FrameTransformerDecoder(channels * 10, num_attention_maps, self.max_bin // 32, dropout=dropout, expansion=expansion, num_heads=num_heads)
 
-        self.dec5 = FrameDecoder(channels * 10 + num_attention_maps + num_attention_maps, channels * 8, self.max_bin // 16, dropout=0.5)
+        self.dec5 = FrameDecoder(channels * 10 + num_attention_maps + num_attention_maps, channels * 8, self.max_bin // 16)
         self.dec5_transformer = FrameTransformerDecoder(channels * 8, num_attention_maps, self.max_bin // 16, dropout=dropout, expansion=expansion, num_heads=num_heads)
 
         self.dec4 = FrameDecoder(channels * 8 + num_attention_maps + num_attention_maps, channels * 6, self.max_bin // 8)

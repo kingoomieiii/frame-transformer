@@ -186,13 +186,10 @@ class VoxAugDataset(torch.utils.data.Dataset):
     def __getitem__(self, idx):
         path = str(self.curr_list[idx % len(self.curr_list)])
         data = np.load(path, allow_pickle=True)
-        aug = 'Y' not in data.files
+        aug = 'YW' not in data.files
 
         XW, c = data['XW'][:2], data['c']
         YW  = XW if aug else data['YW'][:2]
-        VS, VP, WP = None, np.zeros((XW.shape[0], self.vout_bands, ((XW.shape[1] // self.hop_length)))), np.zeros((XW.shape[0], XW.shape[1]))
-
-        #cw = np.abs(XW).max()
 
         if not self.is_validation:
             YW = self._augment_instruments(XW)
@@ -209,30 +206,6 @@ class VoxAugDataset(torch.utils.data.Dataset):
 
         XW = normalize_waveform(XW, YW)
         YW = normalize_waveform(YW, XW)
-        
-        # XL = librosa.stft(XW[0], n_fft=self.n_fft, hop_length=self.hop_length)
-        # XR = librosa.stft(XW[1], n_fft=self.n_fft, hop_length=self.hop_length)
-        # XS = np.stack([XL, XR], axis=0)
-
-        # XML = librosa.feature.melspectrogram(S=np.abs(XS[0]), sr=self.sr, n_fft=self.n_fft, hop_length=self.hop_length, n_mels=self.n_mels)
-        # XMR = librosa.feature.melspectrogram(S=np.abs(XS[1]), sr=self.sr, n_fft=self.n_fft, hop_length=self.hop_length, n_mels=self.n_mels)
-        # XM = np.stack([XML, XMR], axis=0)
-        # XM = XM / np.max([c, XM.max()])
-        
-        # YL = librosa.stft(YW[0], n_fft=self.n_fft, hop_length=self.hop_length)
-        # YR = librosa.stft(YW[1], n_fft=self.n_fft, hop_length=self.hop_length)
-        # YS = np.stack([YL, YR], axis=0)
-
-        # c = np.max([c, np.abs(XS).max(), np.abs(YS).max()])
-        # XP = (np.angle(XS) + np.pi) / (2 * np.pi)
-        # YP = (np.angle(YS) + np.pi) / (2 * np.pi)
-        # XS = (np.abs(XS) / c)
-        # YS = (np.abs(YS) / c)
-        #XS = np.concatenate((XS, XP), axis=0)
-        # XS = np.concatenate((XS, XP), axis=0)
-        # YS = np.concatenate((YS, YP), axis=0)
-        # XW = (XW + 1) * 0.5
-        # YW = (YW + 1) * 0.5
 
         return XW.astype(np.float32), YW.astype(np.float32), c.astype(np.float32)
         

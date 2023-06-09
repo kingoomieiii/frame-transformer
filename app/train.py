@@ -186,8 +186,8 @@ def main():
     # p.add_argument('--validation_lib', type=str, default="/media/ben/internal-nvme-b/cs2048_sr44100_hl1024_nf2048_of0_VALIDATION")
 
     p.add_argument('--curr_step', type=int, default=0)#9000)
-    p.add_argument('--curr_epoch', type=int, default=1)
-    p.add_argument('--warmup_steps', type=int, default=16000)
+    p.add_argument('--curr_epoch', type=int, default=0)
+    p.add_argument('--warmup_steps', type=int, default=8000)
     p.add_argument('--decay_steps', type=int, default=1000000)
     p.add_argument('--lr_scheduler_decay_target', type=int, default=1e-12)
     p.add_argument('--lr_scheduler_decay_power', type=float, default=0.5)
@@ -322,7 +322,7 @@ def main():
         num_workers=args.num_workers
     )
 
-    #wave, spec = validate_epoch(val_dataloader, generator, device, max_bin=args.n_fft // 2, predict_mask=args.predict_mask, predict_phase=args.predict_phase)
+    wave = validate_epoch(val_dataloader, generator, device, max_bin=args.n_fft // 2, predict_mask=args.predict_mask, predict_phase=args.predict_phase)
 
     best_loss = float('inf')
     while step < args.stages[-1]:
@@ -353,15 +353,15 @@ def main():
         print('# epoch {}'.format(epoch))
         train_dataloader.dataset.set_epoch(epoch)
         train_loss_mag, step = train_epoch(train_dataloader, generator, device, optimizer=optimizer_gen, accumulation_steps=accum_steps, progress_bar=args.progress_bar, lr_warmup=scheduler_gen, grad_scaler=grad_scaler_gen, step=step, max_bin=args.n_fft // 2, use_wandb=args.wandb, predict_mask=args.predict_mask, predict_phase=args.predict_phase)
-        wave, spec = validate_epoch(val_dataloader, generator, device, max_bin=args.n_fft // 2, predict_mask=args.predict_mask, predict_phase=args.predict_phase)
+        wave = validate_epoch(val_dataloader, generator, device, max_bin=args.n_fft // 2, predict_mask=args.predict_mask, predict_phase=args.predict_phase)
 
         print(
-            '  * training l1 loss = {:.6f}, wave_loss = {:6f} spec loss = {:.6f}'
-            .format(train_loss_mag, wave, spec)
+            '  * training loss = {:.6f}, validation loss = {:6f}'
+            .format(train_loss_mag, wave)
         )
         
-        if spec < best_loss:
-            best_loss = spec
+        if wave < best_loss:
+            best_loss = wave
             print('  * best validation loss')
 
         if args.world_rank == 0:
