@@ -107,7 +107,7 @@ class Separator(object):
 def main():
     p = argparse.ArgumentParser()
     p.add_argument('--gpu', '-g', type=int, default=-1)
-    p.add_argument('--pretrained_model', '-P', type=str, default='model.pth') # https://mega.nz/file/2pRHBL7J#rNkFf0iUQgbXjVPoswj51GIS4xm3KnmsuKHjniHsKFQ
+    p.add_argument('--pretrained_model', '-P', type=str, default='model.pth') # https://mega.nz/file/ulRhwYBY#1xliHf5-MsNFbX1cvJh8tacSz2jsuEzMl8VQACLdQ48
     p.add_argument('--input', '-i', required=True)
     p.add_argument('--output', '-o', type=str, default="")
     p.add_argument('--num_res_encoders', type=int, default=4)
