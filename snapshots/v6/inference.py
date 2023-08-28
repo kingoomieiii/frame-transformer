@@ -223,24 +223,23 @@ def main():
             if args.create_webm:
                 os.system(f'ffmpeg -y -framerate 1 -loop 1 -i "{cover}" -i "{inst_file}" -t {librosa.get_duration(wave, sr=args.sr)} "{vid_file}"')
 
-            # print('inverse stft of vocals...', end=' ')
+            print('inverse stft of vocals...', end=' ')
+            wave = spec_utils.spectrogram_to_wave(v_spec, hop_length=args.hop_length)
+            print('done')
+            sf.write('{}/{}_Vocals.wav'.format(output_folder, basename), wave.T, sr)
 
-            # wave = spec_utils.spectrogram_to_wave(v_spec, hop_length=args.hop_length)
-            # print('done')
-            # sf.write('{}/{}_Vocals.wav'.format(output_folder, basename), wave.T, sr)
-
-            # if args.output_image:
-            #     try:
-            #         image = spec_utils.spectrogram_to_image(y_spec)
-            #         utils.imwrite('{}{}_Instruments.jpg'.format(output_folder, basename), image)
-            #         image = spec_utils.spectrogram_to_image(v_spec)
-            #         utils.imwrite('{}{}_Vocals.jpg'.format(output_folder, basename), image)
-            #         image = np.uint8(m_spec)
-            #         image = np.pad(image, ((0,1), (0,0), (0,0)))
-            #         image = image.transpose(1, 2, 0)
-            #         utils.imwrite('{}{}_Mask.jpg'.format(output_folder, basename), image)
-            #     except:
-            #         pass
+            if args.output_image:
+                try:
+                    image = spec_utils.spectrogram_to_image(y_spec)
+                    utils.imwrite('{}{}_Instruments.jpg'.format(output_folder, basename), image)
+                    image = spec_utils.spectrogram_to_image(v_spec)
+                    utils.imwrite('{}{}_Vocals.jpg'.format(output_folder, basename), image)
+                    image = np.uint8(m_spec)
+                    image = np.pad(image, ((0,1), (0,0), (0,0)))
+                    image = image.transpose(1, 2, 0)
+                    utils.imwrite('{}{}_Mask.jpg'.format(output_folder, basename), image)
+                except:
+                    pass
                 
         if args.rename_dir:
             os.system(f'python song-renamer.py --dir "{output_folder}"')
@@ -260,7 +259,7 @@ def main():
         X_spec = spec_utils.wave_to_spectrogram(X, args.hop_length, args.n_fft)
         print('done')
 
-        sp = Separator(model, device, args.batchsize, args.cropsize, args.postprocess)
+        sp = Separator(None, model, device, args.batchsize, args.cropsize, args.n_fft, args.postprocess)
 
         if args.tta:
             y_spec, v_spec, m_spec = sp.separate_tta(X_spec)
@@ -273,12 +272,9 @@ def main():
         sf.write('{}_Instruments.wav'.format(basename), wave.T, sr)
 
         print('inverse stft of vocals...', end=' ')
-        c = np.abs(y_spec).max()
-        v_spec = c.copy()
-        v_spec.real = (v_spec.real / c + np.random.normal(size=v_spec.shape)) * c
         wave = spec_utils.spectrogram_to_wave(v_spec, hop_length=args.hop_length)
         print('done')
-        sf.write('{}_Vocals.wav'.format(basename), wave.T, sr)
+        sf.write('{}/{}_Vocals.wav'.format(output_folder, basename), wave.T, sr)
 
         if args.output_image:
             image = spec_utils.spectrogram_to_image(y_spec)
