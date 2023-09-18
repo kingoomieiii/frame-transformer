@@ -1,6 +1,6 @@
 # FrameTransformer / AsymUNetMCT
 
-The YT channel was terminated due to a coordinated barrage of copyright strikes from Sony. Discord community is located here: [https://discord.gg/EFMVw2Jz](https://discord.gg/TftEyYJG)
+The YT channel was terminated due to a coordinated barrage of copyright strikes from Sony. Discord community is located here: https://discord.gg/TftEyYJG
 
 Snapshots folder has been updated with a new version. I have a third new version finishing up now that is doing even better, and a fourth model training on my second workstation which is doing even better than these. All checkpoints are found in the inference.py file in the corresponding snapshot folder, left as a comment with a mega.nz link that leads to a model.pth. If anyone has any issues with the checkpoints please let me know.
 
