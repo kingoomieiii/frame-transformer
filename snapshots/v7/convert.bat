@@ -1,0 +1,1 @@
+python inference.py --gpu 0 --input "G://input/Humanity's Last Breath - Ashen" --output "G://input/output/v7new-01"
