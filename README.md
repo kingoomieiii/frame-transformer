@@ -6,6 +6,27 @@ The YT channel was terminated due to a coordinated barrage of copyright strikes 
 
 Snapshots folder has been updated with a new version. I have a third new version finishing up now that is doing even better, and a fourth model training on my second workstation which is doing even better than these. All checkpoints are found in the inference.py file in the corresponding snapshot folder, left as a comment with a mega.nz link that leads to a model.pth. If anyone has any issues with the checkpoints please let me know.
 
+Installation tips from the community with thanks to HunterThompson, PsychoticFrog, mesk and others for helping converge on these, will clean up requirements.txt soon:
+no output issues with gtx1660 (no tensor cores)
+https://discord.com/channels/1143212618006405170/1143212618492936292/1158172182246072400
+
+TypeError: init() got an unexpected keyword argument 'dtype'
+pytorch is too old, update to 2.0.0+cu118
+
+ModuleNotFoundError: No module named 'einops'
+pip install einops
+
+module 'numpy' has no attribute 'complex'.
+pip install numpy==1.23.5
+
+librosa 0.8.1 works
+librosa 0.9.2 works, but gave me warnings
+
+edit inference.py like this for model version in filenames
+https://cdn.discordapp.com/attachments/531122660244062236/1157139846947672115/image.png?ex=651ad1b6&is=65198036&hm=f529e7dcbcb268afa02f41937486ca86e9fa85cd4d0c571cf6e0b0b7d294466e&
+
+weird python issues? Uninstall python, reinstall python and reboot. This wipes all your pip modules so you have to install pytorch, numpy 1.23.5 and einops again
+
 Right now all snapshots use the old method of librosa's STFT for creating spectrograms. I have a new version training now using the combined linear and mel scale L1 loss terms as well as using PyTorch's STFT. This will allow for a pretty large speedup during inferencing in the next version, should have it finished this weekend.
 
 Two new versions are currently training, both of which are outperforming current snapshots (I have another snapshot I'll upload before these two in the coming days as well). Most versions have been using the old method of preprocessed spectrograms as I haven't been training on my main machine which has my regenerated dataset of just waveforms and utilizes TorchAudio to convert to spectrograms on the GPU. The newest version I'm training includes a loss term for reconstruction of the spectrogram in the Mel scale as well to encourage more overlap with human perception but I'm not really sure if that will work. It's performing quite well but who knows, might not make a big difference.
