@@ -223,7 +223,7 @@ def main():
             print('inverse stft of instruments...', end=' ')
             wave = spec_utils.spectrogram_to_wave(y_spec, hop_length=args.hop_length)
             print('done')
-            inst_file = '{}/{}_Instruments.{}'.format(output_folder, basename,outputformat)
+            inst_file = '{}/{}_Instruments.{}'.format(output_folder, basename, outputformat)
             sf.write(inst_file, wave.T, sr)
             vid_file = '{}/{}.mp4'.format(output_folder, basename)
 
