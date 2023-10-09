@@ -173,7 +173,7 @@ def main():
         d = os.path.basename(os.path.dirname(args.input))
         output_folder = os.path.join(output_folder, d)
         print(output_folder)
-        extensions = ['wav', 'm4a', 'mp3', 'mp4', 'flac']
+        extensions = ['wav', 'm4a', 'mp3', 'mp4', 'flac', 'ogg']
         cover_ext = ["jpg", "png", "bmp"]
 
         cover = ""
