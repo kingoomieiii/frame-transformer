@@ -198,6 +198,8 @@ def main():
 
             if ext in cover_ext:
                 cover = os.path.join(args.input, f)
+                if args.copy_source_images:
+                    shutil.copy(cover, output_folder)	
 
         for file in tqdm(files):
             print('loading wave source...', end=' ')
@@ -237,9 +239,7 @@ def main():
                 print('done')
                 sf.write('{}/{}_Vocals.{}'.format(output_folder, basename, outputformat), wave.T, sr)
 
-            if args.copy_source_images:
-                shutil.copy(cover, output_folder)	
-                
+
         if args.rename_dir:
             os.system(f'python song-renamer.py --dir "{output_folder}"')
             
