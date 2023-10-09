@@ -1,5 +1,6 @@
 import argparse
 import os
+import shutil
 import librosa
 import numpy as np
 import soundfile as sf
@@ -120,6 +121,7 @@ def main():
     p.add_argument('--cropsize', '-c', type=int, default=1024)
     p.add_argument('--padding', type=int, default=512)
     p.add_argument('--output_image', '-I', action='store_true')
+    p.add_argument('--copy_source_images', action='store_true') # copies images from input into output
     p.add_argument('--postprocess', '-p', action='store_true')
     p.add_argument('--create_webm', action='store_true')
     p.add_argument('--create_vocals', action='store_true')
@@ -234,6 +236,9 @@ def main():
                 wave = spec_utils.spectrogram_to_wave(v_spec, hop_length=args.hop_length)
                 print('done')
                 sf.write('{}/{}_Vocals.{}'.format(output_folder, basename, outputformat), wave.T, sr)
+
+            if args.copy_source_images:
+                shutil.copy(cover, output_folder)	
                 
         if args.rename_dir:
             os.system(f'python song-renamer.py --dir "{output_folder}"')
