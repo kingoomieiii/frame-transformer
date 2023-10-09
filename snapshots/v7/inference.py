@@ -110,6 +110,7 @@ def main():
     p.add_argument('--pretrained_model', '-P', type=str, default='model.pth') # https://mega.nz/file/P0xmGIKa#3_p23ugfOX3oSwgXlw7iayhMBxJNZ1HcZ-YgtbZToVw
     p.add_argument('--input', '-i', required=True)
     p.add_argument('--output', '-o', type=str, default="")
+    p.add_argument('--outputformat', type=str, default="flac")
     p.add_argument('--num_res_encoders', type=int, default=4)
     p.add_argument('--num_res_decoders', type=int, default=4)
     p.add_argument('--sr', '-r', type=int, default=44100)
@@ -164,6 +165,10 @@ def main():
     print('done')
 
     output_folder = args.output
+    outputformat = args.outputformat.lower()
+
+    if outputformat not in ["flac", "wav", "mp3"]:
+        outputformat = "flac"
 
     process = None
     queue = []
@@ -216,7 +221,7 @@ def main():
             print('inverse stft of instruments...', end=' ')
             wave = spec_utils.spectrogram_to_wave(y_spec, hop_length=args.hop_length)
             print('done')
-            inst_file = '{}/{}_Instruments.wav'.format(output_folder, basename)
+            inst_file = '{}/{}_Instruments.{}'.format(output_folder, basename,outputformat)
             sf.write(inst_file, wave.T, sr)
             vid_file = '{}/{}.mp4'.format(output_folder, basename)
 
@@ -228,7 +233,7 @@ def main():
                 print('inverse stft of vocals...', end=' ')
                 wave = spec_utils.spectrogram_to_wave(v_spec, hop_length=args.hop_length)
                 print('done')
-                sf.write('{}/{}_Vocals.wav'.format(output_folder, basename), wave.T, sr)
+                sf.write('{}/{}_Vocals.{}'.format(output_folder, basename, outputformat), wave.T, sr)
                 
         if args.rename_dir:
             os.system(f'python song-renamer.py --dir "{output_folder}"')
@@ -258,12 +263,12 @@ def main():
         print('inverse stft of instruments...', end=' ')
         wave = spec_utils.spectrogram_to_wave(y_spec, hop_length=args.hop_length)
         print('done')
-        sf.write('{}_Instruments.wav'.format(basename), wave.T, sr)
+        sf.write('{}_Instruments.{}'.format(basename, outputformat), wave.T, sr)
 
         print('inverse stft of vocals...', end=' ')
         wave = spec_utils.spectrogram_to_wave(v_spec, hop_length=args.hop_length)
         print('done')
-        sf.write('{}_Vocals.wav'.format(basename), wave.T, sr)
+        sf.write('{}_Vocals.{}'.format(basename, outputformat), wave.T, sr)
 
         if args.output_image:
             image = spec_utils.spectrogram_to_image(y_spec)
