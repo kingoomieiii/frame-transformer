@@ -109,7 +109,7 @@ class Separator(object):
 def main():
     p = argparse.ArgumentParser()
     p.add_argument('--gpu', '-g', type=int, default=-1)
-    p.add_argument('--pretrained_model', '-P', type=str, default='model.pth') # https://mega.nz/file/P0xmGIKa#3_p23ugfOX3oSwgXlw7iayhMBxJNZ1HcZ-YgtbZToVw
+    p.add_argument('--pretrained_model', '-P', type=str, default='model.pth') # https://mega.nz/file/L55UwZAC#leWuP1ic9Rt4SpDVHeo6tnimaEIw5095ORoiaosF1Do
     p.add_argument('--input', '-i', required=True)
     p.add_argument('--output', '-o', type=str, default="")
     p.add_argument('--output_format', type=str, default="flac")
