@@ -170,7 +170,7 @@ def main():
     output_folder = args.output
     if output_folder != '' and not os.path.exists(output_folder):
         os.makedirs(output_folder)
-
+        
     output_format = args.output_format.lower()
     if output_format not in ["flac", "wav", "mp3"]:
         output_format = "flac"
