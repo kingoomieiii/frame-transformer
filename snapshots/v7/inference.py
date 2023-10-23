@@ -170,7 +170,7 @@ def main():
     output_folder = args.output
     if output_folder != '' and not os.path.exists(output_folder):
         os.makedirs(output_folder)
-            
+        
     output_format = args.output_format.lower()
     if output_format not in ["flac", "wav", "mp3"]:
         output_format = "flac"
@@ -184,6 +184,9 @@ def main():
         cover_ext = ["jpg", "png", "bmp"]
 
         cover = ""
+        
+        if output_folder != '' and not os.path.exists(output_folder):
+            os.makedirs(output_folder)
 
         files = []
         d = os.listdir(args.input)
@@ -199,7 +202,7 @@ def main():
                     shutil.copy(cover, output_folder)	
 
         for file in tqdm(files):
-            print('loading wave source...', end=' ')
+            print('\nloading wave source...', end=' ')
             X, sr = librosa.load(
                 file, args.sr, False, dtype=np.float32, res_type='kaiser_fast')
             basename = os.path.splitext(os.path.basename(file))[0]
@@ -219,7 +222,7 @@ def main():
             else:
                 y_spec, v_spec, m_spec = sp.separate(X_spec, padding=args.padding)
 
-            print('inverse stft of instruments...', end=' ')
+            print('\ninverse stft of instruments...', end=' ')
             wave = spec_utils.spectrogram_to_wave(y_spec, hop_length=args.hop_length)
             print('done')
             inst_file = f'{output_folder}/{basename}_Instruments.{output_format}'
@@ -240,7 +243,7 @@ def main():
                 os.system(f'ffmpeg -y -framerate 1 -loop 1 -i "{cover}" -i "{inst_file}" -t {librosa.get_duration(wave, sr=args.sr)} "{vid_file}"')
 
             if args.create_vocals:
-                print('inverse stft of vocals...', end=' ')
+                print('\ninverse stft of vocals...', end=' ')
                 wave = spec_utils.spectrogram_to_wave(v_spec, hop_length=args.hop_length)
                 print('done')
                 sf.write(f'{output_folder}/{basename}_Vocals.{output_format}', wave.T, sr)
@@ -258,7 +261,7 @@ def main():
             os.system(f'python song-renamer.py --dir "{output_folder}"')
             
     else:
-        print('loading wave source...', end=' ')
+        print('\nloading wave source...', end=' ')
         X, sr = librosa.load(
             args.input, args.sr, False, dtype=np.float32, res_type='kaiser_fast')
         basename = os.path.splitext(os.path.basename(args.input))[0]
@@ -279,7 +282,7 @@ def main():
         else:
             y_spec, v_spec, m_spec = sp.separate(X_spec, padding=args.padding)
 
-        print('inverse stft of instruments...', end=' ')
+        print('\ninverse stft of instruments...', end=' ')
         wave = spec_utils.spectrogram_to_wave(y_spec, hop_length=args.hop_length)
         print('done')
         sf.write(f'{output_folder}/{basename}_Instruments.{output_format}', wave.T, sr)
