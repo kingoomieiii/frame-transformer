@@ -1,5 +1,6 @@
 import argparse
 import os
+import re
 import shutil
 import librosa
 import numpy as np
@@ -233,9 +234,18 @@ def main():
             inst_tags['tracktitle'] = filetags['tracktitle']
             inst_tags['album'] = filetags['album']
             inst_tags['artist'] = filetags['artist']
-            inst_tags['tracknumber'] = filetags['tracknumber']
-            inst_tags['totaltracks'] = filetags['totaltracks']
             inst_tags['year'] = filetags['year']
+
+            try:
+                inst_tags['tracknumber'] = filetags['tracknumber'] #NAN error if, for example, the tracknumber is stored as "1/10"
+            except:
+                inst_tags['tracknumber'] = re.sub('^([0-9]+)/.*$', "\\1", (filetags.raw['tracknumber'].value)) # takes the first set of digits in the raw tracknumber
+
+            try:
+                inst_tags['totaltracks'] = filetags['totaltracks']
+            except:
+                inst_tags['totaltracks'] = re.sub('^[0-9]+/([0-9])+$', "\\1", (filetags.raw['tracknumber'].value)) # takes the second set of digits in the raw tracknumber
+
             inst_tags.save()
 
             if args.create_webm:
@@ -252,9 +262,18 @@ def main():
                 vocal_tags['tracktitle'] = f'{filetags["tracktitle"]} (Vocals)'
                 vocal_tags['album'] = f'{filetags["album"]} (Vocals)'
                 vocal_tags['artist'] = filetags['artist']
-                vocal_tags['tracknumber'] = filetags['tracknumber']
-                vocal_tags['totaltracks'] = filetags['totaltracks']
                 vocal_tags['year'] = filetags['year']
+
+                try:
+                    vocal_tags['tracknumber'] = filetags['tracknumber']
+                except:
+                    vocal_tags['tracknumber'] = re.sub('^([0-9]+)/.*$', "\\1", (filetags.raw['tracknumber'].value)) # takes the first set of digits in the raw tracknumber
+
+                try:
+                    vocal_tags['totaltracks'] = filetags['totaltracks']
+                except:
+                    vocal_tags['totaltracks'] = re.sub('^[0-9]+/([0-9])+$', "\\1", (filetags.raw['tracknumber'].value)) # takes the second set of digits in the raw tracknumber
+                    
                 vocal_tags.save()
 
         if args.rename_dir:
@@ -292,9 +311,18 @@ def main():
         inst_tags['tracktitle'] = f'{filetags["tracktitle"]} (Instruments)'
         inst_tags['album'] = f'{filetags["album"]} (Instruments)'
         inst_tags['artist'] = filetags['artist']
-        inst_tags['tracknumber'] = filetags['tracknumber']
-        inst_tags['totaltracks'] = filetags['totaltracks']
         inst_tags['year'] = filetags['year']
+
+        try:
+            inst_tags['tracknumber'] = filetags['tracknumber']
+        except:
+            inst_tags['tracknumber'] = re.sub('^([0-9]+)/.*$', "\\1", (filetags.raw['tracknumber'].value)) # takes the first set of digits in the raw tracknumber
+
+        try:
+            inst_tags['totaltracks'] = filetags['totaltracks']
+        except:
+            inst_tags['totaltracks'] = re.sub('^[0-9]+/([0-9])+$', "\\1", (filetags.raw['tracknumber'].value)) # takes the second set of digits in the raw tracknumber
+
         inst_tags.save()
 
         if args.create_vocals:
@@ -307,9 +335,18 @@ def main():
             vocal_tags['tracktitle'] = f'{filetags["tracktitle"]} (Vocals)'
             vocal_tags['album'] = f'{filetags["album"]} (Vocals)'
             vocal_tags['artist'] = filetags['artist']
-            vocal_tags['tracknumber'] = filetags['tracknumber']
-            vocal_tags['totaltracks'] = filetags['totaltracks']
             vocal_tags['year'] = filetags['year']
+
+            try:
+                vocal_tags['tracknumber'] = filetags['tracknumber']
+            except:
+                vocal_tags['tracknumber'] = re.sub('^([0-9]+)/.*$', "\\1", (filetags.raw['tracknumber'].value)) # takes the first set of digits in the raw tracknumber
+
+            try:
+                vocal_tags['totaltracks'] = filetags['totaltracks']
+            except:
+                vocal_tags['totaltracks'] = re.sub('^[0-9]+/([0-9])+$', "\\1", (filetags.raw['tracknumber'].value)) # takes the second set of digits in the raw tracknumber
+
             vocal_tags.save()
 
         if args.output_image:
