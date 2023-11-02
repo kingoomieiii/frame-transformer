@@ -220,7 +220,7 @@ def main():
         files = []
         d = os.listdir(args.input)
         for f in d:
-            ext = f[::-1].split('.')[0][::-1]
+            ext = (f[::-1].split('.')[0][::-1]).lower()
 
             if ext in extensions:
                 files.append(os.path.join(args.input, f))
