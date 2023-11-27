@@ -1,0 +1,1 @@
+python inference.py --gpu 0 --input "G://input/im" --output "G://input/output/v7.22"
