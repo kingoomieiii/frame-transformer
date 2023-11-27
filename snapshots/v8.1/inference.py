@@ -162,8 +162,6 @@ def main():
     model = FrameTransformer(in_channels=2, out_channels=2, channels=args.channels, expansion=args.expansion, n_fft=args.n_fft, dropout=args.dropout, num_heads=args.num_heads, num_attention_maps=args.num_attention_maps)
     model.load_state_dict(torch.load(args.pretrained_model, map_location=device))
 
-    quit()
-
     if torch.cuda.is_available() and args.gpu >= 0:
         device = torch.device('cuda:{}'.format(args.gpu))
         model.to(device)
