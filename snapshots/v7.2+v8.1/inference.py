@@ -240,8 +240,16 @@ def main():
             else:
                 y_spec_b, v_spec_b, _ = sp.separate(X_spec, padding=args.padding)
 
-            y_spec = np.minimum(y_spec_a, y_spec_b)
-            v_spec = np.maximum(v_spec_a, v_spec_b)
+            y_mag_a = np.abs(y_spec_a)
+            y_mag_b = np.abs(y_spec_b)
+            v_mag_a = np.abs(v_spec_a)
+            v_mag_b = np.abs(v_spec_b)
+            y_phase = np.angle(y_spec_a)
+            v_phase = np.angle(v_spec_a)
+            y_mag = np.minimum(y_mag_a, y_mag_b)
+            v_mag = np.maximum(v_mag_a, v_mag_b)
+            y_spec = y_mag * np.exp(1.j * y_phase)
+            v_spec = v_mag * np.exp(1.j * v_phase)
 
             print('\ninverse stft of instruments...', end=' ')
             wave = spec_utils.spectrogram_to_wave(y_spec, hop_length=args.hop_length)
