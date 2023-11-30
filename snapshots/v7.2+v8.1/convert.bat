@@ -1,0 +1,1 @@
+python inference.py --gpu 0 --input "G://input/Dasein" --output "G://input/output/v7.2.v8.1"
