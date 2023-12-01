@@ -1,5 +1,6 @@
 import argparse
 import os
+import re
 import shutil
 import librosa
 import numpy as np
@@ -107,6 +108,40 @@ class Separator(object):
 
         return y_spec, v_spec, m_spec
 
+def copy_tags(input, output, suffix):
+    #input ~ 'C://input/tagfile.mp3'
+    #output ~ 'H://output/tagfile_Instruments.flac'
+    #suffix ~ 'instruments'
+
+    suffix = f'({suffix.capitalize()})' # >> '(Instruments)'
+
+    input = music_tag.load_file(input)
+    output = music_tag.load_file(output)
+    output['tracktitle'] = f'{input["tracktitle"]} {suffix}'
+    output['album'] = f'{input["album"]} {suffix}'
+    output['artist'] = input['artist']
+    output['year'] = input['year']
+    try:
+        output['tracknumber'] = input['tracknumber'] 
+        #NAN error if, for example, the tracknumber is stored as "1/10"
+    except:
+        output['tracknumber'] = re.sub('^([0-9]+).*$', "\\1", (input.raw['tracknumber'].value)) 
+        # takes the first set of digits in the raw tracknumber
+
+    try:
+        output['totaltracks'] = input['totaltracks']
+    except:
+        output['totaltracks'] = re.sub('^[0-9]+.*([0-9])+$', "\\1", (input.raw['tracknumber'].value)) 
+        # takes the second set of digits in the raw tracknumber
+
+    output.save()
+
+def natural_sort(l): 
+    #https://stackoverflow.com/a/4836734
+    convert = lambda text: int(text) if text.isdigit() else text.lower() 
+    alphanum_key = lambda key: [convert(c) for c in re.split('([0-9]+)', key)] 
+    return sorted(l, key=alphanum_key)
+
 def main():
     p = argparse.ArgumentParser()
     p.add_argument('--gpu', '-g', type=int, default=-1)
@@ -196,7 +231,7 @@ def main():
             os.makedirs(output_folder)
 
         files = []
-        d = os.listdir(args.input)
+        d = natural_sort(os.listdir(args.input))
         for f in d:
             ext = f[::-1].split('.')[0][::-1]
 
@@ -257,15 +292,7 @@ def main():
             inst_file = f'{output_folder}/{basename}_Instruments.{output_format}'
             sf.write(inst_file, wave.T, sr)
 
-            filetags = music_tag.load_file(file)
-            inst_tags = music_tag.load_file(inst_file)
-            inst_tags['tracktitle'] = filetags['tracktitle']
-            inst_tags['album'] = filetags['album']
-            inst_tags['artist'] = filetags['artist']
-            inst_tags['tracknumber'] = filetags['tracknumber']
-            inst_tags['totaltracks'] = filetags['totaltracks']
-            inst_tags['year'] = filetags['year']
-            inst_tags.save()
+            copy_tags(file,inst_file,"instruments")
 
             if args.create_webm:
                 vid_file = f'{output_folder}/{basename}.mp4'
@@ -275,16 +302,10 @@ def main():
                 print('\ninverse stft of vocals...', end=' ')
                 wave = spec_utils.spectrogram_to_wave(v_spec, hop_length=args.hop_length)
                 print('done')
-                sf.write(f'{output_folder}/{basename}_Vocals.{output_format}', wave.T, sr)
+                voc_file = f'{output_folder}/{basename}_Vocals.{output_format}'
+                sf.write(voc_file, wave.T, sr)
 
-                vocal_tags = music_tag.load_file(f'{output_folder}/{basename}_Vocals.{output_format}')
-                vocal_tags['tracktitle'] = f'{filetags["tracktitle"]} (Vocals)'
-                vocal_tags['album'] = f'{filetags["album"]} (Vocals)'
-                vocal_tags['artist'] = filetags['artist']
-                vocal_tags['tracknumber'] = filetags['tracknumber']
-                vocal_tags['totaltracks'] = filetags['totaltracks']
-                vocal_tags['year'] = filetags['year']
-                vocal_tags.save()
+                copy_tags(file,voc_file,"vocals")
 
         if args.rename_dir:
             os.system(f'python song-renamer.py --dir "{output_folder}"')
@@ -328,32 +349,20 @@ def main():
         print('\ninverse stft of instruments...', end=' ')
         wave = spec_utils.spectrogram_to_wave(y_spec_a, hop_length=args.hop_length)
         print('done')
-        sf.write(f'{output_folder}/{basename}_Instruments.{output_format}', wave.T, sr)
+        inst_file = f'{output_folder}/{basename}_Instruments.{output_format}'
+        sf.write(inst_file, wave.T, sr)
 
-        filetags = music_tag.load_file(file)
-        inst_tags = music_tag.load_file(f'{output_folder}\{basename}_Instruments.{args.output_format}')
-        inst_tags['tracktitle'] = f'{filetags["tracktitle"]} (Instruments)'
-        inst_tags['album'] = f'{filetags["album"]} (Instruments)'
-        inst_tags['artist'] = filetags['artist']
-        inst_tags['tracknumber'] = filetags['tracknumber']
-        inst_tags['totaltracks'] = filetags['totaltracks']
-        inst_tags['year'] = filetags['year']
-        inst_tags.save()
+        copy_tags(file, inst_file, "instruments")
 
         if args.create_vocals:
             print('inverse stft of vocals...', end=' ')
             wave = spec_utils.spectrogram_to_wave(v_spec_a, hop_length=args.hop_length)
             print('done')
-            sf.write(f'{output_folder}/{basename}_Vocals.{output_format}', wave.T, sr)
+            voc_file = f'{output_folder}/{basename}_Vocals.{output_format}'
+            sf.write(voc_file, wave.T, sr)
             
-            vocal_tags = music_tag.load_file(f'{output_folder}\{basename}_Vocals.{args.output_extension}')
-            vocal_tags['tracktitle'] = f'{filetags["tracktitle"]} (Vocals)'
-            vocal_tags['album'] = f'{filetags["album"]} (Vocals)'
-            vocal_tags['artist'] = filetags['artist']
-            vocal_tags['tracknumber'] = filetags['tracknumber']
-            vocal_tags['totaltracks'] = filetags['totaltracks']
-            vocal_tags['year'] = filetags['year']
-            vocal_tags.save()
+            copy_tags(file,voc_file,"vocals")
+
 
         if args.output_image:
             image = spec_utils.spectrogram_to_image(y_spec)
