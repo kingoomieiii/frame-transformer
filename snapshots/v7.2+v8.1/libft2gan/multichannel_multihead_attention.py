@@ -8,7 +8,7 @@ from libft2gan.multichannel_linear import MultichannelLinear
 from libft2gan.multichannel_layernorm import MultichannelLayerNorm
 
 class MultichannelMultiheadAttention(nn.Module):
-    def __init__(self, channels, attention_maps, num_heads, features, kernel_size=3, padding=1, mem_channels=None, dtype=torch.float):
+    def __init__(self, channels, attention_maps, num_heads, features, kernel_size=5, padding=2, mem_channels=None, mem_features=None, dtype=torch.float):
         super().__init__()
 
         self.attention_maps = attention_maps
@@ -21,11 +21,11 @@ class MultichannelMultiheadAttention(nn.Module):
         
         self.k_proj = nn.Sequential(
             nn.Conv2d(channels if mem_channels is None else mem_channels, attention_maps, kernel_size=kernel_size, padding=padding),
-            MultichannelLinear(attention_maps, attention_maps, features, features, dtype=dtype))
+            MultichannelLinear(attention_maps, attention_maps, features if mem_features is None else mem_features, features, dtype=dtype))
         
         self.v_proj = nn.Sequential(
             nn.Conv2d(channels if mem_channels is None else mem_channels, attention_maps, kernel_size=kernel_size, padding=padding),
-            MultichannelLinear(attention_maps, attention_maps, features, features, dtype=dtype))
+            MultichannelLinear(attention_maps, attention_maps, features if mem_features is None else mem_features, features, dtype=dtype))
         
         self.o_proj = MultichannelLinear(attention_maps, attention_maps, features, features, depthwise=True)
         
