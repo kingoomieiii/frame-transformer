@@ -135,6 +135,12 @@ def copy_tags(input, output, suffix):
 
     output.save()
 
+def natural_sort(l): 
+    #https://stackoverflow.com/a/4836734
+    convert = lambda text: int(text) if text.isdigit() else text.lower() 
+    alphanum_key = lambda key: [convert(c) for c in re.split('([0-9]+)', key)] 
+    return sorted(l, key=alphanum_key)
+
 def main():
     p = argparse.ArgumentParser()
     p.add_argument('--gpu', '-g', type=int, default=-1)
@@ -218,7 +224,7 @@ def main():
             os.makedirs(output_folder)
 
         files = []
-        d = os.listdir(args.input)
+        d = natural_sort(os.listdir(args.input))
         for f in d:
             ext = (f[::-1].split('.')[0][::-1]).lower()
 
@@ -242,7 +248,7 @@ def main():
 
             print('stft of wave source...', end=' ')
             X_spec = spec_utils.wave_to_spectrogram(X, args.hop_length, args.n_fft)
-            print('done')
+            print(f'done\n    Now transforming: {basename}')
 
             sp = Separator(None, model, device, args.batchsize, args.cropsize, args.n_fft,   args.postprocess)
 
